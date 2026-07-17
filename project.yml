@@ -51,8 +51,11 @@ targets:
       properties:
         CFBundleDisplayName: RemKeys
         UILaunchScreen: {}
+        # All four orientations: ASC rejects iPad multitasking apps (90474)
+        # unless PortraitUpsideDown is present too.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         ITSAppUsesNonExemptEncryption: false
