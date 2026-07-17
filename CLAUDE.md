@@ -6,6 +6,16 @@ standalone service — no dependency on NVDA or any other screen reader.
 
 Bundle id: `com.jonathan859.keybridge`.
 
+**Naming**: the user-facing product name is **RemKeys** (the App Store name
+"KeyBridge" was taken, so the ASC app record is "RemKeys"). The rebrand covers
+everything a user sees: display names, `PRODUCT_NAME` (so the bundle is
+`RemKeys.app` / `RemKeys.ipa`), in-app strings, permission-prompt text, the
+icon, and the macOS zip (`RemKeys-macOS.zip`). Internal names stay KeyBridge —
+repo, targets/schemes (`KeyBridge-iOS`/`-macOS`), bundle id, `BridgeCore`
+API names, and the Windows agent (`KeyBridgeAgent`, service name, its zip) —
+renaming those buys nothing and would churn CI, the ASC record, and installed
+services. Don't "fix" the mismatch in either direction.
+
 ## What each piece does
 
 | Component | Path | Role |

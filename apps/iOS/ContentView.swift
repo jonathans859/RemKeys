@@ -32,7 +32,7 @@ struct ContentView: View {
                     connectionSection
                     forwardingSection
                 }
-                .navigationTitle("KeyBridge")
+                .navigationTitle("RemKeys")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -88,7 +88,7 @@ struct ContentView: View {
             .accessibilityAddTraits(.updatesFrequently)
         } footer: {
             if isForwarding {
-                Text("Keep KeyBridge open and the screen on. Keystrokes only forward while this app is in the foreground.")
+                Text("Keep RemKeys open and the screen on. Keystrokes only forward while this app is in the foreground.")
             }
         }
     }

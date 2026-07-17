@@ -101,7 +101,7 @@ platform :mac do
       scheme: "KeyBridge-macOS",
       export_method: "developer-id",
       output_directory: "output",
-      output_name: "KeyBridge",
+      output_name: "RemKeys",
       export_options: {
         signingStyle: "manual",
         signingCertificate: "Developer ID Application",
@@ -110,12 +110,12 @@ platform :mac do
     )
 
     notarize(
-      package: "output/KeyBridge.app",
+      package: "output/RemKeys.app",
       api_key: api_key,
       print_log: true
     )
 
     # Zip the stapled app for the GitHub Release.
-    sh("cd output && ditto -c -k --keepParent KeyBridge.app KeyBridge-macOS.zip")
+    sh("cd output && ditto -c -k --keepParent RemKeys.app RemKeys-macOS.zip")
   end
 end

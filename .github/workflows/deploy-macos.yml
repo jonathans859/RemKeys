@@ -57,11 +57,11 @@ jobs:
       - name: Attach zip to this run
         uses: actions/upload-artifact@v4
         with:
-          name: KeyBridge-macOS
-          path: output/KeyBridge-macOS.zip
+          name: RemKeys-macOS
+          path: output/RemKeys-macOS.zip
           if-no-files-found: error
       - name: Attach zip to the Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: output/KeyBridge-macOS.zip
+          files: output/RemKeys-macOS.zip

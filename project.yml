@@ -3,6 +3,10 @@
 #     brew install xcodegen && xcodegen generate
 # then open KeyBridge.xcodeproj. Info.plists are generated from the `info`
 # blocks below, so no plist is hand-maintained.
+#
+# Naming: the product/brand name is **RemKeys** (the App Store name
+# "KeyBridge" was taken); repo, targets, schemes, and the bundle id keep the
+# internal KeyBridge name.
 name: KeyBridge
 
 options:
@@ -36,7 +40,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jonathan859.keybridge
-        PRODUCT_NAME: KeyBridge
+        PRODUCT_NAME: RemKeys
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad
         SUPPORTS_MACCATALYST: NO
@@ -45,7 +49,7 @@ targets:
     info:
       path: apps/iOS/Info.generated.plist
       properties:
-        CFBundleDisplayName: KeyBridge
+        CFBundleDisplayName: RemKeys
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -67,7 +71,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jonathan859.keybridge
-        PRODUCT_NAME: KeyBridge
+        PRODUCT_NAME: RemKeys
         GENERATE_INFOPLIST_FILE: NO
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
@@ -77,10 +81,10 @@ targets:
     info:
       path: apps/macOS/Info.generated.plist
       properties:
-        CFBundleDisplayName: KeyBridge
+        CFBundleDisplayName: RemKeys
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
-        NSInputMonitoringUsageDescription: "KeyBridge reads the physical Caps Lock key so it can be forwarded as a held modifier to your Windows PC."
+        NSInputMonitoringUsageDescription: "RemKeys reads the physical Caps Lock key so it can be forwarded as a held modifier to your Windows PC."
         ITSAppUsesNonExemptEncryption: false
 
 schemes:

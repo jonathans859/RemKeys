@@ -36,7 +36,7 @@ struct MenuContentView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("KeyBridge")
+            Text("RemKeys")
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
             Text(model.statusLine)
@@ -45,7 +45,7 @@ struct MenuContentView: View {
                 .accessibilityAddTraits(.updatesFrequently)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("KeyBridge")
+        .accessibilityLabel("RemKeys")
         .accessibilityValue(model.statusLine)
     }
 
@@ -173,7 +173,7 @@ struct MenuContentView: View {
     }
 
     private var footer: some View {
-        Button("Quit KeyBridge") { NSApplication.shared.terminate(nil) }
+        Button("Quit RemKeys") { NSApplication.shared.terminate(nil) }
             .keyboardShortcut("q", modifiers: [.command])
     }
 

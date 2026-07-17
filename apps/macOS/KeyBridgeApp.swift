@@ -14,7 +14,7 @@ struct KeyBridgeApp: App {
             // The label also carries state for VoiceOver users navigating the
             // menu bar (state is never conveyed by the icon alone).
             Image(systemName: model.isForwarding ? "keyboard.fill" : "keyboard")
-                .accessibilityLabel("KeyBridge")
+                .accessibilityLabel("RemKeys")
                 .accessibilityValue(model.statusLine)
         }
         .menuBarExtraStyle(.window)
