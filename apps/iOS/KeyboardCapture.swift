@@ -34,6 +34,7 @@ struct KeyboardCapture: UIViewRepresentable {
 final class CaptureView: UIView {
     var bridge: BridgeClient?
     var settings: AppSettings?
+    private var diagnostics: CaptureDiagnostics { .shared }
 
     /// Posting this reclaims first responder for the capture view after some
     /// other control (e.g. the IP-address field) has taken it. The view can't
@@ -73,6 +74,18 @@ final class CaptureView: UIView {
 
     override var canBecomeFirstResponder: Bool { true }
 
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        diagnostics.captureViewIsFirstResponder = isFirstResponder
+        return result
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        diagnostics.captureViewIsFirstResponder = isFirstResponder
+        return result
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window != nil {
@@ -97,6 +110,14 @@ final class CaptureView: UIView {
     // unclaimed goes to super and behaves normally.
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        // Count every key-down before any handling — the diagnostics screen
+        // uses this to distinguish "keys never arrive" from "keys arrive but
+        // aren't forwarded".
+        for press in presses {
+            guard let key = press.key else { continue }
+            diagnostics.pressesSeen += 1
+            diagnostics.lastKey = HIDToVK.keyName(for: key)
+        }
         // The toggle shortcut takes precedence over forwarding, and works
         // whether forwarding is currently on or off.
         if handleToggleShortcut(presses) { return }
@@ -160,9 +181,11 @@ final class CaptureView: UIView {
                 // Unmapped key: log so gaps are visible during testing, never
                 // silently dropped.
                 HIDToVK.logUnmapped(key)
+                if pressed { diagnostics.unmappedSeen += 1 }
                 continue
             }
             bridge.sendKey(vk: vk, pressed: pressed)
+            diagnostics.eventsForwarded += 1
             claimed = true
         }
         return claimed

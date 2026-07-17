@@ -15,6 +15,7 @@ struct ContentView: View {
 
     @State private var showingSettings = false
     @Environment(\.scenePhase) private var scenePhase
+    private var diagnostics: CaptureDiagnostics { .shared }
 
     private var isForwarding: Bool { bridge.forwardingEnabled }
 
@@ -31,6 +32,7 @@ struct ContentView: View {
                     statusSection
                     connectionSection
                     forwardingSection
+                    diagnosticsSection
                 }
                 .navigationTitle("RemKeys")
                 .toolbar {
@@ -138,6 +140,51 @@ struct ContentView: View {
                 : "Connects and starts sending keystrokes to the Windows PC")
         } footer: {
             Text("Tip: two-finger double tap anywhere toggles forwarding.")
+        }
+    }
+
+    /// Live telemetry for debugging "keys don't arrive" in the field: is a
+    /// keyboard detected, does the capture view hold focus, and do presses
+    /// actually reach the app?
+    private var diagnosticsSection: some View {
+        Section {
+            LabeledContent("Target") {
+                Text(settings.targetHost.isEmpty
+                     ? "Not set"
+                     : "\(settings.targetHost):\(String(settings.targetPort))")
+            }
+            LabeledContent("Connection") {
+                Text(bridge.status.announcement)
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("Hardware keyboard") {
+                Text(diagnostics.keyboardName ?? "None detected")
+            }
+            LabeledContent("Capture focus") {
+                Text(diagnostics.captureViewIsFirstResponder ? "Held" : "Not held")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("Key-downs seen") {
+                Text("\(diagnostics.pressesSeen)")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("Events forwarded") {
+                Text("\(diagnostics.eventsForwarded)")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("Last key seen") {
+                Text(diagnostics.lastKey ?? "None yet")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            if diagnostics.unmappedSeen > 0 {
+                LabeledContent("Unmapped key-downs") {
+                    Text("\(diagnostics.unmappedSeen)")
+                }
+            }
+        } header: {
+            Text("Diagnostics")
+        } footer: {
+            Text("If a keyboard is detected but Key-downs seen stays at zero while you type, another layer is consuming keys before they reach RemKeys — with VoiceOver running that is usually QuickNav. Try turning QuickNav off (press Left and Right arrow together) and typing again.")
         }
     }
 
