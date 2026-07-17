@@ -1,6 +1,14 @@
 using KeyBridgeAgent;
 
-var builder = Host.CreateApplicationBuilder(args);
+// Anchor the content root to the exe's folder: the logon scheduled task
+// starts processes in C:\Windows\System32, and the default content root
+// (current directory) would make the host miss the appsettings.json that
+// ships next to the executable.
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 // Deliberately NOT a Windows service: services run in session 0, where
 // SendInput cannot reach the interactive desktop — every injection is

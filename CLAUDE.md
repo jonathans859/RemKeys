@@ -124,16 +124,30 @@ services. Don't "fix" the mismatch in either direction.
   injection is rejected (verified in the field 2026-07-17; the agent
   received keystrokes and logged `SendInput rejected` for each). The task
   runs with highest privileges so injection also reaches elevated windows.
+  Built as `WinExe` (windowless): the task must not spawn a console window a
+  user could close to accidentally kill the agent — all output goes to the
+  file logger, stop via `uninstall-agent.bat`/Task Scheduler. The content
+  root is pinned to `AppContext.BaseDirectory` because the task starts in
+  `System32`, where the default (CWD) content root would silently miss the
+  `appsettings.json` next to the exe.
 - `appsettings.json`: `ListenPort` (default 5391), optional `AllowedRemoteIP`
   (empty = accept any Tailscale peer), `LogDirectory`.
 - Keystroke injection via `SendInput` (`KeystrokeInjector.cs`), with the
   extended-key flag set for the nav cluster, right-hand modifiers, numpad
-  divide, Win/Apps, and media keys. **Layout-sensitive keys (letters, digits,
-  punctuation) are injected as US scancodes, not VKs**: the senders encode
-  physical positions as US-meaning VKs, and scancode injection lets the PC's
-  active layout (e.g. German QWERTZ) choose the character — matching the
-  key's label when both sides use the same layout. Everything else stays on
-  the VK path (layout-independent).
+  divide, Win/Apps, and media keys. **All keys are injected scancode-primary
+  (`KEYEVENTF_SCANCODE`), not as VKs** — games reading Raw Input/DirectInput
+  identify keys by scancode and silently drop make-code-0 (VK-only) events,
+  so a VK path would work in normal apps but lose arrows/F-keys/modifiers in
+  games. Layout-sensitive keys (letters, digits, punctuation) use a fixed
+  US-positional scancode table: the senders encode physical positions as
+  US-meaning VKs, and scancode injection lets the PC's active layout (e.g.
+  German QWERTZ) choose the character. Layout-independent keys resolve via
+  `MapVirtualKeyW` at send time — with quirk handling: the nav cluster maps
+  without its E0 prefix (the `ExtendedKeys` set disambiguates arrows from
+  numpad), PrintScreen maps to the Alt+SysRq code (overridden to `E0 37`),
+  and Pause is E1-multi-byte, the one key left on the VK path. Anti-cheat
+  systems that filter injected input entirely (Vanguard etc.) are out of
+  scope — that needs a driver.
 - **Never crashes on bad config**: invalid port or busy socket → logs and
   retries; malformed line → logged and skipped, not fatal. Logs to a per-day
   file (`FileLogger.cs`).

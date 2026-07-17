@@ -6,6 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>KeyBridgeAgent</RootNamespace>
     <AssemblyName>KeyBridgeAgent</AssemblyName>
+    <!-- Windowless: the logon task must not spawn a closable console window.
+         All output goes to the file logger; stop via uninstall-agent.bat or
+         Task Scheduler, not by closing a window. -->
+    <OutputType>WinExe</OutputType>
     <!-- Generic host + file logging; no third-party runtime deps. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>

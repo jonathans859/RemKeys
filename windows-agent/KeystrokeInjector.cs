@@ -24,8 +24,10 @@ public static class KeystrokeInjector
     /// "y"). Injecting the US scancode for the position instead lets the PC's
     /// active layout decide the character — exactly as if the keyboard were
     /// attached locally. Maps US-positional VK → PC/AT set-1 make code.
-    /// Everything absent here (modifiers, F-keys, nav, numpad, media) is
-    /// layout-independent and stays on the VK path.
+    /// This table must stay fixed (never MapVirtualKey) because the PC's own
+    /// layout would translate these VKs to the wrong positions. Keys absent
+    /// here are layout-independent and get their scan code from
+    /// MapVirtualKeyW at send time instead.
     /// </summary>
     private static readonly Dictionary<ushort, ushort> LayoutSensitiveScanCodes = new()
     {
@@ -124,19 +126,46 @@ public static class KeystrokeInjector
     public static bool Send(ushort vk, bool pressed)
     {
         uint flags = pressed ? 0u : KEYEVENTF_KEYUP;
-        if (ExtendedKeys.Contains(vk))
+        bool extended = ExtendedKeys.Contains(vk);
+
+        // Scancode-primary injection for every key that has a scan code, not
+        // just the layout-sensitive ones: games reading Raw Input or
+        // DirectInput identify keys by scan code and silently drop events
+        // whose make code is 0, so VK-only events reach normal apps but
+        // vanish in games (arrows, F-keys, modifiers). With a scan code the
+        // system derives the VK itself, exactly like a physically attached
+        // keyboard.
+        if (!LayoutSensitiveScanCodes.TryGetValue(vk, out ushort scan))
         {
-            flags |= KEYEVENTF_EXTENDEDKEY;
+            // Layout-independent keys resolve at runtime. Quirks (verified
+            // against MapVirtualKeyW output): the nav cluster comes back
+            // WITHOUT its E0 prefix (VK_LEFT -> 0x4B, colliding with numpad
+            // 4 — the ExtendedKeys flag above is what disambiguates);
+            // VK_SNAPSHOT returns the Alt+SysRq code 0x54 instead of E0 37;
+            // VK_PAUSE returns the multi-byte E1 sequence, which KEYBDINPUT
+            // cannot express, so it stays a VK-only event.
+            uint mapped = vk switch
+            {
+                0x2C => 0xE037, // VK_SNAPSHOT: real PrintScreen make code
+                0x13 => 0,      // VK_PAUSE: E1-prefixed, keep the VK path
+                _ => MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX),
+            };
+            if ((mapped >> 8) == 0xE0)
+            {
+                extended = true;
+            }
+            scan = (ushort)(mapped & 0xFF);
         }
 
         ushort sendVk = vk;
-        ushort scan = 0;
-        if (LayoutSensitiveScanCodes.TryGetValue(vk, out var positionScan))
+        if (scan != 0)
         {
-            // Positional injection: the PC's own layout picks the character.
             flags |= KEYEVENTF_SCANCODE;
-            scan = positionScan;
             sendVk = 0;
+        }
+        if (extended)
+        {
+            flags |= KEYEVENTF_EXTENDEDKEY;
         }
 
         var input = new INPUT
@@ -162,6 +191,11 @@ public static class KeystrokeInjector
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    private const uint MAPVK_VK_TO_VSC_EX = 4;
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKeyW(uint uCode, uint uMapType);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
