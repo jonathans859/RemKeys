@@ -1,0 +1,67 @@
+name: Deploy macOS
+
+# Every push to main that touches the macOS app (or anything it builds from)
+# produces a Developer ID-signed, notarized, stapled zip and attaches it to
+# the workflow run as an artifact. On Release publish the same zip is also
+# attached to the Release. (The app installs a CGEventTap and cannot be
+# sandboxed, so there is no Mac App Store / TestFlight channel.)
+#
+# Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (notarization),
+#          APPLE_TEAM_ID, DEVID_P12, DEVID_P12_PASSWORD (signing).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/macOS/**'
+      - 'BridgeCore/**'
+      - 'project.yml'
+      - 'fastlane/**'
+      - 'Gemfile'
+      - '.github/workflows/deploy-macos.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-macos
+  cancel-in-progress: false
+
+jobs:
+  developer-id:
+    name: macOS → Developer ID (notarized)
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write   # attach the zip to a Release
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - uses: ruby/setup-ruby@v1
+        with: { ruby-version: '3.3' }
+      - name: Install gems
+        run: bundle install
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build, sign, notarize
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVID_P12: ${{ secrets.DEVID_P12 }}
+          DEVID_P12_PASSWORD: ${{ secrets.DEVID_P12_PASSWORD }}
+        run: bundle exec fastlane mac mac_release
+      - name: Attach zip to this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyBridge-macOS
+          path: output/KeyBridge-macOS.zip
+          if-no-files-found: error
+      - name: Attach zip to the Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/KeyBridge-macOS.zip

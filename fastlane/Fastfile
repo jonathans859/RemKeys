@@ -34,8 +34,11 @@ platform :ios do
       targets: ["KeyBridge-iOS"]
     )
 
+    # Monotonic on main and recomputable from any checkout (needs
+    # fetch-depth: 0 in the workflow). Re-running a run whose upload already
+    # succeeded is rejected as a duplicate — push a new commit instead.
     increment_build_number(
-      build_number: ENV["GITHUB_RUN_NUMBER"] || "1",
+      build_number: sh("git rev-list --count HEAD").strip,
       xcodeproj: "KeyBridge.xcodeproj"
     )
 
@@ -81,8 +84,13 @@ platform :mac do
       keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || ""
     )
 
+    # Manual Developer ID signing throughout: the CI keychain holds only the
+    # imported Developer ID cert (no Apple Development cert, no ASC auth on
+    # the archive step), so automatic signing would find no identity. A
+    # non-sandboxed app with no restricted entitlements needs no profile.
     update_code_signing_settings(
-      use_automatic_signing: true,
+      use_automatic_signing: false,
+      code_sign_identity: "Developer ID Application",
       team_id: ENV.fetch("APPLE_TEAM_ID"),
       path: "KeyBridge.xcodeproj",
       targets: ["KeyBridge-macOS"]
@@ -94,9 +102,9 @@ platform :mac do
       export_method: "developer-id",
       output_directory: "output",
       output_name: "KeyBridge",
-      xcargs: "-allowProvisioningUpdates",
       export_options: {
-        signingStyle: "automatic",
+        signingStyle: "manual",
+        signingCertificate: "Developer ID Application",
         teamID: ENV.fetch("APPLE_TEAM_ID")
       }
     )

@@ -143,11 +143,25 @@ Then, from the publish output, **as Administrator**: `install-service.bat`.
 ## CI/CD & distribution
 - `.github/workflows/ci.yml` — every push/PR: BridgeCore tests + unsigned
   builds of both apps + a Windows agent build. No secrets.
-- `.github/workflows/release-apple.yml` — on GitHub Release: iOS → TestFlight,
-  macOS → Developer ID (notarized) zip attached to the Release.
-- `.github/workflows/release-windows.yml` — on GitHub Release: publishes the
-  agent zip (build + scripts + config).
+- **Continuous per-platform deploys**, path-filtered so each fires only when
+  its platform (or a shared input: `BridgeCore/**`, `project.yml`,
+  `fastlane/**`) changed. All three also fire on Release publish and attach
+  their asset to the Release:
+  - `deploy-ios.yml` — push to main → TestFlight upload (internal testers via
+    a group with automatic distribution). Runs on `macos-26`: ASC's SDK floor
+    applies to uploads only, so ci.yml stays on the stabler `macos-15`.
+  - `deploy-macos.yml` — push to main → Developer ID-signed, notarized zip as
+    a run artifact (and Release asset on release).
+  - `deploy-windows.yml` — push to main → agent zip as a run artifact (and
+    Release asset on release).
 - fastlane lanes: `ios ios_beta`, `mac mac_release` (`fastlane/Fastfile`).
+  Build number = `git rev-list --count HEAD` (needs `fetch-depth: 0`):
+  monotonic on main, recomputable from any checkout. Re-running a run whose
+  upload already succeeded fails as a duplicate build — push a new commit.
+  The mac lane signs **manually with Developer ID end-to-end** (the CI
+  keychain has no Apple Development cert, so automatic signing would find no
+  identity for the archive step; no profile needed without sandbox or
+  restricted entitlements).
 
 ### ⚠️ Deviation from the original brief: macOS does NOT use TestFlight
 The brief asked for TestFlight for both apps. **The macOS app installs a
@@ -157,7 +171,7 @@ is distributed as a **Developer ID-signed, notarized** build via GitHub
 Releases (same channel as the Windows agent). iOS is unaffected and still ships
 to TestFlight.
 
-### Secrets needed (add each right before its first run)
+### Secrets (all set in the repo as of 2026-07-17)
 - iOS TestFlight + macOS notarization: `ASC_KEY_ID`, `ASC_ISSUER_ID`,
   `ASC_KEY_P8` (App Store Connect API key), `APPLE_TEAM_ID`.
 - macOS Developer ID signing: `DEVID_P12` (base64-encoded Developer ID
@@ -173,9 +187,12 @@ to TestFlight.
 - ✅ Windows agent: TCP listener, wire parser, SendInput injection, service
   scripts, file logging.
 - ✅ XcodeGen project, fastlane, CI + release workflows, docs.
+- ✅ Signing secrets wired; asset catalogs with a **generated placeholder
+  icon** (gradient + "KB→", `apps/{iOS,macOS}/Assets.xcassets`) — replace
+  with real art when available (iOS marketing icon must stay flattened RGB,
+  no alpha).
 - ⏳ Not yet done: on-device testing on real hardware (iPhone via TestFlight,
-  Mac locally, Windows PC); wiring real signing secrets; a bundled marketing
-  icon / asset catalog (needed before the first TestFlight upload).
+  Mac locally, Windows PC).
 
 ## Testing milestones (each independently testable on hardware)
 1. **Windows agent alone** — run it, `telnet`/netcat `key 65 pressed=1` +

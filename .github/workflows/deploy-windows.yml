@@ -1,10 +1,16 @@
-name: Release Windows agent
+name: Deploy Windows agent
 
-# Publishing a GitHub Release builds the standalone Windows agent and attaches
-# a ready-to-run zip (framework-dependent build + install/uninstall scripts +
-# appsettings.json). No app store, no signing secrets.
+# Every push to main that touches the agent produces a ready-to-run zip
+# (framework-dependent build + install/uninstall scripts + appsettings.json)
+# attached to the workflow run as an artifact. On Release publish the same
+# zip is also attached to the Release. No signing secrets.
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows-agent/**'
+      - '.github/workflows/deploy-windows.yml'
   release:
     types: [published]
   workflow_dispatch:
@@ -14,7 +20,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: write   # attach the zip to a Release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -29,7 +35,14 @@ jobs:
         run: |
           Copy-Item install-service.bat, uninstall-service.bat publish/
           Compress-Archive -Path publish/* -DestinationPath KeyBridgeAgent-win-x64.zip
-      - name: Attach to Release
+      - name: Attach zip to this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyBridgeAgent-win-x64
+          path: windows-agent/KeyBridgeAgent-win-x64.zip
+          if-no-files-found: error
+      - name: Attach zip to the Release
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: windows-agent/KeyBridgeAgent-win-x64.zip

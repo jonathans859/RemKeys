@@ -41,6 +41,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"   # iPhone + iPad
         SUPPORTS_MACCATALYST: NO
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: apps/iOS/Info.generated.plist
       properties:
@@ -71,6 +72,7 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
     info:
       path: apps/macOS/Info.generated.plist
