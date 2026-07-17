@@ -1,0 +1,15 @@
+# This repo is authored on Windows but its CI runs on Unix (macOS/Ubuntu)
+# runners. Force LF on everything the runners execute so CRLF never sneaks
+# into a shell heredoc or YAML run-block.
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sh    text eol=lf
+*.rb    text eol=lf
+*.swift text eol=lf
+*.cs    text eol=lf
+*.json  text eol=lf
+Fastfile text eol=lf
+Appfile  text eol=lf
+
+# Windows batch files must stay CRLF.
+*.bat   text eol=crlf

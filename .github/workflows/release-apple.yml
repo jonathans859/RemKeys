@@ -1,0 +1,82 @@
+name: Release Apple apps
+
+# Publishing a GitHub Release builds and ships both Apple apps:
+#   • iOS   → TestFlight
+#   • macOS → Developer ID (notarized), attached to the Release as a .zip
+#             (the menu-bar app installs a CGEventTap and cannot be sandboxed,
+#              so it can't use the Mac App Store / TestFlight)
+#
+# Required repository secrets (add them just before first run):
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8   — App Store Connect API key
+#                                             (iOS upload + macOS notarization)
+#   APPLE_TEAM_ID                            — Apple Developer team id
+#   DEVID_P12, DEVID_P12_PASSWORD            — Developer ID Application cert,
+#                                             base64-encoded .p12 + its password
+#                                             (macOS lane only)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: release-apple
+  cancel-in-progress: false
+
+jobs:
+  ios-testflight:
+    name: iOS → TestFlight
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Select newest Xcode (SDK floor for uploads)
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+      - uses: ruby/setup-ruby@v1
+        with: { bundler-cache: true }
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Write API key to disk
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "${{ secrets.ASC_KEY_P8 }}" > "$RUNNER_TEMP/asc/AuthKey.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
+      - name: Upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CHANGELOG: ${{ github.event.release.body }}
+        run: bundle exec fastlane ios ios_beta
+
+  macos-developer-id:
+    name: macOS → Developer ID (notarized)
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - uses: ruby/setup-ruby@v1
+        with: { bundler-cache: true }
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build, notarize, package
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVID_P12: ${{ secrets.DEVID_P12 }}
+          DEVID_P12_PASSWORD: ${{ secrets.DEVID_P12_PASSWORD }}
+        run: bundle exec fastlane mac mac_release
+      - name: Attach macOS app to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/KeyBridge-macOS.zip

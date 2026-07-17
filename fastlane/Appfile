@@ -1,0 +1,3 @@
+app_identifier("com.jonathan859.keybridge")
+# apple_id / itc_team_id are supplied via the App Store Connect API key in CI,
+# so nothing sensitive lives here.

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'LICENSE', '.gitignore', '.claude/**']
+  pull_request:
+    paths-ignore: ['**.md', 'LICENSE', '.gitignore', '.claude/**']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: BridgeCore tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Run unit tests
+        run: swift test
+        working-directory: BridgeCore
+
+  build-apps:
+    name: Build iOS + macOS (unsigned)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build iOS (unsigned)
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available | grep -E '^\s+iPhone' | head -1 \
+            | sed -E 's/^ *(.+) \([0-9A-Fa-f-]+\) \(.+$/\1/')
+          xcodebuild build \
+            -project KeyBridge.xcodeproj \
+            -scheme KeyBridge-iOS \
+            -destination "platform=iOS Simulator,name=$DEVICE" \
+            CODE_SIGNING_ALLOWED=NO | xcbeautify
+      - name: Build macOS (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project KeyBridge.xcodeproj \
+            -scheme KeyBridge-macOS \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO | xcbeautify
+
+  windows-agent:
+    name: Build Windows agent
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build
+        run: dotnet build KeyBridgeAgent.csproj -c Release
+        working-directory: windows-agent
