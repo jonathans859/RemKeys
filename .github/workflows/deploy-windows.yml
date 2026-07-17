@@ -1,9 +1,10 @@
 name: Deploy Windows agent
 
 # Every push to main that touches the agent produces a ready-to-run zip
-# (framework-dependent build + install/uninstall scripts + appsettings.json)
-# attached to the workflow run as an artifact. On Release publish the same
-# zip is also attached to the Release. No signing secrets.
+# (self-contained build — .NET runtime bundled, no install prerequisites —
+# plus install/uninstall scripts and appsettings.json) attached to the
+# workflow run as an artifact. On Release publish the same zip is also
+# attached to the Release. No signing secrets.
 
 on:
   push:
@@ -28,7 +29,7 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Publish
         working-directory: windows-agent
-        run: dotnet publish KeyBridgeAgent.csproj -c Release -o publish
+        run: dotnet publish KeyBridgeAgent.csproj -c Release -r win-x64 --self-contained true -o publish
       - name: Package
         working-directory: windows-agent
         shell: pwsh
