@@ -13,7 +13,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 toggleShortcutSection
-                Section("Modifier mapping") {
+                Section {
                     mappingPicker(
                         title: "Option key",
                         selection: Binding(
@@ -30,6 +30,8 @@ struct SettingsView: View {
                         ),
                         hint: "Where the Command key lands on the Windows PC"
                     )
+                } header: {
+                    Text("Modifier mapping")
                 } footer: {
                     Text("Shift and Control always map to Windows Shift and Control.")
                 }
@@ -44,7 +46,7 @@ struct SettingsView: View {
     }
 
     private var toggleShortcutSection: some View {
-        Section("Forwarding toggle shortcut") {
+        Section {
             LabeledContent("Shortcut") {
                 Text(settings.toggleShortcut?.displayString ?? "None")
                     .foregroundStyle(.secondary)
@@ -79,6 +81,8 @@ struct SettingsView: View {
                     }
                 }
             }
+        } header: {
+            Text("Forwarding toggle shortcut")
         } footer: {
             Text("Optional. A physical keyboard shortcut that turns forwarding on and off. Leave as None to use the on-screen button or a two-finger double tap.")
         }

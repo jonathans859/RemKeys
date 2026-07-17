@@ -74,7 +74,7 @@ enum HIDToVK {
         case .keyboardNonUSPound: return VK.oem5
         case .keyboardSemicolon: return VK.oem1
         case .keyboardQuote: return VK.oem7
-        case .keyboardGraveAccent: return VK.oem3
+        case .keyboardGraveAccentAndTilde: return VK.oem3
         case .keyboardComma: return VK.oemComma
         case .keyboardPeriod: return VK.oemPeriod
         case .keyboardSlash: return VK.oem2
