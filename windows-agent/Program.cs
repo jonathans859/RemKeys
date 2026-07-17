@@ -2,11 +2,10 @@ using KeyBridgeAgent;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Run as a Windows service (also runs fine as a console app for debugging).
-builder.Services.AddWindowsService(options =>
-{
-    options.ServiceName = "KeyBridge Agent";
-});
+// Deliberately NOT a Windows service: services run in session 0, where
+// SendInput cannot reach the interactive desktop — every injection is
+// rejected. The agent must run inside the logged-in user's session; the
+// install script registers it as a logon scheduled task instead.
 
 // Bind config. Missing/malformed sections just leave defaults in place — the
 // options object always has safe values, so the service never fails to start.

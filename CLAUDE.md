@@ -113,8 +113,13 @@ services. Don't "fix" the mismatch in either direction.
   user can track remote state from the sound alone.
 
 ## Windows agent
-- .NET 8 Worker Service, runs as an installable Windows service
-  (`install-service.bat` / `uninstall-service.bat`, **run as Administrator**).
+- .NET 8 worker host. **Runs as a logon scheduled task in the user's
+  session, NOT a Windows service** (`install-agent.bat` /
+  `uninstall-agent.bat`, **run as Administrator**). A service lives in
+  session 0, where `SendInput` cannot reach the interactive desktop — every
+  injection is rejected (verified in the field 2026-07-17; the agent
+  received keystrokes and logged `SendInput rejected` for each). The task
+  runs with highest privileges so injection also reaches elevated windows.
 - `appsettings.json`: `ListenPort` (default 5391), optional `AllowedRemoteIP`
   (empty = accept any Tailscale peer), `LogDirectory`.
 - Keystroke injection via `SendInput` (`KeystrokeInjector.cs`), with the
@@ -148,7 +153,9 @@ open KeyBridge.xcodeproj
 cd windows-agent
 dotnet build -c Release            # or: dotnet publish -c Release -o publish
 ```
-Then, from the publish output, **as Administrator**: `install-service.bat`.
+Then, from the publish output, **as Administrator**: `install-agent.bat`
+(registers a logon scheduled task — see the Windows agent section for why it
+must not be a service).
 
 ## CI/CD & distribution
 - `.github/workflows/ci.yml` — every push/PR: BridgeCore tests + unsigned
