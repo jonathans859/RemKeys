@@ -34,7 +34,10 @@ public struct KeyEvent: Equatable, Sendable {
     /// stray blank line never becomes a phantom keystroke. Mirrors the parser
     /// the Windows agent implements in C#.
     public static func parse(_ line: some StringProtocol) -> KeyEvent? {
-        let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\r" || $0 == "\n" })
+        // `isWhitespace`, not an explicit == " " / "\r" / "\n" set: Swift folds
+        // CRLF into a single Character, which compares equal to neither "\r"
+        // nor "\n" and so would survive into the last field.
+        let fields = line.split(whereSeparator: { $0.isWhitespace })
         guard fields.count == 3, fields[0] == "key" else { return nil }
         guard let vk = UInt16(fields[1]) else { return nil }
         guard fields[2] == "pressed=1" || fields[2] == "pressed=0" else { return nil }
