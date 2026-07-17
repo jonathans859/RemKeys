@@ -87,13 +87,14 @@ final class CaptureView: UIView {
         Task { @MainActor in _ = self.becomeFirstResponder() }
     }
 
-    /// Make sure the system doesn't pre-empt our keys with default behaviors
-    /// (Tab/arrow focus engine, Cmd-based shortcuts). With this true, every
-    /// key reaches `pressesBegan` first instead of being eaten by the focus
-    /// engine.
-    override func wantsPriorityOverSystemBehavior(forPressesEvent event: UIPressesEvent) -> Bool {
-        true
-    }
+    // Keeping Tab/arrows away from the focus engine needs no special API:
+    // presses reach the first responder's `pressesBegan` before the system
+    // acts on them, and the focus engine only handles presses we pass up via
+    // `super` (WWDC21 10260 — "call super consistently for presses that you
+    // don't handle"). `wantsPriorityOverSystemBehavior` exists only on
+    // `UIKeyCommand`, a path we deliberately don't use (no key-up events).
+    // So: claim a press by returning without calling super; anything
+    // unclaimed goes to super and behaves normally.
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         // The toggle shortcut takes precedence over forwarding, and works

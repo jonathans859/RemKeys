@@ -45,13 +45,25 @@ Bundle id: `com.jonathan859.keybridge`.
 
 ### iOS (`apps/iOS/KeyboardCapture.swift`)
 - A `UIViewRepresentable`-hosted `CaptureView` holds first responder and reads
-  raw `pressesBegan/Ended/Cancelled`. Not GCKeyboard, not UIKeyCommand — those
-  abstract away key-up and individual modifiers.
-- **Fixed bug from the reference:** the priority override now has the correct
-  signature — `override func wantsPriorityOverSystemBehavior(forPressesEvent:)`
-  — so Tab/arrow keys reach `pressesBegan` instead of being eaten by the focus
-  engine. (The old `_wantsPriorityOverSystemBehaviorWhenKeyboardEvent()` had no
-  `override` and the wrong signature, so it was dead code.)
+  raw `pressesBegan/Ended/Cancelled`. Not UIKeyCommand (no key-up, no
+  individual modifiers). Not GCKeyboard — it *does* expose per-key up/down
+  including left/right modifiers via `keyChangedHandler`, but the handler has
+  a history of silently never firing on real devices (SDL issue #6465), which
+  is disqualifying for an input bridge.
+- **No "priority override" exists — none is needed.** The reference code's
+  `_wantsPriorityOverSystemBehaviorWhenKeyboardEvent()` was dead code, and the
+  first attempted fix (`override func
+  wantsPriorityOverSystemBehavior(forPressesEvent:)`) overrode a method UIKit
+  doesn't have — the only public `wantsPriorityOverSystemBehavior` is a
+  property on `UIKeyCommand` (iOS 15+), which we deliberately don't use.
+  The documented mechanism (WWDC21 10260) is the one already in place: presses
+  reach the first responder's `pressesBegan` before the system acts; the focus
+  engine only handles presses passed up via `super`. Claimed keys never call
+  super, so Tab/arrows are forwarded, not eaten. (System-reserved chords like
+  Cmd-H / Cmd-Space never reach any app; that's an iOS limit, not a bug.)
+  Confirming Tab/arrows really flow on iPadOS 15+ hardware is part of testing
+  milestone 3; the fallback, if they don't, would be no-op `UIKeyCommand`s
+  with `wantsPriorityOverSystemBehavior = true` purely to claim those keys.
 - **First-responder reclaim:** `CaptureView.requestReclaim()` posts a
   notification the active capture view answers by re-taking first responder.
   Called after the IP field / settings sheet steals focus, so keys flow again

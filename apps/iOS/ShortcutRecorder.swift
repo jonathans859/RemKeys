@@ -49,11 +49,9 @@ final class ShortcutRecorderView: UIView {
 
     override var canBecomeFirstResponder: Bool { true }
 
-    /// Ensure Tab/arrows/etc. reach us to be recorded instead of moving focus.
-    override func wantsPriorityOverSystemBehavior(forPressesEvent event: UIPressesEvent) -> Bool {
-        true
-    }
-
+    // Tab/arrows/etc. reach `pressesBegan` here because the recorder claims
+    // every press (never calls super); the focus engine only acts on presses
+    // passed up the chain. See the matching note in KeyboardCapture.swift.
     override var keyCommands: [UIKeyCommand]? { [] }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
