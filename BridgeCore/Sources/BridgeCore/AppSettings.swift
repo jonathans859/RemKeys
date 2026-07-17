@@ -8,6 +8,8 @@ public enum ModifierMapping: String, CaseIterable, Codable, Sendable, Identifiab
     case alt        // Windows Alt (VK_MENU)
     case control    // Windows Ctrl (VK_CONTROL)
     case win        // Windows key (VK_LWIN)
+    case altGr      // Windows AltGr (right Alt, VK_RMENU) — on e.g. German
+                    // layouts the only way to type @ € { } [ ] \ ~
 
     public var id: String { rawValue }
 
@@ -17,6 +19,7 @@ public enum ModifierMapping: String, CaseIterable, Codable, Sendable, Identifiab
         case .alt: return "Alt"
         case .control: return "Control"
         case .win: return "Windows key"
+        case .altGr: return "AltGr (right Alt)"
         }
     }
 
@@ -26,6 +29,7 @@ public enum ModifierMapping: String, CaseIterable, Codable, Sendable, Identifiab
         case .alt: return VK.menu
         case .control: return VK.control
         case .win: return VK.lwin
+        case .altGr: return VK.rmenu
         }
     }
 }

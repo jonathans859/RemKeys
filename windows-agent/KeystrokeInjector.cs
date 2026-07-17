@@ -13,6 +13,74 @@ public static class KeystrokeInjector
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_SCANCODE = 0x0008;
+
+    /// <summary>
+    /// Layout-sensitive keys (letters, digits, punctuation) are injected as
+    /// <b>scancodes</b>, not VKs. The Apple senders report physical key
+    /// positions (HID usages) translated to VKs with their US-layout meaning;
+    /// injecting that VK on a PC with a different layout types the wrong
+    /// character (German QWERTZ: the key labeled Z arrives as VK_Y and types
+    /// "y"). Injecting the US scancode for the position instead lets the PC's
+    /// active layout decide the character — exactly as if the keyboard were
+    /// attached locally. Maps US-positional VK → PC/AT set-1 make code.
+    /// Everything absent here (modifiers, F-keys, nav, numpad, media) is
+    /// layout-independent and stays on the VK path.
+    /// </summary>
+    private static readonly Dictionary<ushort, ushort> LayoutSensitiveScanCodes = new()
+    {
+        // Letters (VK_A..VK_Z = 0x41..0x5A)
+        [0x41] = 0x1E, // A
+        [0x42] = 0x30, // B
+        [0x43] = 0x2E, // C
+        [0x44] = 0x20, // D
+        [0x45] = 0x12, // E
+        [0x46] = 0x21, // F
+        [0x47] = 0x22, // G
+        [0x48] = 0x23, // H
+        [0x49] = 0x17, // I
+        [0x4A] = 0x24, // J
+        [0x4B] = 0x25, // K
+        [0x4C] = 0x26, // L
+        [0x4D] = 0x32, // M
+        [0x4E] = 0x31, // N
+        [0x4F] = 0x18, // O
+        [0x50] = 0x19, // P
+        [0x51] = 0x10, // Q
+        [0x52] = 0x13, // R
+        [0x53] = 0x1F, // S
+        [0x54] = 0x14, // T
+        [0x55] = 0x16, // U
+        [0x56] = 0x2F, // V
+        [0x57] = 0x11, // W
+        [0x58] = 0x2D, // X
+        [0x59] = 0x15, // Y (US position; German layout makes this Z)
+        [0x5A] = 0x2C, // Z
+        // Top-row digits (VK_0..VK_9 = 0x30..0x39)
+        [0x31] = 0x02, // 1
+        [0x32] = 0x03, // 2
+        [0x33] = 0x04, // 3
+        [0x34] = 0x05, // 4
+        [0x35] = 0x06, // 5
+        [0x36] = 0x07, // 6
+        [0x37] = 0x08, // 7
+        [0x38] = 0x09, // 8
+        [0x39] = 0x0A, // 9
+        [0x30] = 0x0B, // 0
+        // Punctuation (US OEM keys)
+        [0xBD] = 0x0C, // VK_OEM_MINUS   (-)
+        [0xBB] = 0x0D, // VK_OEM_PLUS    (=)
+        [0xDB] = 0x1A, // VK_OEM_4       ([)
+        [0xDD] = 0x1B, // VK_OEM_6       (])
+        [0xDC] = 0x2B, // VK_OEM_5       (\)
+        [0xBA] = 0x27, // VK_OEM_1       (;)
+        [0xDE] = 0x28, // VK_OEM_7       (')
+        [0xC0] = 0x29, // VK_OEM_3       (`)
+        [0xBC] = 0x33, // VK_OEM_COMMA   (,)
+        [0xBE] = 0x34, // VK_OEM_PERIOD  (.)
+        [0xBF] = 0x35, // VK_OEM_2       (/)
+        [0xE2] = 0x56, // VK_OEM_102     (ISO extra key next to left Shift)
+    };
 
     /// <summary>
     /// Virtual keys that live in the "extended" block of the PC keyboard. They
@@ -61,6 +129,16 @@ public static class KeystrokeInjector
             flags |= KEYEVENTF_EXTENDEDKEY;
         }
 
+        ushort sendVk = vk;
+        ushort scan = 0;
+        if (LayoutSensitiveScanCodes.TryGetValue(vk, out var positionScan))
+        {
+            // Positional injection: the PC's own layout picks the character.
+            flags |= KEYEVENTF_SCANCODE;
+            scan = positionScan;
+            sendVk = 0;
+        }
+
         var input = new INPUT
         {
             type = INPUT_KEYBOARD,
@@ -68,8 +146,8 @@ public static class KeystrokeInjector
             {
                 ki = new KEYBDINPUT
                 {
-                    wVk = vk,
-                    wScan = 0,
+                    wVk = sendVk,
+                    wScan = scan,
                     dwFlags = flags,
                     time = 0,
                     dwExtraInfo = IntPtr.Zero,

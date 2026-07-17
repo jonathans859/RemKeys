@@ -206,6 +206,14 @@ enum HIDToVK {
     }
 
     private static let specialNames: [UIKeyboardHIDUsage: String] = [
+        // Modifiers first — the Diagnostics "Last key seen" row uses these to
+        // reveal what a physical key actually sends (e.g. an MX Keys
+        // Win-labeled key arriving as Command).
+        .keyboardLeftShift: "Left Shift", .keyboardRightShift: "Right Shift",
+        .keyboardLeftControl: "Left Control", .keyboardRightControl: "Right Control",
+        .keyboardLeftAlt: "Left Option", .keyboardRightAlt: "Right Option",
+        .keyboardLeftGUI: "Left Command", .keyboardRightGUI: "Right Command",
+        .keyboardCapsLock: "Caps Lock",
         .keyboardReturnOrEnter: "Return", .keyboardTab: "Tab",
         .keyboardSpacebar: "Space", .keyboardDeleteOrBackspace: "Delete",
         .keyboardEscape: "Escape", .keyboardDeleteForward: "Forward Delete",

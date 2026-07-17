@@ -45,7 +45,11 @@ services. Don't "fix" the mismatch in either direction.
 - **Modifier mapping is configurable** because there is no fixed correct
   mapping between the Apple and Windows layouts. iOS Option/Command and macOS
   left/right Option + Command each route through a `ModifierMapping`
-  (`Alt`/`Control`/`Windows key`). Shift and Control always map straight across.
+  (`Alt`/`Control`/`Windows key`/`AltGr`). AltGr exists because on e.g. German
+  PC layouts it is the only way to type @ € { } [ ] \. Shift and Control
+  always map straight across. Note: Logitech multi-OS keyboards (MX Keys)
+  present their Win-labeled key to Apple hosts as *Command*, so "Windows key
+  types Ctrl" = the Command mapping's default, changeable in Settings.
 - **Networking is peer-to-peer over Tailscale.** No discovery, no pairing, no
   relay, no app-level crypto — Tailscale already encrypts and authenticates.
   The apps have a text field for the target Tailscale IP and connect directly
@@ -124,7 +128,12 @@ services. Don't "fix" the mismatch in either direction.
   (empty = accept any Tailscale peer), `LogDirectory`.
 - Keystroke injection via `SendInput` (`KeystrokeInjector.cs`), with the
   extended-key flag set for the nav cluster, right-hand modifiers, numpad
-  divide, Win/Apps, and media keys.
+  divide, Win/Apps, and media keys. **Layout-sensitive keys (letters, digits,
+  punctuation) are injected as US scancodes, not VKs**: the senders encode
+  physical positions as US-meaning VKs, and scancode injection lets the PC's
+  active layout (e.g. German QWERTZ) choose the character — matching the
+  key's label when both sides use the same layout. Everything else stays on
+  the VK path (layout-independent).
 - **Never crashes on bad config**: invalid port or busy socket → logs and
   retries; malformed line → logged and skipped, not fatal. Logs to a per-day
   file (`FileLogger.cs`).
