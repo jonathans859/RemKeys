@@ -16,16 +16,20 @@ public sealed class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly KeyBridgeOptions _options;
+    private readonly AgentStatus _status;
+    private int _port;
 
-    public Worker(ILogger<Worker> logger, IOptions<KeyBridgeOptions> options)
+    public Worker(ILogger<Worker> logger, IOptions<KeyBridgeOptions> options, AgentStatus status)
     {
         _logger = logger;
         _options = options.Value;
+        _status = status;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var port = _options.ListenPort is > 0 and < 65536 ? _options.ListenPort : 5391;
+        _port = port;
         if (port != _options.ListenPort)
         {
             _logger.LogWarning("Configured ListenPort {Configured} is invalid; using {Fallback}.",
@@ -42,11 +46,13 @@ public sealed class Worker : BackgroundService
             {
                 listener.Start();
                 _logger.LogInformation("KeyBridge agent listening on port {Port}.", port);
+                _status.Set(AgentState.Listening, $"Waiting for a connection on port {port}");
                 break;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Could not start listener on port {Port}; retrying in 10s.", port);
+                _status.Set(AgentState.PortBlocked, $"Port {port} is busy — retrying");
                 await SafeDelay(TimeSpan.FromSeconds(10), stoppingToken);
             }
         }
@@ -83,6 +89,7 @@ public sealed class Worker : BackgroundService
         }
 
         _logger.LogInformation("Peer connected from {Remote}.", remote);
+        _status.Set(AgentState.Connected, $"Connected to {remote}");
         client.NoDelay = true;
 
         using var stream = client.GetStream();
@@ -108,6 +115,7 @@ public sealed class Worker : BackgroundService
         {
             ArrayPool<byte>.Shared.Return(buffer);
             _logger.LogInformation("Peer {Remote} session ended.", remote);
+            _status.Set(AgentState.Listening, $"Waiting for a connection on port {_port}");
         }
     }
 

@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- net8.0-windows + WinForms for the tray icon (NotifyIcon). The publish
+         is self-contained, so the Desktop runtime ships inside the zip and
+         target PCs still need no install. EnableWindowsTargeting keeps the
+         ubuntu CI build job compiling this Windows-only target. -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>KeyBridgeAgent</RootNamespace>

@@ -95,18 +95,36 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   no background entitlement. The UI is built around a clear "Forwarding active"
   state, holds the idle timer off while forwarding, and stops forwarding when
   the app leaves the foreground (so the remote never keeps a half-held chord).
+- **Screen curtain** (Start tab button, overlay in `RootTabView`): black
+  overlay + brightness 0, the battery saver for long forwarding sessions;
+  double-tap dismisses. Offered **only while VoiceOver is off** — VoiceOver
+  has its own Screen Curtain and the dismissal gesture would collide.
+  Brightness is a system-sticky setting, so it auto-restores on backgrounding
+  and if VoiceOver turns on mid-curtain. Idle timer is held while forwarding
+  *or* curtained. Capture keeps working under the overlay.
 
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
 - On-screen key sender (iOS-only tab), VoiceOver-first: each category row
   (editing, navigation, F-keys) is exposed to VoiceOver as **one adjustable
   element whose position IS the selection** — option 0 is "None", swipe
-  up/down lands on the key that row will send, no double tap (VoiceOver
-  activation is slow, field-reported twice; per-key buttons were rejected
-  first, then browse+double-tap). Multiple rows can each contribute a key,
-  tapped in row order. The **modifiers row alone** keeps browse +
-  double-tap-toggle because several can be on at once. Visible buttons
-  serve touch only. Plus a text field, a "will send" readout, and Send
-  (also magic tap on that tab). Everything resets after sending.
+  up/down lands on the key the row holds (per-key buttons were rejected
+  first, then browse+double-tap-to-select). Multiple rows can each
+  contribute a key, tapped in row order. The **modifiers row alone** keeps
+  browse + double-tap-toggle because several can be on at once. Visible
+  buttons serve touch only. Plus a text field, a "will send" readout, and
+  Send (also magic tap on that tab). Send resets everything to None.
+- **Double-tapping a key row sends just that row's key immediately** —
+  wrapped in the toggled modifiers when the "Rows send with modifiers"
+  setting is on (`AppSettings.virtualRowSendsModifiers`, default on).
+  Activation deliberately changes *nothing* (no value change, no reset, no
+  focus move, silent on success, queued announcement on failure only), so
+  repeated double taps repeat the key; a three-finger scroll on a row
+  resets it to None without sending. **Send-on-adjust was tried and
+  field-rejected the same day (2026-07-18)**: swiping across a row fired
+  every intermediate key — don't reintroduce it. Known open issue:
+  VoiceOver's double-tap activation latency is system-inherent and still
+  feels sluggish to the user; split tap helps, and a direct-touch send pad
+  (`allowsDirectInteraction`) is the designed escalation if needed.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
   involved; AltGr is just `VK_RMENU`.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +
@@ -160,6 +178,25 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   root is pinned to `AppContext.BaseDirectory` because the task starts in
   `System32`, where the default (CWD) content root would silently miss the
   `appsettings.json` next to the exe.
+- **Must run elevated — un-elevated failure is silent and dialog-specific.**
+  `SendInput` into windows of **uiAccess** processes (installed NVDA runs
+  `uiAccess="True"` — its own dialogs!) or elevated apps is discarded by
+  UIPI with *no error and no failing return value* (documented behavior;
+  field-verified 2026-07-18: a hand-launched Medium-IL agent typed fine
+  everywhere except NVDA's dialogs, with zero log entries). The agent
+  therefore logs a loud startup warning and flags the tray status when
+  un-elevated. Launch via the scheduled task, never by double-clicking.
+- **Single instance** (named mutex; a second launch logs one line and
+  exits — the windowless exe invited accidental multi-launch, which piled
+  up port-retry loops) and a **tray icon** (WinForms `NotifyIcon`; csproj
+  targets `net8.0-windows` + `UseWindowsForms`, `EnableWindowsTargeting`
+  keeps the ubuntu CI job compiling). Tray tooltip + a disabled menu line
+  carry live status ("Waiting for a connection on port 5391" /
+  "Connected to <ip>" / "Port busy", with a "not elevated!" marker) — the
+  tooltip is what NVDA announces in the tray, so it's the accessible status
+  channel. Exit menu item stops the host cleanly. `install-agent.bat` also
+  clears schtasks defaults that killed the agent (72-h execution limit,
+  stop-on-battery).
 - `appsettings.json`: `ListenPort` (default 5391), optional `AllowedRemoteIP`
   (empty = accept any Tailscale peer), `LogDirectory`.
 - Keystroke injection via `SendInput` (`KeystrokeInjector.cs`), with the

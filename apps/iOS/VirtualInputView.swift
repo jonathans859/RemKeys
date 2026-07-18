@@ -13,14 +13,16 @@ import BridgeCore
 ///   a single slider value can't express. Left/right swipes jump between
 ///   rows — 8 stops for the whole screen. The visible buttons remain for
 ///   touch users only.
-/// - **Selecting a key sends it immediately** (swipe or touch tap alike) —
-///   wrapped in the toggled modifiers if the Settings toggle for that is on.
-///   Deliberately no feedback beyond VoiceOver speaking the row's new value,
-///   and no reset or focus move: the user stays on the row, e.g. to fire
-///   arrow keys in quick succession. Only a failed send announces. A
-///   three-finger scroll on a row (VoiceOver's scroll gesture) sets it back
-///   to None *without* sending — that is also the way to re-send the current
-///   key without passing through a neighbor: scroll to None, swipe back.
+/// - **Swiping only selects; double-tapping the row sends the selected key**
+///   (wrapped in the toggled modifiers if the Settings toggle for that is
+///   on). Send-on-adjust was tried first and field-rejected: swiping across
+///   a row fired every intermediate key. Activation changes nothing — no
+///   value change, no reset, no focus move, no announcement (a failed send
+///   is the only thing that speaks) — so the row can be double-tapped
+///   repeatedly to auto-repeat a key. A three-finger scroll on a row sets it
+///   back to None without sending. (Tip for speed: a split tap — hold one
+///   finger on the row, tap with another — activates without the double-tap
+///   gesture delay.)
 /// - Send / magic tap still delivers the whole combination (so it doubles as
 ///   "repeat", and the "Will send" readout stays honest) and only then does
 ///   everything reset to None.
@@ -122,17 +124,21 @@ struct VirtualInputView: View {
                     keyButton(key, in: category)
                 }
             }
-            // The slider position is the selection: no double tap anywhere
-            // (activation is noticeably slow under VoiceOver). Option 0 is
-            // "None"; swiping to a key selects it AND sends it right away —
-            // VoiceOver speaking the new value is the only feedback (an
-            // announcement here would clip it; only failures announce).
+            // The slider position is the selection; double tap fires it.
+            // Option 0 is "None". Swiping deliberately does NOT send
+            // (field-rejected: it fired every key passed on the way), and
+            // activation deliberately changes NOTHING — no value change, no
+            // reset, no focus move, no announcement — so repeated double
+            // taps repeat the key; only a failed send speaks.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(category.title)
             .accessibilityValue(index == 0 ? "None" : category.keys[index - 1].name)
-            .accessibilityHint("Swipe up or down to send the key the row lands on. A three-finger scroll sets the row back to None without sending.")
+            .accessibilityHint("Swipe up or down to choose the key, double tap to send it. The row keeps its key, so double tap again to repeat. A three-finger scroll sets the row back to None.")
             .accessibilityAdjustableAction { direction in
                 select(adjusted(index, direction, count: category.keys.count + 1), in: category)
+            }
+            .accessibilityAction {
+                sendSelected(in: category)
             }
             // VoiceOver's three-finger scroll while focused on the row: quick
             // reset to None, silent, nothing sent. Both horizontal directions
@@ -159,8 +165,8 @@ struct VirtualInputView: View {
     }
 
     /// Touch-only (VoiceOver sees the enclosing row, not the buttons): tap
-    /// selects the key in its row — which sends it, same as the adjustable —
-    /// tapping the selected key clears the row without sending.
+    /// selects the key in its row, tapping the selected key clears the row.
+    /// Touch users send via the Send button.
     private func keyButton(_ key: VirtualKey, in category: VirtualKeyCategory) -> some View {
         let position = (category.keys.firstIndex(of: key) ?? 0) + 1
         let isSelected = keySelectionIndices[category.id, default: 0] == position
@@ -171,15 +177,21 @@ struct VirtualInputView: View {
         .tint(isSelected ? Color.accentColor : nil)
     }
 
-    /// Move a row's selection; landing on a key sends it immediately (landing
-    /// on None sends nothing). No-op when the position doesn't change, so a
-    /// swipe clamped at the row's end can't re-fire the boundary key.
+    /// Move a row's selection. Selection alone never sends — sending is the
+    /// row's activate action (`sendSelected`) or the Send button.
     private func select(_ position: Int, in category: VirtualKeyCategory) {
-        guard position != keySelectionIndices[category.id, default: 0] else { return }
         keySelectionIndices[category.id] = position
-        if position > 0 {
-            sendImmediate(category.keys[position - 1])
+    }
+
+    /// The row's activate (double tap) action: forward the key the row shows,
+    /// touching nothing else — no value change, no reset, no focus move.
+    private func sendSelected(in category: VirtualKeyCategory) {
+        let index = keySelectionIndices[category.id, default: 0]
+        guard index > 0 else {
+            announce("No key selected")
+            return
         }
+        sendImmediate(category.keys[index - 1])
     }
 
     /// A horizontally scrolling "slider" of keys.
@@ -226,7 +238,7 @@ struct VirtualInputView: View {
             .disabled(!hasSomethingToSend)
             .accessibilityHint("Sends the combination to the Windows PC")
         } footer: {
-            Text("Selecting a key on a row sends it immediately. Send (or a two-finger double tap on this tab) delivers the whole combination — modifiers, text, and the keys the rows show — and resets everything to None.")
+            Text("Double tap a row to send just the key it shows — it stays selected, so double tap again to repeat. Send (or a two-finger double tap on this tab) delivers the whole combination — modifiers, text, and the keys the rows show — and resets everything to None.")
         }
     }
 
@@ -260,12 +272,11 @@ struct VirtualInputView: View {
 
     // MARK: Sending
 
-    /// Immediate path for row selection: exactly one key, wrapped in the
-    /// toggled modifiers when the setting says so. Success is silent (the
-    /// row's value change is the feedback — an announcement would clip it)
-    /// and nothing resets or moves; state only clears via Send. Unlike
-    /// Send, a failure doesn't flip forwarding on — it just says the key
-    /// was not sent, and the selection sticks so Send can deliver it.
+    /// Immediate path for a row's activate action: exactly one key, wrapped
+    /// in the toggled modifiers when the setting says so. Success is fully
+    /// silent and nothing resets or moves; state only clears via Send.
+    /// Unlike Send, a failure doesn't flip forwarding on — it just says the
+    /// key was not sent, and the selection sticks so Send can deliver it.
     private func sendImmediate(_ key: VirtualKey) {
         guard bridge.forwardingEnabled else {
             announce("\(key.name) not sent. Forwarding is off.")

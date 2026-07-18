@@ -42,6 +42,16 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+REM schtasks defaults would stop the agent after 72 hours and refuse to run
+REM on battery - both wrong for an input bridge that must simply stay up.
+REM Only PowerShell's task cmdlets can clear them.
+echo Removing the 72-hour run limit and battery restrictions...
+powershell -NoProfile -Command "Set-ScheduledTask -TaskName '%TASK_NAME%' -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries)" >nul
+if %errorlevel% neq 0 (
+    echo Warning: could not adjust task settings; the agent will be stopped
+    echo after 72 hours of uptime until the next logon.
+)
+
 echo Starting agent...
 schtasks /Run /TN "%TASK_NAME%"
 

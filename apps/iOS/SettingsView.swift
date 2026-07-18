@@ -105,11 +105,11 @@ struct SettingsView: View {
                 get: { settings.virtualRowSendsModifiers },
                 set: { settings.virtualRowSendsModifiers = $0 }
             ))
-            .accessibilityHint("Applies to the immediate send when selecting a key on a Virtual Input row")
+            .accessibilityHint("Applies when double tapping a Virtual Input row to send its key")
         } header: {
             Text("Virtual input")
         } footer: {
-            Text("Selecting a key on a Virtual Input row sends it immediately. When this is on, that key is wrapped in the modifiers currently toggled on — fast Control or Shift plus arrows. When off, rows send the bare key and modifiers only apply through the Send button.")
+            Text("Double tapping a Virtual Input row sends the key it shows. When this is on, that key is wrapped in the modifiers currently toggled on — fast Control or Shift plus arrows. When off, rows send the bare key and modifiers only apply through the Send button.")
         }
     }
 
