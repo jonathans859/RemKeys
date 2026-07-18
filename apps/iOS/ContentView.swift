@@ -14,6 +14,11 @@ import BridgeCore
 struct ContentView: View {
     let settings: AppSettings
     let bridge: BridgeClient
+    /// Raises the screen curtain, which lives in `RootTabView` so its overlay
+    /// covers the tab bar too.
+    let activateCurtain: () -> Void
+
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     private var diagnostics: CaptureDiagnostics { .shared }
 
@@ -32,6 +37,9 @@ struct ContentView: View {
                     statusSection
                     connectionSection
                     forwardingSection
+                    if !voiceOverEnabled {
+                        curtainSection
+                    }
                     diagnosticsSection
                 }
                 .navigationTitle("RemKeys")
@@ -111,6 +119,21 @@ struct ContentView: View {
                 : "Connects and starts sending keystrokes to the Windows PC")
         } footer: {
             Text("Tip: two-finger double tap anywhere toggles forwarding. On the Virtual Input tab, the same gesture sends the built combination instead.")
+        }
+    }
+
+    /// Battery saver for long forwarding sessions: black overlay + brightness
+    /// zero (see `RootTabView`). Hidden entirely while VoiceOver runs —
+    /// VoiceOver's own Screen Curtain (three-finger triple tap) does the same
+    /// job, and the double-tap dismissal would fight VoiceOver gestures.
+    private var curtainSection: some View {
+        Section {
+            Button("Screen curtain") {
+                activateCurtain()
+            }
+            .accessibilityHint("Turns the screen black to save battery. Keystrokes keep forwarding.")
+        } footer: {
+            Text("Blacks out the screen and drops brightness to zero to save battery — forwarding keeps running. Double-tap the screen to turn it back on. While VoiceOver is on, this button is hidden: use VoiceOver's Screen Curtain (three-finger triple tap) instead.")
         }
     }
 

@@ -8,11 +8,22 @@ import BridgeCore
 /// - Each key row is ONE adjustable element ("slider") whose position IS the
 ///   selection: option 0 is "None", swiping up/down lands on the key the row
 ///   will send — no double tap involved (activation is slow under VoiceOver,
-///   field-reported). Rows reset to None after each send. The modifiers row
-///   is the exception: it keeps browse + double-tap-to-toggle because several
-///   modifiers can be on at once, which a single slider value can't express.
-///   Left/right swipes jump between rows — 8 stops for the whole screen.
-///   The visible buttons remain for touch users only.
+///   field-reported). The modifiers row is the exception: it keeps browse +
+///   double-tap-to-toggle because several modifiers can be on at once, which
+///   a single slider value can't express. Left/right swipes jump between
+///   rows — 8 stops for the whole screen. The visible buttons remain for
+///   touch users only.
+/// - **Selecting a key sends it immediately** (swipe or touch tap alike) —
+///   wrapped in the toggled modifiers if the Settings toggle for that is on.
+///   Deliberately no feedback beyond VoiceOver speaking the row's new value,
+///   and no reset or focus move: the user stays on the row, e.g. to fire
+///   arrow keys in quick succession. Only a failed send announces. A
+///   three-finger scroll on a row (VoiceOver's scroll gesture) sets it back
+///   to None *without* sending — that is also the way to re-send the current
+///   key without passing through a neighbor: scroll to None, swipe back.
+/// - Send / magic tap still delivers the whole combination (so it doubles as
+///   "repeat", and the "Will send" readout stays honest) and only then does
+///   everything reset to None.
 /// - Plain text is typed into a normal text field and sent through the
 ///   layout-independent unicode path, so it types verbatim on any PC layout;
 ///   when modifiers are held it switches to US-position keys, because
@@ -21,6 +32,7 @@ import BridgeCore
 ///   and a two-finger double tap (magic tap) sends from anywhere on this tab.
 struct VirtualInputView: View {
     let bridge: BridgeClient
+    let settings: AppSettings
 
     /// Posted by the root magic-tap handler while this tab is frontmost.
     static let sendRequested = Notification.Name("KeyBridge.virtualInputSendRequested")
@@ -112,14 +124,25 @@ struct VirtualInputView: View {
             }
             // The slider position is the selection: no double tap anywhere
             // (activation is noticeably slow under VoiceOver). Option 0 is
-            // "None"; swiping to a key selects it, swiping back to None
-            // clears the row.
+            // "None"; swiping to a key selects it AND sends it right away —
+            // VoiceOver speaking the new value is the only feedback (an
+            // announcement here would clip it; only failures announce).
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(category.title)
             .accessibilityValue(index == 0 ? "None" : category.keys[index - 1].name)
-            .accessibilityHint("Swipe up or down to choose the key this row sends. The first option, None, sends nothing.")
+            .accessibilityHint("Swipe up or down to send the key the row lands on. A three-finger scroll sets the row back to None without sending.")
             .accessibilityAdjustableAction { direction in
-                keySelectionIndices[category.id] = adjusted(index, direction, count: category.keys.count + 1)
+                select(adjusted(index, direction, count: category.keys.count + 1), in: category)
+            }
+            // VoiceOver's three-finger scroll while focused on the row: quick
+            // reset to None, silent, nothing sent. Both horizontal directions
+            // accepted — nothing else competes for the gesture, and the
+            // edge-to-gesture mapping is easy to get backwards. Vertical
+            // scrolls are left unhandled for the Form to page.
+            .accessibilityScrollAction { edge in
+                if edge == .leading || edge == .trailing {
+                    keySelectionIndices[category.id] = 0
+                }
             }
         } header: {
             Text(category.title).accessibilityHidden(true)
@@ -136,15 +159,27 @@ struct VirtualInputView: View {
     }
 
     /// Touch-only (VoiceOver sees the enclosing row, not the buttons): tap
-    /// selects the key in its row, tapping the selected key clears the row.
+    /// selects the key in its row — which sends it, same as the adjustable —
+    /// tapping the selected key clears the row without sending.
     private func keyButton(_ key: VirtualKey, in category: VirtualKeyCategory) -> some View {
         let position = (category.keys.firstIndex(of: key) ?? 0) + 1
         let isSelected = keySelectionIndices[category.id, default: 0] == position
         return Button(key.name) {
-            keySelectionIndices[category.id] = isSelected ? 0 : position
+            select(isSelected ? 0 : position, in: category)
         }
         .buttonStyle(.bordered)
         .tint(isSelected ? Color.accentColor : nil)
+    }
+
+    /// Move a row's selection; landing on a key sends it immediately (landing
+    /// on None sends nothing). No-op when the position doesn't change, so a
+    /// swipe clamped at the row's end can't re-fire the boundary key.
+    private func select(_ position: Int, in category: VirtualKeyCategory) {
+        guard position != keySelectionIndices[category.id, default: 0] else { return }
+        keySelectionIndices[category.id] = position
+        if position > 0 {
+            sendImmediate(category.keys[position - 1])
+        }
     }
 
     /// A horizontally scrolling "slider" of keys.
@@ -191,7 +226,7 @@ struct VirtualInputView: View {
             .disabled(!hasSomethingToSend)
             .accessibilityHint("Sends the combination to the Windows PC")
         } footer: {
-            Text("Each row sends the key it shows; None sends nothing. Tip: on this tab, a two-finger double tap sends the combination. Everything resets after sending.")
+            Text("Selecting a key on a row sends it immediately. Send (or a two-finger double tap on this tab) delivers the whole combination — modifiers, text, and the keys the rows show — and resets everything to None.")
         }
     }
 
@@ -224,6 +259,27 @@ struct VirtualInputView: View {
     }
 
     // MARK: Sending
+
+    /// Immediate path for row selection: exactly one key, wrapped in the
+    /// toggled modifiers when the setting says so. Success is silent (the
+    /// row's value change is the feedback — an announcement would clip it)
+    /// and nothing resets or moves; state only clears via Send. Unlike
+    /// Send, a failure doesn't flip forwarding on — it just says the key
+    /// was not sent, and the selection sticks so Send can deliver it.
+    private func sendImmediate(_ key: VirtualKey) {
+        guard bridge.forwardingEnabled else {
+            announce("\(key.name) not sent. Forwarding is off.")
+            return
+        }
+        guard bridge.status.isConnected else {
+            announce("\(key.name) not sent. \(bridge.status.announcement)")
+            return
+        }
+        let modifiers = settings.virtualRowSendsModifiers ? orderedModifiers.map(\.vk) : []
+        for vk in modifiers { bridge.sendKey(vk: vk, pressed: true) }
+        tap(key.vk)
+        for vk in modifiers.reversed() { bridge.sendKey(vk: vk, pressed: false) }
+    }
 
     private func send() {
         guard hasSomethingToSend else {

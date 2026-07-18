@@ -80,6 +80,18 @@ public final class AppSettings {
         didSet { defaults.set(rightCommandMapping.rawValue, forKey: Keys.rightCommandMapping) }
     }
 
+    // MARK: Virtual input (iOS)
+
+    /// Whether selecting a key on a virtual-input row (which sends that key
+    /// immediately) wraps it in the modifiers currently toggled on. Off means
+    /// row selection sends the bare key and modifiers only apply through the
+    /// Send button. A setting because both behaviors are legitimate: wrapped
+    /// is fast Ctrl/Shift+Arrow navigation, bare keeps swiping across a row
+    /// from firing modified chords on every stop.
+    public var virtualRowSendsModifiers: Bool {
+        didSet { defaults.set(virtualRowSendsModifiers, forKey: Keys.virtualRowSendsModifiers) }
+    }
+
     // MARK: Forwarding toggle shortcut
 
     /// Optional physical chord that turns forwarding on/off. `nil` means the
@@ -111,6 +123,9 @@ public final class AppSettings {
         self.rightOptionMapping = mapping(Keys.rightOptionMapping, legacy: Keys.legacyOptionMapping, default: .alt)
         self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
+        // Default true: `bool(forKey:)` can't express a true default, so read
+        // the raw object.
+        self.virtualRowSendsModifiers = defaults.object(forKey: Keys.virtualRowSendsModifiers) as? Bool ?? true
         if let data = defaults.data(forKey: Keys.toggleShortcut),
            let decoded = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
             self.toggleShortcut = decoded
@@ -139,5 +154,6 @@ public final class AppSettings {
         static let legacyOptionMapping = "optionMapping"
         static let legacyCommandMapping = "commandMapping"
         static let toggleShortcut = "toggleShortcut"
+        static let virtualRowSendsModifiers = "virtualRowSendsModifiers"
     }
 }

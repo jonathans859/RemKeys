@@ -50,6 +50,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Left and right keys map independently — for a key right of Space that should act as AltGr, set only that side. Not sure which side a key reports as? Press it and check Last key seen in Diagnostics. Shift and Control always map to Windows Shift and Control.")
                 }
+                virtualInputSection
             }
             .navigationTitle("Settings")
         }
@@ -95,6 +96,20 @@ struct SettingsView: View {
             Text("Forwarding toggle shortcut")
         } footer: {
             Text("Optional. A physical keyboard shortcut that turns forwarding on and off. Leave as None to use the on-screen button or a two-finger double tap.")
+        }
+    }
+
+    private var virtualInputSection: some View {
+        Section {
+            Toggle("Rows send with modifiers", isOn: Binding(
+                get: { settings.virtualRowSendsModifiers },
+                set: { settings.virtualRowSendsModifiers = $0 }
+            ))
+            .accessibilityHint("Applies to the immediate send when selecting a key on a Virtual Input row")
+        } header: {
+            Text("Virtual input")
+        } footer: {
+            Text("Selecting a key on a Virtual Input row sends it immediately. When this is on, that key is wrapped in the modifiers currently toggled on — fast Control or Shift plus arrows. When off, rows send the bare key and modifiers only apply through the Send button.")
         }
     }
 
