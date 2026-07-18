@@ -14,8 +14,10 @@ enum HIDToVK {
 
     static func vk(
         for key: UIKey,
-        optionMapping: ModifierMapping,
-        commandMapping: ModifierMapping
+        leftOptionMapping: ModifierMapping,
+        rightOptionMapping: ModifierMapping,
+        leftCommandMapping: ModifierMapping,
+        rightCommandMapping: ModifierMapping
     ) -> UInt16? {
         switch key.keyCode {
         // MARK: Letters
@@ -150,12 +152,13 @@ enum HIDToVK {
             return VK.shift
         case .keyboardLeftControl, .keyboardRightControl:
             return VK.control
-        case .keyboardLeftAlt, .keyboardRightAlt:
-            // iOS "Option" → configurable Windows modifier.
-            return optionMapping.vk
-        case .keyboardLeftGUI, .keyboardRightGUI:
-            // iOS "Command" → configurable Windows modifier.
-            return commandMapping.vk
+        // Option and Command map per physical side: PC-style keyboards
+        // present their right-of-space cluster as the *right* variants, and
+        // e.g. AltGr only makes sense on the right key.
+        case .keyboardLeftAlt: return leftOptionMapping.vk
+        case .keyboardRightAlt: return rightOptionMapping.vk
+        case .keyboardLeftGUI: return leftCommandMapping.vk
+        case .keyboardRightGUI: return rightCommandMapping.vk
 
         default:
             return nil

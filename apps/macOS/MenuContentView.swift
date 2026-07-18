@@ -107,9 +107,12 @@ struct MenuContentView: View {
             mappingPicker("Right Option", Binding(
                 get: { settings.rightOptionMapping },
                 set: { settings.rightOptionMapping = $0 }))
-            mappingPicker("Command", Binding(
-                get: { settings.commandMapping },
-                set: { settings.commandMapping = $0 }))
+            mappingPicker("Left Command", Binding(
+                get: { settings.leftCommandMapping },
+                set: { settings.leftCommandMapping = $0 }))
+            mappingPicker("Right Command", Binding(
+                get: { settings.rightCommandMapping },
+                set: { settings.rightCommandMapping = $0 }))
 
             Divider()
             toggleShortcutControl

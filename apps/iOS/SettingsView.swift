@@ -15,25 +15,41 @@ struct SettingsView: View {
                 toggleShortcutSection
                 Section {
                     mappingPicker(
-                        title: "Option key",
+                        title: "Left Option",
                         selection: Binding(
-                            get: { settings.optionMapping },
-                            set: { settings.optionMapping = $0 }
+                            get: { settings.leftOptionMapping },
+                            set: { settings.leftOptionMapping = $0 }
                         ),
-                        hint: "Where the Option key lands on the Windows PC"
+                        hint: "Where the left Option key lands on the Windows PC"
                     )
                     mappingPicker(
-                        title: "Command key",
+                        title: "Right Option",
                         selection: Binding(
-                            get: { settings.commandMapping },
-                            set: { settings.commandMapping = $0 }
+                            get: { settings.rightOptionMapping },
+                            set: { settings.rightOptionMapping = $0 }
                         ),
-                        hint: "Where the Command key lands on the Windows PC"
+                        hint: "Where the right Option key lands on the Windows PC"
+                    )
+                    mappingPicker(
+                        title: "Left Command",
+                        selection: Binding(
+                            get: { settings.leftCommandMapping },
+                            set: { settings.leftCommandMapping = $0 }
+                        ),
+                        hint: "Where the left Command key lands on the Windows PC"
+                    )
+                    mappingPicker(
+                        title: "Right Command",
+                        selection: Binding(
+                            get: { settings.rightCommandMapping },
+                            set: { settings.rightCommandMapping = $0 }
+                        ),
+                        hint: "Where the right Command key lands on the Windows PC"
                     )
                 } header: {
                     Text("Modifier mapping")
                 } footer: {
-                    Text("Shift and Control always map to Windows Shift and Control.")
+                    Text("Left and right keys map independently — for a key right of Space that should act as AltGr, set only that side. Not sure which side a key reports as? Press it and check Last key seen in Diagnostics. Shift and Control always map to Windows Shift and Control.")
                 }
             }
             .navigationTitle("Settings")

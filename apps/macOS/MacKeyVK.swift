@@ -16,7 +16,8 @@ enum MacKeyVK {
         forKeyCode keyCode: CGKeyCode,
         leftOptionMapping: ModifierMapping,
         rightOptionMapping: ModifierMapping,
-        commandMapping: ModifierMapping
+        leftCommandMapping: ModifierMapping,
+        rightCommandMapping: ModifierMapping
     ) -> UInt16? {
         switch keyCode {
         // MARK: Letters
@@ -144,7 +145,8 @@ enum MacKeyVK {
         case 0x3B, 0x3E: return VK.control      // Left / Right Control
         case 0x3A: return leftOptionMapping.vk  // Left Option
         case 0x3D: return rightOptionMapping.vk // Right Option
-        case 0x37, 0x36: return commandMapping.vk // Left / Right Command
+        case 0x37: return leftCommandMapping.vk  // Left Command
+        case 0x36: return rightCommandMapping.vk // Right Command
         // Caps Lock is handled via the HID hook (real down/up); it never
         // reaches this table for forwarding.
 

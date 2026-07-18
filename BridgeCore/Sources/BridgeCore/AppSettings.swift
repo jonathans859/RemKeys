@@ -53,28 +53,31 @@ public final class AppSettings {
         didSet { defaults.set(targetPort, forKey: Keys.targetPort) }
     }
 
-    // MARK: iOS modifier mappings
+    // MARK: Modifier mappings (per physical side, both platforms)
 
-    /// iOS Option (Alt) key → Windows modifier.
-    public var optionMapping: ModifierMapping {
-        didSet { defaults.set(optionMapping.rawValue, forKey: Keys.optionMapping) }
-    }
+    // Left and right are mapped independently on every configurable modifier:
+    // keyboards with a PC-style right-of-space cluster present those keys as
+    // *right* Option/Command, and e.g. "right Option = AltGr, left Option =
+    // Alt" is only expressible with per-side settings.
 
-    /// iOS Command (GUI) key → Windows modifier.
-    public var commandMapping: ModifierMapping {
-        didSet { defaults.set(commandMapping.rawValue, forKey: Keys.commandMapping) }
-    }
-
-    // MARK: macOS modifier mappings
-
-    /// macOS left Option → Windows modifier.
+    /// Left Option (Alt) key → Windows modifier.
     public var leftOptionMapping: ModifierMapping {
         didSet { defaults.set(leftOptionMapping.rawValue, forKey: Keys.leftOptionMapping) }
     }
 
-    /// macOS right Option → Windows modifier.
+    /// Right Option (Alt) key → Windows modifier.
     public var rightOptionMapping: ModifierMapping {
         didSet { defaults.set(rightOptionMapping.rawValue, forKey: Keys.rightOptionMapping) }
+    }
+
+    /// Left Command (GUI) key → Windows modifier.
+    public var leftCommandMapping: ModifierMapping {
+        didSet { defaults.set(leftCommandMapping.rawValue, forKey: Keys.leftCommandMapping) }
+    }
+
+    /// Right Command (GUI) key → Windows modifier.
+    public var rightCommandMapping: ModifierMapping {
+        didSet { defaults.set(rightCommandMapping.rawValue, forKey: Keys.rightCommandMapping) }
     }
 
     // MARK: Forwarding toggle shortcut
@@ -96,10 +99,18 @@ public final class AppSettings {
         self.targetHost = defaults.string(forKey: Keys.targetHost) ?? ""
         let storedPort = defaults.integer(forKey: Keys.targetPort)
         self.targetPort = storedPort == 0 ? 5391 : storedPort
-        self.optionMapping = ModifierMapping(rawValue: defaults.string(forKey: Keys.optionMapping) ?? "") ?? .alt
-        self.commandMapping = ModifierMapping(rawValue: defaults.string(forKey: Keys.commandMapping) ?? "") ?? .control
-        self.leftOptionMapping = ModifierMapping(rawValue: defaults.string(forKey: Keys.leftOptionMapping) ?? "") ?? .alt
-        self.rightOptionMapping = ModifierMapping(rawValue: defaults.string(forKey: Keys.rightOptionMapping) ?? "") ?? .alt
+        // Migration: installs that predate per-side mappings stored a single
+        // value per modifier ("optionMapping"/"commandMapping"); it seeds both
+        // sides so remapping one side is a fresh, deliberate act.
+        func mapping(_ key: String, legacy: String, default def: ModifierMapping) -> ModifierMapping {
+            ModifierMapping(rawValue: defaults.string(forKey: key) ?? "")
+                ?? ModifierMapping(rawValue: defaults.string(forKey: legacy) ?? "")
+                ?? def
+        }
+        self.leftOptionMapping = mapping(Keys.leftOptionMapping, legacy: Keys.legacyOptionMapping, default: .alt)
+        self.rightOptionMapping = mapping(Keys.rightOptionMapping, legacy: Keys.legacyOptionMapping, default: .alt)
+        self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
+        self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         if let data = defaults.data(forKey: Keys.toggleShortcut),
            let decoded = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
             self.toggleShortcut = decoded
@@ -120,10 +131,13 @@ public final class AppSettings {
     private enum Keys {
         static let targetHost = "targetHost"
         static let targetPort = "targetPort"
-        static let optionMapping = "optionMapping"
-        static let commandMapping = "commandMapping"
         static let leftOptionMapping = "leftOptionMapping"
         static let rightOptionMapping = "rightOptionMapping"
+        static let leftCommandMapping = "leftCommandMapping"
+        static let rightCommandMapping = "rightCommandMapping"
+        // Pre-per-side keys, read once for migration, never written.
+        static let legacyOptionMapping = "optionMapping"
+        static let legacyCommandMapping = "commandMapping"
         static let toggleShortcut = "toggleShortcut"
     }
 }

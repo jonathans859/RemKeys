@@ -172,12 +172,16 @@ final class CaptureView: UIView {
     @discardableResult
     private func forward(_ presses: Set<UIPress>, pressed: Bool) -> Bool {
         guard let bridge, bridge.forwardingEnabled else { return false }
-        let optionMap = settings?.optionMapping ?? .alt
-        let commandMap = settings?.commandMapping ?? .alt
         var claimed = false
         for press in presses {
             guard let key = press.key else { continue }
-            guard let vk = HIDToVK.vk(for: key, optionMapping: optionMap, commandMapping: commandMap) else {
+            guard let vk = HIDToVK.vk(
+                for: key,
+                leftOptionMapping: settings?.leftOptionMapping ?? .alt,
+                rightOptionMapping: settings?.rightOptionMapping ?? .alt,
+                leftCommandMapping: settings?.leftCommandMapping ?? .control,
+                rightCommandMapping: settings?.rightCommandMapping ?? .control
+            ) else {
                 // Unmapped key: log so gaps are visible during testing, never
                 // silently dropped.
                 HIDToVK.logUnmapped(key)

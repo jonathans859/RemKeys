@@ -251,7 +251,8 @@ final class KeyCapture {
                 forKeyCode: keyCode,
                 leftOptionMapping: settings.leftOptionMapping,
                 rightOptionMapping: settings.rightOptionMapping,
-                commandMapping: settings.commandMapping
+                leftCommandMapping: settings.leftCommandMapping,
+                rightCommandMapping: settings.rightCommandMapping
             ) {
                 bridge.sendKey(vk: vk, pressed: type == .keyDown)
             }
@@ -289,7 +290,8 @@ final class KeyCapture {
             forKeyCode: keyCode,
             leftOptionMapping: settings.leftOptionMapping,
             rightOptionMapping: settings.rightOptionMapping,
-            commandMapping: settings.commandMapping
+            leftCommandMapping: settings.leftCommandMapping,
+            rightCommandMapping: settings.rightCommandMapping
         ) {
             bridge.sendKey(vk: vk, pressed: pressed)
         }

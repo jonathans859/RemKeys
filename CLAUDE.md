@@ -43,9 +43,12 @@ services. Don't "fix" the mismatch in either direction.
   media keys. **Anything unmapped is logged, never silently dropped**, so gaps
   are visible during on-device testing.
 - **Modifier mapping is configurable** because there is no fixed correct
-  mapping between the Apple and Windows layouts. iOS Option/Command and macOS
-  left/right Option + Command each route through a `ModifierMapping`
-  (`Alt`/`Control`/`Windows key`/`AltGr`). AltGr exists because on e.g. German
+  mapping between the Apple and Windows layouts. Option and Command each map
+  **per physical side** on both platforms — four `ModifierMapping` settings
+  (`Alt`/`Control`/`Windows key`/`AltGr`): left/right Option, left/right
+  Command. Per-side matters because PC-style boards present the right-of-space
+  cluster as *right* Option/Command, and "right Option = AltGr" must not drag
+  left Option along (single-mapping installs migrate by seeding both sides). AltGr exists because on e.g. German
   PC layouts it is the only way to type @ € { } [ ] \. Shift and Control
   always map straight across. Note: Logitech multi-OS keyboards (MX Keys)
   present their Win-labeled key to Apple hosts as *Command*, so "Windows key
