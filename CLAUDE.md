@@ -21,7 +21,7 @@ services. Don't "fix" the mismatch in either direction.
 | Component | Path | Role |
 |---|---|---|
 | **BridgeCore** | `BridgeCore/` | Shared Swift package: wire format, Windows VK constants, settings, network client. Used by both apps. |
-| **iOS app** | `apps/iOS/` | SwiftUI app. Captures an external keyboard via a first-responder `UIView` and forwards while foreground. |
+| **iOS app** | `apps/iOS/` | SwiftUI app, three tabs: Start (captures an external keyboard via a first-responder `UIView`, forwards while foreground), Virtual Input (on-screen key sender, no physical keyboard needed), Settings. |
 | **macOS app** | `apps/macOS/` | Menu-bar (`LSUIElement`) app. System-wide capture via `CGEventTap` + `IOHIDManager`. |
 | **Windows agent** | `windows-agent/` | C#/.NET 8 Worker Service. Listens on TCP, replays keystrokes via `SendInput`. |
 
@@ -30,10 +30,13 @@ services. Don't "fix" the mismatch in either direction.
 - **One repo, one Xcode project, two app targets** sharing `BridgeCore`.
   Platform-specific capture (CGEventTap on macOS, UIResponder on iOS) and UI
   (menu bar vs. iOS screens) live outside the shared core, in `apps/`.
-- **Wire format is plain text lines**, one per key transition:
-  `key <vk> pressed=<0|1>\n`. `<vk>` is a decimal Windows virtual-key code.
-  The `key … pressed=…` naming is a convention carried over from an old
-  prototype — not an integration point with anything. Defined once in
+- **Wire format is plain text lines**, one per event. Two line types:
+  `key <vk> pressed=<0|1>\n` (one physical key transition; `<vk>` is a decimal
+  Windows virtual-key code) and `char <codepoint>\n` (one Unicode character to
+  type, injected as a down+up pair via `KEYEVENTF_UNICODE`, layout-independent
+  — used by the iOS virtual-input tab for plain text). The `key … pressed=…`
+  naming is a convention carried over from an old prototype — not an
+  integration point with anything. Defined once in
   `BridgeCore/Sources/BridgeCore/KeyEvent.swift`; the C# mirror is
   `windows-agent/WireProtocol.cs` (keep them in sync).
 - **Complete, explicit key mapping tables**, not a "common subset":
@@ -91,6 +94,21 @@ services. Don't "fix" the mismatch in either direction.
   state, holds the idle timer off while forwarding, and stops forwarding when
   the app leaves the foreground (so the remote never keeps a half-held chord).
 
+### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
+- On-screen key sender (iOS-only tab), VoiceOver-first: modifier `Toggle`s
+  (multi-select), single-select key buttons in horizontally scrolling
+  category rows, a text field, a "will send" readout, and Send (also magic
+  tap on that tab). Selection clears after sending.
+- Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
+  involved; AltGr is just `VK_RMENU`.
+- Sending rides the same connection as forwarding (`forwardingEnabled` on +
+  connected). If off, Send turns it on and asks the user to re-trigger —
+  deliberately no queuing of the combo.
+- Text rules: **no modifiers → `char` unicode lines** (layout-proof, umlauts
+  work); **with modifiers → US-position VKs** via `USCharVK` (shortcut
+  semantics, Shift-wrapped as needed, unmappable characters skipped and
+  announced).
+
 ### macOS (`apps/macOS/KeyCapture.swift`)
 - **`CGEventTap` at `.cghidEventTap`** sees every keyDown/keyUp/flagsChanged
   before any app or the system, and (with `.defaultTap`) swallows them while
@@ -112,7 +130,8 @@ services. Don't "fix" the mismatch in either direction.
 - Every control has a label/hint; no state is conveyed by color/visuals alone.
 - **iOS**: state changes are announced via `UIAccessibility.post(.announcement)`
   (forwarding on/off, connection status). Magic tap (two-finger double tap)
-  toggles forwarding from anywhere.
+  lives on the root tab view and routes by tab: on Virtual Input it sends the
+  built combination, elsewhere it toggles forwarding.
 - **macOS**: NSAccessibility announcements are unreliable from a menu-bar
   (`LSUIElement`) app, so state rides **three** redundant channels
   (`AppModel.swift`): a distinct **audio cue** per event, an announcement

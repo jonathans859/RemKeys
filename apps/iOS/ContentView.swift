@@ -2,19 +2,19 @@ import SwiftUI
 import UIKit
 import BridgeCore
 
-/// Root iOS screen.
+/// Start tab: forwarding status, connection target, and the physical capture
+/// surface.
 ///
 /// Physical keyboard input only reaches an iOS app while it is foreground and
 /// the screen is on — a sandbox restriction with no background workaround. The
 /// UI is therefore built around a clear, always-visible "forwarding active"
 /// state, and the idle timer is held off while forwarding so the screen never
-/// sleeps out from under the user.
+/// sleeps out from under the user. App-wide behavior (magic tap, scene-phase
+/// stop, bridge callbacks) lives in `RootTabView`.
 struct ContentView: View {
     let settings: AppSettings
     let bridge: BridgeClient
 
-    @State private var showingSettings = false
-    @Environment(\.scenePhase) private var scenePhase
     private var diagnostics: CaptureDiagnostics { .shared }
 
     private var isForwarding: Bool { bridge.forwardingEnabled }
@@ -35,35 +35,6 @@ struct ContentView: View {
                     diagnosticsSection
                 }
                 .navigationTitle("RemKeys")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showingSettings = true
-                        } label: {
-                            Label("Settings", systemImage: "gearshape")
-                        }
-                        .accessibilityLabel("Settings")
-                        .accessibilityHint("Modifier key mappings")
-                    }
-                }
-                .sheet(isPresented: $showingSettings, onDismiss: {
-                    // A text field in settings stole first responder; give it
-                    // back to the capture view so keys flow again.
-                    CaptureView.requestReclaim()
-                }) {
-                    SettingsView(settings: settings)
-                }
-            }
-        }
-        // The app's single most important toggle — reachable from anywhere in
-        // the screen with a two-finger double tap.
-        .accessibilityAction(.magicTap) { toggleForwarding() }
-        .onAppear { wireUpBridge() }
-        .onChange(of: scenePhase) { _, phase in
-            // Leaving the foreground means we can't capture anyway; stop
-            // forwarding so the remote never sits with a half-held chord.
-            if phase != .active, bridge.forwardingEnabled {
-                bridge.forwardingEnabled = false
             }
         }
     }
@@ -139,7 +110,7 @@ struct ContentView: View {
                 ? "Stops sending keystrokes to the Windows PC"
                 : "Connects and starts sending keystrokes to the Windows PC")
         } footer: {
-            Text("Tip: two-finger double tap anywhere toggles forwarding.")
+            Text("Tip: two-finger double tap anywhere toggles forwarding. On the Virtual Input tab, the same gesture sends the built combination instead.")
         }
     }
 
@@ -194,21 +165,5 @@ struct ContentView: View {
         bridge.forwardingEnabled.toggle()
         // Take the hardware keyboard back after the button press moved focus.
         CaptureView.requestReclaim()
-    }
-
-    /// Wire bridge callbacks to VoiceOver announcements and the idle timer.
-    /// Announcements are the accessible channel for state a sighted user reads
-    /// off the border/icon.
-    private func wireUpBridge() {
-        bridge.forwardingDidChange = { enabled in
-            UIApplication.shared.isIdleTimerDisabled = enabled
-            UIAccessibility.post(
-                notification: .announcement,
-                argument: enabled ? "Forwarding on" : "Forwarding off"
-            )
-        }
-        bridge.statusDidChange = { status in
-            UIAccessibility.post(notification: .announcement, argument: status.announcement)
-        }
     }
 }

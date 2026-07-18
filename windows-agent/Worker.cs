@@ -120,6 +120,13 @@ public sealed class Worker : BackgroundService
                 _logger.LogWarning("SendInput rejected vk={Vk} pressed={Pressed}.", vk, pressed);
             }
         }
+        else if (WireProtocol.TryParseChar(line, out var codepoint))
+        {
+            if (!KeystrokeInjector.SendUnicode(codepoint))
+            {
+                _logger.LogWarning("SendInput rejected unicode codepoint={Codepoint}.", codepoint);
+            }
+        }
         else if (line.Trim().Length > 0)
         {
             // Unparseable, non-blank line: surface it rather than dropping it

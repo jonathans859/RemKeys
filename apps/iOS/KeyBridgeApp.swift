@@ -14,7 +14,7 @@ struct KeyBridgeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(settings: settings, bridge: bridge)
+            RootTabView(settings: settings, bridge: bridge)
         }
     }
 }

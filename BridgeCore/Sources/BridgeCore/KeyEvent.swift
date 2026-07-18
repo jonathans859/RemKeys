@@ -44,3 +44,39 @@ public struct KeyEvent: Equatable, Sendable {
         return KeyEvent(vk: vk, pressed: fields[2] == "pressed=1")
     }
 }
+
+/// One character to *type* on the remote, independent of either side's
+/// keyboard layout. Wire format is one line per character:
+///
+///     char <codepoint>\n
+///
+/// `<codepoint>` is the decimal Unicode scalar value. The agent injects it as
+/// a full down+up pair via `SendInput`'s `KEYEVENTF_UNICODE` path, so "ü"
+/// types "ü" on any Windows layout. Used by the iOS virtual-input screen for
+/// plain text; key *combinations* stay on the positional `key` VK path,
+/// because shortcut handling in Windows apps matches keys, not characters.
+public struct CharEvent: Equatable, Sendable {
+    public let scalar: Unicode.Scalar
+
+    public init(scalar: Unicode.Scalar) {
+        self.scalar = scalar
+    }
+
+    /// The exact bytes to write, including the trailing newline framing.
+    public var wireLine: String {
+        "char \(scalar.value)\n"
+    }
+
+    public var wireData: Data {
+        Data(wireLine.utf8)
+    }
+
+    /// Parse a single wire line. Same tolerance rules as `KeyEvent.parse`;
+    /// mirrors the C# parser in the Windows agent — keep the two in sync.
+    public static func parse(_ line: some StringProtocol) -> CharEvent? {
+        let fields = line.split(whereSeparator: { $0.isWhitespace })
+        guard fields.count == 2, fields[0] == "char" else { return nil }
+        guard let value = UInt32(fields[1]), let scalar = Unicode.Scalar(value) else { return nil }
+        return CharEvent(scalar: scalar)
+    }
+}

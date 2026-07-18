@@ -80,6 +80,15 @@ public final class BridgeClient {
         send(KeyEvent(vk: vk, pressed: pressed))
     }
 
+    /// Type one character on the remote via the layout-independent unicode
+    /// path (`char` wire line). The agent injects a full down+up, so there is
+    /// no held-key bookkeeping. Same gating as `sendKey`.
+    public func sendCharacter(_ scalar: Unicode.Scalar) {
+        guard forwardingEnabled else { return }
+        guard let connection, status.isConnected else { return }
+        connection.send(content: CharEvent(scalar: scalar).wireData, completion: .contentProcessed { _ in })
+    }
+
     private func send(_ event: KeyEvent) {
         guard let connection, status.isConnected else { return }
         connection.send(content: event.wireData, completion: .contentProcessed { _ in })

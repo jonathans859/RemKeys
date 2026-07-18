@@ -13,6 +13,7 @@ public static class KeystrokeInjector
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
     private const uint KEYEVENTF_SCANCODE = 0x0008;
 
     /// <summary>
@@ -188,6 +189,43 @@ public static class KeystrokeInjector
         uint sent = SendInput(1, inputs, Marshal.SizeOf<INPUT>());
         return sent == 1;
     }
+
+    /// <summary>
+    /// Type one Unicode character (full down+up) via KEYEVENTF_UNICODE, which
+    /// delivers the character itself regardless of the active layout — the
+    /// path for the iOS virtual-input screen's plain text, where "ü" must be
+    /// "ü" and not whatever key sits at that position. Characters outside the
+    /// BMP go out as their surrogate pair, which is exactly what the unicode
+    /// injection path expects in wScan.
+    /// </summary>
+    public static bool SendUnicode(int codepoint)
+    {
+        string units = char.ConvertFromUtf32(codepoint);
+        var inputs = new INPUT[units.Length * 2];
+        for (int i = 0; i < units.Length; i++)
+        {
+            inputs[i] = UnicodeInput(units[i], up: false);
+            inputs[units.Length + i] = UnicodeInput(units[i], up: true);
+        }
+        uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        return sent == inputs.Length;
+    }
+
+    private static INPUT UnicodeInput(char unit, bool up) => new()
+    {
+        type = INPUT_KEYBOARD,
+        U = new InputUnion
+        {
+            ki = new KEYBDINPUT
+            {
+                wVk = 0,
+                wScan = unit,
+                dwFlags = KEYEVENTF_UNICODE | (up ? KEYEVENTF_KEYUP : 0u),
+                time = 0,
+                dwExtraInfo = IntPtr.Zero,
+            }
+        }
+    };
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

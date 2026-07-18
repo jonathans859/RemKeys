@@ -6,7 +6,6 @@ import BridgeCore
 /// to a Windows modifier the user chooses.
 struct SettingsView: View {
     let settings: AppSettings
-    @Environment(\.dismiss) private var dismiss
     @State private var isRecordingShortcut = false
 
     var body: some View {
@@ -53,11 +52,6 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
         }
     }
 
