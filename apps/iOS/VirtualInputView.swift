@@ -79,13 +79,15 @@ struct VirtualInputView: View {
                 modifierBrowseIndex = adjusted(modifierBrowseIndex, direction, count: VirtualKeys.modifiers.count)
             }
             .accessibilityAction {
+                // No custom announcement here: the value flips to
+                // "<name>, on/off" and VoiceOver speaks that on its own —
+                // any announcement posted alongside clips it mid-sentence
+                // (field-tested, including with low/queued priority).
                 let modifier = VirtualKeys.modifiers[modifierBrowseIndex]
                 if selectedModifiers.contains(modifier.vk) {
                     selectedModifiers.remove(modifier.vk)
-                    announce("\(modifier.name) off")
                 } else {
                     selectedModifiers.insert(modifier.vk)
-                    announce("\(modifier.name) on")
                 }
             }
         } header: {
@@ -115,14 +117,10 @@ struct VirtualInputView: View {
                     keyBrowseIndices[category.id, default: 0], direction, count: category.keys.count)
             }
             .accessibilityAction {
+                // Same as the modifier row: the value change speaks for
+                // itself, a custom announcement would clip it.
                 let key = category.keys[keyBrowseIndices[category.id, default: 0]]
-                if selectedKey == key {
-                    selectedKey = nil
-                    announce("\(key.name) removed")
-                } else {
-                    selectedKey = key
-                    announce("\(key.name) selected")
-                }
+                selectedKey = selectedKey == key ? nil : key
             }
         } header: {
             Text(category.title).accessibilityHidden(true)
