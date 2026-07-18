@@ -26,6 +26,24 @@ platform :ios do
   desc "Build and upload the iOS app to TestFlight"
   lane :ios_beta do
     api_key = ci_api_key
+    setup_ci
+
+    # Import the one cached Apple Development certificate (base64 .p12 secret)
+    # so Xcode's cloud signing finds a valid identity and reuses it. Without
+    # this, every CI run minted a fresh certificate — the account hit Apple's
+    # certificate cap on 2026-07-18 and archiving died with "Choose a
+    # certificate to revoke". Cloud signing itself stays on (it still manages
+    # the provisioning profile); only the certificate is pinned.
+    require "base64"
+    require "tmpdir"
+    dev_p12_path = File.join(Dir.tmpdir, "ios_dev.p12")
+    File.binwrite(dev_p12_path, Base64.decode64(ENV.fetch("IOS_DEV_P12")))
+    import_certificate(
+      certificate_path: dev_p12_path,
+      certificate_password: ENV.fetch("IOS_DEV_P12_PASSWORD"),
+      keychain_name: ENV["MATCH_KEYCHAIN_NAME"] || "fastlane_tmp_keychain",
+      keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || ""
+    )
 
     update_code_signing_settings(
       use_automatic_signing: true,

@@ -209,8 +209,13 @@ Then, from the publish output, **as Administrator**: `install-agent.bat`
 must not be a service).
 
 ## CI/CD & distribution
-- `.github/workflows/ci.yml` — every push/PR: BridgeCore tests + unsigned
-  builds of both apps + a Windows agent build. No secrets.
+- `.github/workflows/ci.yml` — every push/PR: BridgeCore tests + an unsigned
+  macOS app build (one macOS job — jobs bill separately and macOS is 10x) +
+  a Windows agent build on ubuntu (1x vs 2x on windows). No secrets.
+  **No iOS build in CI on purpose**: deploy-ios compiles the same code
+  against the real SDK on every main push, so a simulator build was
+  redundant billed minutes. Jonathan is cost-sensitive about Actions
+  minutes — don't add macOS jobs casually.
 - **Continuous per-platform deploys**, path-filtered so each fires only when
   its platform (or a shared input: `BridgeCore/**`, `project.yml`,
   `fastlane/**`) changed. All three also fire on Release publish and attach
@@ -219,7 +224,9 @@ must not be a service).
     a group with automatic distribution). Runs on `macos-26`: ASC's SDK floor
     applies to uploads only, so ci.yml stays on the stabler `macos-15`.
   - `deploy-macos.yml` — push to main → Developer ID-signed, notarized zip as
-    a run artifact (and Release asset on release).
+    a run artifact (and Release asset on release). **Currently disabled**
+    (`gh workflow disable`) — its `DEVID_P12_PASSWORD` secret is wrong, so
+    every run failed at signing on billed minutes; re-enable once fixed.
   - `deploy-windows.yml` — push to main → agent zip as a run artifact (and
     Release asset on release).
 - fastlane lanes: `ios ios_beta`, `mac mac_release` (`fastlane/Fastfile`).
@@ -242,6 +249,12 @@ to TestFlight.
 ### Secrets (all set in the repo as of 2026-07-17)
 - iOS TestFlight + macOS notarization: `ASC_KEY_ID`, `ASC_ISSUER_ID`,
   `ASC_KEY_P8` (App Store Connect API key), `APPLE_TEAM_ID`.
+- iOS signing: `IOS_DEV_P12` + `IOS_DEV_P12_PASSWORD` — ONE cached Apple
+  Development cert (key material in `~/Downloads/keybridge/ios_dev.*` on
+  Jonathan's PC, minted 2026-07-18 via the ASC API). Imported into the CI
+  keychain by the `ios_beta` lane so Xcode cloud signing reuses it; without
+  it every ephemeral runner minted a new certificate until the account hit
+  Apple's cap and archiving failed with "Choose a certificate to revoke".
 - macOS Developer ID signing: `DEVID_P12` (base64-encoded Developer ID
   Application `.p12`) and `DEVID_P12_PASSWORD`. The `mac_release` lane imports
   the cert into the CI keychain — no `match`, no certs repo.

@@ -22,11 +22,13 @@ on:
     types: [published]
   workflow_dispatch:
 
-# Serialize uploads: parallel pilot runs against one app record race ASC
-# processing. Queue, never cancel a run mid-upload.
+# One run at a time, and a newer push cancels a superseded run: parallel
+# pilot runs against one app record race ASC processing, and finishing a
+# stale archive is billed macOS minutes for a build nobody will install
+# (a cancelled mid-upload build is simply discarded by ASC).
 concurrency:
   group: deploy-ios
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   testflight:
@@ -42,9 +44,9 @@ jobs:
       - name: Select newest Xcode
         run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
       - uses: ruby/setup-ruby@v1
-        with: { ruby-version: '3.3' }
-      - name: Install gems
-        run: bundle install
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true   # installs the bundle and caches the gems
       - name: Install XcodeGen
         run: brew install xcodegen
       - run: xcodegen generate
@@ -59,6 +61,9 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Cached Apple Development cert — see the ios_beta lane.
+          IOS_DEV_P12: ${{ secrets.IOS_DEV_P12 }}
+          IOS_DEV_P12_PASSWORD: ${{ secrets.IOS_DEV_P12_PASSWORD }}
           # Becomes TestFlight's "What to Test" (raw text, not markdown).
           CHANGELOG: ${{ github.event_name == 'release' && github.event.release.body || github.event.head_commit.message }}
         run: bundle exec fastlane ios ios_beta
