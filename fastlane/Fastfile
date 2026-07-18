@@ -146,7 +146,9 @@ platform :mac do
       print_log: true
     )
 
-    # Zip the stapled app for the GitHub Release.
-    sh("cd output && ditto -c -k --keepParent RemKeys.app RemKeys-macOS.zip")
+    # Zip the stapled app for the GitHub Release. NB: fastlane's `sh` runs
+    # from fastlane/, unlike gym/notarize which resolve from the repo root —
+    # hence the ../.
+    sh("cd ../output && ditto -c -k --keepParent RemKeys.app RemKeys-macOS.zip")
   end
 end
