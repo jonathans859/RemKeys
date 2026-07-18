@@ -12,6 +12,17 @@
 
 default_platform(:ios)
 
+# `security import` reports a bad .p12 (wrong password OR an
+# OpenSSL-3-format file macOS can't read — build p12s with
+# -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1) without
+# failing the import_certificate step; the run then dies much later with a
+# misleading "no signing certificate" error. Fail fast instead. Bit us
+# twice (DEVID_P12 2026-07-17, IOS_DEV_P12 2026-07-18).
+def assert_identity_present(name)
+  identities = sh("security find-identity -v -p codesigning", log: false)
+  UI.user_error!("'#{name}' missing after import — bad .p12 password or format") unless identities.include?(name)
+end
+
 # Build the ASC API key once; it flows into pilot / notarize automatically.
 def ci_api_key
   app_store_connect_api_key(
@@ -44,6 +55,7 @@ platform :ios do
       keychain_name: ENV["MATCH_KEYCHAIN_NAME"] || "fastlane_tmp_keychain",
       keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || ""
     )
+    assert_identity_present("Apple Development")
 
     update_code_signing_settings(
       use_automatic_signing: true,
@@ -101,6 +113,7 @@ platform :mac do
       keychain_name: ENV["MATCH_KEYCHAIN_NAME"] || "fastlane_tmp_keychain",
       keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || ""
     )
+    assert_identity_present("Developer ID Application")
 
     # Manual Developer ID signing throughout: the CI keychain holds only the
     # imported Developer ID cert (no Apple Development cert, no ASC auth on

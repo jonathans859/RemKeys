@@ -11,10 +11,12 @@ Bundle id: `com.jonathan859.keybridge`.
 everything a user sees: display names, `PRODUCT_NAME` (so the bundle is
 `RemKeys.app` / `RemKeys.ipa`), in-app strings, permission-prompt text, the
 icon, and the macOS zip (`RemKeys-macOS.zip`). Internal names stay KeyBridge —
-repo, targets/schemes (`KeyBridge-iOS`/`-macOS`), bundle id, `BridgeCore`
+targets/schemes (`KeyBridge-iOS`/`-macOS`), bundle id, `BridgeCore`
 API names, and the Windows agent (`KeyBridgeAgent`, service name, its zip) —
 renaming those buys nothing and would churn CI, the ASC record, and installed
-services. Don't "fix" the mismatch in either direction.
+services. Don't "fix" the mismatch in either direction. (Exception: Jonathan
+renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
+`…/keybridge` URLs redirect.)
 
 ## What each piece does
 
@@ -258,6 +260,12 @@ to TestFlight.
 - macOS Developer ID signing: `DEVID_P12` (base64-encoded Developer ID
   Application `.p12`) and `DEVID_P12_PASSWORD`. The `mac_release` lane imports
   the cert into the CI keychain — no `match`, no certs repo.
+- **Any .p12 destined for CI must be exported in legacy format**
+  (`openssl pkcs12 -export … -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES
+  -macalg sha1`): macOS `security import` rejects OpenSSL 3's default
+  encoding with "MAC verification failed (wrong password?)" even when the
+  password is right, and `import_certificate` doesn't fail the run on it —
+  the lanes now assert the identity is present right after import.
 - Windows release: none.
 
 ## Current state
