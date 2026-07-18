@@ -96,12 +96,15 @@ services. Don't "fix" the mismatch in either direction.
 
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
 - On-screen key sender (iOS-only tab), VoiceOver-first: each category row
-  (modifiers, editing, navigation, F-keys) is exposed to VoiceOver as **one
-  adjustable element** — swipe up/down browses the row's keys, double tap
-  toggles (modifiers, multi-select) or selects (main key, single-select) —
-  per explicit user preference over per-key buttons; the visible buttons
+  (editing, navigation, F-keys) is exposed to VoiceOver as **one adjustable
+  element whose position IS the selection** — option 0 is "None", swipe
+  up/down lands on the key that row will send, no double tap (VoiceOver
+  activation is slow, field-reported twice; per-key buttons were rejected
+  first, then browse+double-tap). Multiple rows can each contribute a key,
+  tapped in row order. The **modifiers row alone** keeps browse +
+  double-tap-toggle because several can be on at once. Visible buttons
   serve touch only. Plus a text field, a "will send" readout, and Send
-  (also magic tap on that tab). Selection clears after sending.
+  (also magic tap on that tab). Everything resets after sending.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
   involved; AltGr is just `VK_RMENU`.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +

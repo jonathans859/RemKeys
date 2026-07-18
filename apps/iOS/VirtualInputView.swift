@@ -5,10 +5,13 @@ import BridgeCore
 /// On-screen key sender: build a key combination without a physical keyboard
 /// and ship it to the PC in one tap. VoiceOver-first by design:
 ///
-/// - Each key row is ONE adjustable element ("slider"): swipe up/down browses
-///   the row's keys, double tap toggles (modifiers, multi-select) or selects
-///   (main key, single-select) the current one. Left/right swipes jump
-///   between rows — 8 stops for the whole screen instead of one per key.
+/// - Each key row is ONE adjustable element ("slider") whose position IS the
+///   selection: option 0 is "None", swiping up/down lands on the key the row
+///   will send — no double tap involved (activation is slow under VoiceOver,
+///   field-reported). Rows reset to None after each send. The modifiers row
+///   is the exception: it keeps browse + double-tap-to-toggle because several
+///   modifiers can be on at once, which a single slider value can't express.
+///   Left/right swipes jump between rows — 8 stops for the whole screen.
 ///   The visible buttons remain for touch users only.
 /// - Plain text is typed into a normal text field and sent through the
 ///   layout-independent unicode path, so it types verbatim on any PC layout;
@@ -23,16 +26,15 @@ struct VirtualInputView: View {
     static let sendRequested = Notification.Name("KeyBridge.virtualInputSendRequested")
 
     @State private var selectedModifiers: Set<UInt16> = []
-    @State private var selectedKey: VirtualKey?
     @State private var text = ""
     @FocusState private var textFieldFocused: Bool
 
-    // VoiceOver browse cursors. Each key row is exposed as a single
-    // *adjustable* element (a "slider"): swipe up/down moves this cursor
-    // through the row's keys, double tap acts on the current one. One swipe
-    // stop per category instead of one per key.
+    // The modifiers row's VoiceOver browse cursor (browse + double-tap model,
+    // multi-select).
     @State private var modifierBrowseIndex = 0
-    @State private var keyBrowseIndices: [String: Int] = [:]
+    // Per-category slider position, 0 = "None", i = category.keys[i - 1].
+    // The position is the selection — what each row shows is what Send sends.
+    @State private var keySelectionIndices: [String: Int] = [:]
 
     var body: some View {
         NavigationStack {
@@ -101,26 +103,23 @@ struct VirtualInputView: View {
     }
 
     private func keySection(_ category: VirtualKeyCategory) -> some View {
-        let browsed = category.keys[keyBrowseIndices[category.id, default: 0]]
+        let index = keySelectionIndices[category.id, default: 0]
         return Section {
             keyRow {
                 ForEach(category.keys) { key in
-                    keyButton(key)
+                    keyButton(key, in: category)
                 }
             }
+            // The slider position is the selection: no double tap anywhere
+            // (activation is noticeably slow under VoiceOver). Option 0 is
+            // "None"; swiping to a key selects it, swiping back to None
+            // clears the row.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(category.title)
-            .accessibilityValue(selectedKey == browsed ? "\(browsed.name), selected" : browsed.name)
-            .accessibilityHint("Swipe up or down to move through the keys, double tap to make the current one the key to send. One key at a time, across all rows.")
+            .accessibilityValue(index == 0 ? "None" : category.keys[index - 1].name)
+            .accessibilityHint("Swipe up or down to choose the key this row sends. The first option, None, sends nothing.")
             .accessibilityAdjustableAction { direction in
-                keyBrowseIndices[category.id] = adjusted(
-                    keyBrowseIndices[category.id, default: 0], direction, count: category.keys.count)
-            }
-            .accessibilityAction {
-                // Same as the modifier row: the value change speaks for
-                // itself, a custom announcement would clip it.
-                let key = category.keys[keyBrowseIndices[category.id, default: 0]]
-                selectedKey = selectedKey == key ? nil : key
+                keySelectionIndices[category.id] = adjusted(index, direction, count: category.keys.count + 1)
             }
         } header: {
             Text(category.title).accessibilityHidden(true)
@@ -136,17 +135,16 @@ struct VirtualInputView: View {
         }
     }
 
-    private func keyButton(_ key: VirtualKey) -> some View {
-        let isSelected = selectedKey == key
+    /// Touch-only (VoiceOver sees the enclosing row, not the buttons): tap
+    /// selects the key in its row, tapping the selected key clears the row.
+    private func keyButton(_ key: VirtualKey, in category: VirtualKeyCategory) -> some View {
+        let position = (category.keys.firstIndex(of: key) ?? 0) + 1
+        let isSelected = keySelectionIndices[category.id, default: 0] == position
         return Button(key.name) {
-            selectedKey = isSelected ? nil : key
+            keySelectionIndices[category.id] = isSelected ? 0 : position
         }
         .buttonStyle(.bordered)
         .tint(isSelected ? Color.accentColor : nil)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityHint(isSelected
-            ? "Removes this key from the combination"
-            : "Makes this the key the combination sends. One key at a time.")
     }
 
     /// A horizontally scrolling "slider" of keys.
@@ -193,7 +191,7 @@ struct VirtualInputView: View {
             .disabled(!hasSomethingToSend)
             .accessibilityHint("Sends the combination to the Windows PC")
         } footer: {
-            Text("Tip: on this tab, a two-finger double tap sends the combination. The selection clears after sending.")
+            Text("Each row sends the key it shows; None sends nothing. Tip: on this tab, a two-finger double tap sends the combination. Everything resets after sending.")
         }
     }
 
@@ -203,8 +201,17 @@ struct VirtualInputView: View {
         VirtualKeys.modifiers.filter { selectedModifiers.contains($0.vk) }
     }
 
+    /// The key each row's slider currently shows (rows on "None" contribute
+    /// nothing), in row order — sent top to bottom.
+    private var selectedKeys: [VirtualKey] {
+        VirtualKeys.categories.compactMap { category in
+            let index = keySelectionIndices[category.id, default: 0]
+            return index > 0 ? category.keys[index - 1] : nil
+        }
+    }
+
     private var hasSomethingToSend: Bool {
-        !selectedModifiers.isEmpty || selectedKey != nil || !text.isEmpty
+        !selectedModifiers.isEmpty || !selectedKeys.isEmpty || !text.isEmpty
     }
 
     /// Human-readable spelling of exactly what Send will do, e.g.
@@ -212,7 +219,7 @@ struct VirtualInputView: View {
     private var comboDescription: String {
         var parts = orderedModifiers.map(\.name)
         if !text.isEmpty { parts.append("“\(text)”") }
-        if let selectedKey { parts.append(selectedKey.name) }
+        parts.append(contentsOf: selectedKeys.map(\.name))
         return parts.isEmpty ? "Nothing selected" : parts.joined(separator: " + ")
     }
 
@@ -262,11 +269,14 @@ struct VirtualInputView: View {
             }
         }
 
-        if let selectedKey { tap(selectedKey.vk) }
+        for key in selectedKeys { tap(key.vk) }
         for vk in modifiers.reversed() { bridge.sendKey(vk: vk, pressed: false) }
 
+        // Reset everything so the next combination starts clean: rows back
+        // to None, modifiers off, text cleared.
         selectedModifiers.removeAll()
-        selectedKey = nil
+        modifierBrowseIndex = 0
+        keySelectionIndices = [:]
         text = ""
 
         var confirmation = "Sent \(sentDescription)"
