@@ -95,10 +95,13 @@ services. Don't "fix" the mismatch in either direction.
   the app leaves the foreground (so the remote never keeps a half-held chord).
 
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
-- On-screen key sender (iOS-only tab), VoiceOver-first: modifier `Toggle`s
-  (multi-select), single-select key buttons in horizontally scrolling
-  category rows, a text field, a "will send" readout, and Send (also magic
-  tap on that tab). Selection clears after sending.
+- On-screen key sender (iOS-only tab), VoiceOver-first: each category row
+  (modifiers, editing, navigation, F-keys) is exposed to VoiceOver as **one
+  adjustable element** — swipe up/down browses the row's keys, double tap
+  toggles (modifiers, multi-select) or selects (main key, single-select) —
+  per explicit user preference over per-key buttons; the visible buttons
+  serve touch only. Plus a text field, a "will send" readout, and Send
+  (also magic tap on that tab). Selection clears after sending.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
   involved; AltGr is just `VK_RMENU`.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +

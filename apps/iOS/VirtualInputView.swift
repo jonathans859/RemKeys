@@ -5,9 +5,11 @@ import BridgeCore
 /// On-screen key sender: build a key combination without a physical keyboard
 /// and ship it to the PC in one tap. VoiceOver-first by design:
 ///
-/// - Modifiers are real `Toggle`s (announced as switches, multi-selectable).
-/// - Non-modifier keys are buttons carrying `.isSelected`; exactly one can be
-///   the combination's main key.
+/// - Each key row is ONE adjustable element ("slider"): swipe up/down browses
+///   the row's keys, double tap toggles (modifiers, multi-select) or selects
+///   (main key, single-select) the current one. Left/right swipes jump
+///   between rows — 8 stops for the whole screen instead of one per key.
+///   The visible buttons remain for touch users only.
 /// - Plain text is typed into a normal text field and sent through the
 ///   layout-independent unicode path, so it types verbatim on any PC layout;
 ///   when modifiers are held it switches to US-position keys, because
@@ -24,6 +26,13 @@ struct VirtualInputView: View {
     @State private var selectedKey: VirtualKey?
     @State private var text = ""
     @FocusState private var textFieldFocused: Bool
+
+    // VoiceOver browse cursors. Each key row is exposed as a single
+    // *adjustable* element (a "slider"): swipe up/down moves this cursor
+    // through the row's keys, double tap acts on the current one. One swipe
+    // stop per category instead of one per key.
+    @State private var modifierBrowseIndex = 0
+    @State private var keyBrowseIndices: [String: Int] = [:]
 
     var body: some View {
         NavigationStack {
@@ -57,23 +66,75 @@ struct VirtualInputView: View {
                     ))
                     .toggleStyle(.button)
                     .buttonStyle(.bordered)
-                    .accessibilityHint("Held down around the rest of the combination. Several can be on at once.")
+                }
+            }
+            // One adjustable element for the whole row: swipe up/down browses
+            // the modifiers, double tap toggles the current one. The visible
+            // toggles stay for touch; VoiceOver never sees them individually.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Modifiers")
+            .accessibilityValue(modifierBrowseValue)
+            .accessibilityHint("Swipe up or down to move through the modifiers, double tap to turn the current one on or off. Several can be on at once.")
+            .accessibilityAdjustableAction { direction in
+                modifierBrowseIndex = adjusted(modifierBrowseIndex, direction, count: VirtualKeys.modifiers.count)
+            }
+            .accessibilityAction {
+                let modifier = VirtualKeys.modifiers[modifierBrowseIndex]
+                if selectedModifiers.contains(modifier.vk) {
+                    selectedModifiers.remove(modifier.vk)
+                    announce("\(modifier.name) off")
+                } else {
+                    selectedModifiers.insert(modifier.vk)
+                    announce("\(modifier.name) on")
                 }
             }
         } header: {
-            Text("Modifiers").accessibilityAddTraits(.isHeader)
+            Text("Modifiers").accessibilityHidden(true)
         }
     }
 
+    private var modifierBrowseValue: String {
+        let modifier = VirtualKeys.modifiers[modifierBrowseIndex]
+        return "\(modifier.name), \(selectedModifiers.contains(modifier.vk) ? "on" : "off")"
+    }
+
     private func keySection(_ category: VirtualKeyCategory) -> some View {
-        Section {
+        let browsed = category.keys[keyBrowseIndices[category.id, default: 0]]
+        return Section {
             keyRow {
                 ForEach(category.keys) { key in
                     keyButton(key)
                 }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(category.title)
+            .accessibilityValue(selectedKey == browsed ? "\(browsed.name), selected" : browsed.name)
+            .accessibilityHint("Swipe up or down to move through the keys, double tap to make the current one the key to send. One key at a time, across all rows.")
+            .accessibilityAdjustableAction { direction in
+                keyBrowseIndices[category.id] = adjusted(
+                    keyBrowseIndices[category.id, default: 0], direction, count: category.keys.count)
+            }
+            .accessibilityAction {
+                let key = category.keys[keyBrowseIndices[category.id, default: 0]]
+                if selectedKey == key {
+                    selectedKey = nil
+                    announce("\(key.name) removed")
+                } else {
+                    selectedKey = key
+                    announce("\(key.name) selected")
+                }
+            }
         } header: {
-            Text(category.title).accessibilityAddTraits(.isHeader)
+            Text(category.title).accessibilityHidden(true)
+        }
+    }
+
+    /// Move a browse cursor one step, clamped to the row's ends.
+    private func adjusted(_ index: Int, _ direction: AccessibilityAdjustmentDirection, count: Int) -> Int {
+        switch direction {
+        case .increment: return min(index + 1, count - 1)
+        case .decrement: return max(index - 1, 0)
+        @unknown default: return index
         }
     }
 
