@@ -68,13 +68,10 @@ struct RootTabView: View {
     private func wireUpBridge() {
         bridge.forwardingDidChange = { enabled in
             UIApplication.shared.isIdleTimerDisabled = enabled
-            UIAccessibility.post(
-                notification: .announcement,
-                argument: enabled ? "Forwarding on" : "Forwarding off"
-            )
+            postQueuedAnnouncement(enabled ? "Forwarding on" : "Forwarding off")
         }
         bridge.statusDidChange = { status in
-            UIAccessibility.post(notification: .announcement, argument: status.announcement)
+            postQueuedAnnouncement(status.announcement)
         }
     }
 }

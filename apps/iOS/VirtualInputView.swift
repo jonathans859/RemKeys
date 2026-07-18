@@ -283,7 +283,9 @@ struct VirtualInputView: View {
         bridge.sendKey(vk: vk, pressed: false)
     }
 
+    /// Queued so it never clips the speech VoiceOver produces for the row's
+    /// own state change — see `postQueuedAnnouncement`.
     private func announce(_ message: String) {
-        UIAccessibility.post(notification: .announcement, argument: message)
+        postQueuedAnnouncement(message)
     }
 }
