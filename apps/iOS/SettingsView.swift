@@ -101,11 +101,6 @@ struct SettingsView: View {
 
     private var virtualInputSection: some View {
         Section {
-            Toggle("Rows send with modifiers", isOn: Binding(
-                get: { settings.virtualRowSendsModifiers },
-                set: { settings.virtualRowSendsModifiers = $0 }
-            ))
-            .accessibilityHint("Applies when double tapping a Virtual Input row to send its key")
             Toggle("Key pad uses slider gestures", isOn: Binding(
                 get: { settings.virtualPadSliderMode },
                 set: { settings.virtualPadSliderMode = $0 }
@@ -119,7 +114,7 @@ struct SettingsView: View {
         } header: {
             Text("Virtual input")
         } footer: {
-            Text("Double tapping a Virtual Input row sends the key it shows. When this is on, that key is wrapped in the modifiers currently toggled on — fast Control or Shift plus arrows. When off, rows send the bare key and modifiers only apply through the Send button. The key pad always applies the toggled modifiers.")
+            Text("Keys sent from the key pad are always wrapped in the modifiers currently toggled on.")
         }
     }
 

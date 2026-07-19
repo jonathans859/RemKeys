@@ -195,9 +195,47 @@ final class CaptureView: UIView {
         return claimed
     }
 
-    /// UIKit also offers `keyCommands` for Cmd-prefixed shortcuts. We don't
-    /// need that path because `pressesBegan` already gives us every key, but
-    /// returning an empty array prevents the system from synthesizing
-    /// menu-bar style shortcuts behind our back.
-    override var keyCommands: [UIKeyCommand]? { [] }
+    /// The iOS 26 system layer steals Cmd chords (Cmd+B/I/U and friends)
+    /// before `pressesBegan` — and stripping the default main menu in
+    /// `AppDelegate` was field-tested INSUFFICIENT (build 24, 2026-07-19):
+    /// B still never arrived. So while forwarding, the capture view claims
+    /// every Cmd and Cmd+Shift letter/digit chord itself via
+    /// `wantsPriorityOverSystemBehavior` — the documented way to take a key
+    /// from the system — and forwards a synthetic down+up for the main key
+    /// (the held modifiers were already forwarded as their own presses, so
+    /// the remote still sees the full chord). Tap-only semantics: a claimed
+    /// chord can't be held for key-repeat, which shortcuts don't need.
+    /// While forwarding is off the claim list is empty and the app behaves
+    /// normally. (Caveat: a recorded toggle shortcut of the form Cmd+letter
+    /// would be shadowed by the claim while forwarding is on.)
+    override var keyCommands: [UIKeyCommand]? {
+        guard bridge?.forwardingEnabled == true else { return [] }
+        return Self.claimedChords
+    }
+
+    private static let claimedChords: [UIKeyCommand] = {
+        let inputs = "abcdefghijklmnopqrstuvwxyz0123456789,.".map(String.init)
+        let modifierSets: [UIKeyModifierFlags] = [.command, [.command, .shift]]
+        return inputs.flatMap { input in
+            modifierSets.map { flags in
+                let command = UIKeyCommand(
+                    input: input,
+                    modifierFlags: flags,
+                    action: #selector(CaptureView.handleClaimedChord(_:))
+                )
+                command.wantsPriorityOverSystemBehavior = true
+                return command
+            }
+        }
+    }()
+
+    @objc private func handleClaimedChord(_ sender: UIKeyCommand) {
+        guard let bridge, bridge.forwardingEnabled,
+              let character = sender.input?.first,
+              let key = USCharVK.key(for: character) else { return }
+        bridge.sendKey(vk: key.vk, pressed: true)
+        bridge.sendKey(vk: key.vk, pressed: false)
+        diagnostics.eventsForwarded += 2
+        diagnostics.lastKey = "Chord \(sender.input?.uppercased() ?? "?")"
+    }
 }

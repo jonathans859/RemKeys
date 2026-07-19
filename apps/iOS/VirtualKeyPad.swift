@@ -5,8 +5,10 @@ import BridgeCore
 /// The direct-touch key pad: VoiceOver's slow gesture round-trip removed from
 /// the send path entirely. The pad is ONE accessibility element — the rest of
 /// the tab stays ordinary VoiceOver territory, so explore by touch and
-/// flicking between elements keep working; only inside the pad, after the
-/// user activates it (`.requiresActivation`), do raw touches reach the app.
+/// flicking between elements keep working. Inside the pad's frame, touches
+/// pass straight through to the app with no activation step (instant
+/// direct interaction, piano-app style — field-chosen over
+/// `.requiresActivation`).
 ///
 /// Two gesture models, chosen in Settings (`virtualPadSliderMode`):
 ///
@@ -18,19 +20,18 @@ import BridgeCore
 ///   VoiceOver's touch typing, and fixed positions build muscle memory.
 ///   An extra finger landing mid-drag aborts the drag, so nothing fires.
 /// - **Sliders (fallback):** one-finger swipe left/right moves between
-///   bands, up/down steps the band's value (0 = "None"), tap sends the
-///   band's current key; the modifiers band browses and tap-toggles.
-///   Two-finger swipe left resets the current band.
+///   bands, swipe down steps forward / up steps back (0 = "None"), tap
+///   sends the band's current key; the modifiers band browses and
+///   tap-toggles. Two-finger swipe left resets the current band.
 ///
 /// Both modes: two-finger tap clears all toggled modifiers. Success is
 /// silent (plus a light haptic); failures speak via the shared send path.
-/// Keys always send wrapped in the toggled modifiers — on the pad the
-/// modifier band makes that intent explicit, so `virtualRowSendsModifiers`
-/// (a row concern) deliberately does not apply here.
+/// Keys always send wrapped in the toggled modifiers — the pad's modifier
+/// band makes that intent explicit.
 struct VirtualKeyPad: UIViewRepresentable {
     let settings: AppSettings
-    /// Snapshot of the tab's toggled modifiers — the pad and the modifier
-    /// row share one state, so the "Will send" readout stays honest.
+    /// Snapshot of the tab's toggled modifiers — owned by the tab so the
+    /// "Will send" readout and Send stay honest.
     let selectedModifiers: Set<UInt16>
     let onToggleModifier: (VirtualKey) -> Void
     let onClearModifiers: () -> Void
@@ -136,11 +137,16 @@ final class KeyPadUIView: UIView {
 
         isAccessibilityElement = true
         accessibilityLabel = "Key pad"
-        // One element + requiresActivation is the whole safety story:
-        // exploring by touch across the pad can never fire anything; only
-        // after activating it do touches flow raw (and silently) to us.
+        // Instant pass-through (field-requested, 2026-07-19): touching the
+        // pad is direct interaction immediately — no activation step, the
+        // classic piano-app behavior. `.requiresActivation` was tried first
+        // and rejected as an extra hop. silentOnTouch keeps VoiceOver quiet
+        // so the pad's own announcements are the only voice. The trade:
+        // exploring by touch ACROSS the pad interacts with it — acceptable
+        // because the pad is pinned at the top, outside casual explore
+        // paths, and a drag without a lift on a key sends nothing.
         accessibilityTraits = .allowsDirectInteraction
-        accessibilityDirectTouchOptions = [.silentOnTouch, .requiresActivation]
+        accessibilityDirectTouchOptions = [.silentOnTouch]
         updateAccessibilityHint()
 
         // Both modes: two-finger tap clears every toggled modifier.
@@ -176,8 +182,8 @@ final class KeyPadUIView: UIView {
 
     private func updateAccessibilityHint() {
         accessibilityHint = sliderMode
-            ? "Double tap to start. Then swipe left or right to choose a row, up or down to choose its key, and tap once to send. Two-finger swipe left resets the row, two-finger tap clears the modifiers."
-            : "Double tap to start. Then keep a finger on the pad: drag to hear the keys, and lift on one to send it right away. Lifting on a modifier turns it on or off. Two-finger tap clears the modifiers."
+            ? "Touches here work directly. Swipe left or right to choose a row, down to move forward through its keys, up to move back, and tap once to send. Two-finger swipe left resets the row, two-finger tap clears the modifiers."
+            : "Touches here work directly. Drag to hear the keys and lift on one to send it right away. Lifting on a modifier turns it on or off. Two-finger tap clears the modifiers."
     }
 
     // MARK: Bands & visible labels (touch-user convenience; VoiceOver only
@@ -386,10 +392,10 @@ final class KeyPadUIView: UIView {
 
     @objc private func handleSwipeRight() { moveBand(by: 1) }
     @objc private func handleSwipeLeft() { moveBand(by: -1) }
-    // Swipe up = forward through the band, matching the adjustable rows'
-    // increment direction.
-    @objc private func handleSwipeUp() { stepPosition(by: 1) }
-    @objc private func handleSwipeDown() { stepPosition(by: -1) }
+    // Swipe DOWN = forward, up = back (field-requested 2026-07-19 — reading
+    // order, not the VoiceOver-adjustable convention).
+    @objc private func handleSwipeUp() { stepPosition(by: -1) }
+    @objc private func handleSwipeDown() { stepPosition(by: 1) }
 
     @objc private func handleSliderTap() {
         let band = bands[currentBand]

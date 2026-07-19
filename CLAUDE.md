@@ -103,51 +103,45 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   and if VoiceOver turns on mid-curtain. Idle timer is held while forwarding
   *or* curtained. Capture keeps working under the overlay.
 
-- **SDK 26 menu theft** (`AppDelegate.swift`): building against the iOS 26
-  SDK auto-creates a main menu (`UIMainMenuSystem`) whose default commands
-  (Cmd+B/I/U, Cmd+A/C/V/X/Z/F, …) consume matching chords **before
-  `pressesBegan`** — field-verified 2026-07-19 (Win+B reached the PC as a
-  bare Win press; Windows-side injection was exonerated by a RegisterHotKey
-  probe fed agent-identical scancode INPUTs). Fix: app-delegate
-  `buildMenu(with:)` removes every removable menu. Don't re-add menus.
+- **SDK 26 Cmd-chord theft**: since the iOS 26 SDK, the system consumes
+  Cmd chords (Cmd+B/I/U, Cmd+A/C/V/X/Z/F, …) **before `pressesBegan`** —
+  field-verified 2026-07-19 (Win+B reached the PC as a bare Win press;
+  Windows-side injection was exonerated by a RegisterHotKey probe fed
+  agent-identical scancode INPUTs). Stripping the auto-built main menu via
+  app-delegate `buildMenu(with:)` (`AppDelegate.swift`, kept as belt) was
+  **field-tested INSUFFICIENT** (build 24). The working fix lives in
+  `CaptureView.keyCommands`: while forwarding, claim every Cmd/Cmd+Shift
+  letter/digit chord with priority `UIKeyCommand`s
+  (`wantsPriorityOverSystemBehavior = true`) and forward a synthetic
+  down+up via `USCharVK` (held modifiers were already forwarded as their
+  own presses). Tap-only semantics for claimed chords; claim list is empty
+  while forwarding is off.
 
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
-- On-screen key sender (iOS-only tab), VoiceOver-first: each category row
-  (editing, navigation, F-keys) is exposed to VoiceOver as **one adjustable
-  element whose position IS the selection** — option 0 is "None", swipe
-  up/down lands on the key the row holds (per-key buttons were rejected
-  first, then browse+double-tap-to-select). Multiple rows can each
-  contribute a key, tapped in row order. The **modifiers row alone** keeps
-  browse + double-tap-toggle because several can be on at once. Visible
-  buttons serve touch only. Plus a text field, a "will send" readout, and
-  Send (also magic tap on that tab). Send resets everything to None.
-- **Double-tapping a key row sends just that row's key immediately** —
-  wrapped in the toggled modifiers when the "Rows send with modifiers"
-  setting is on (`AppSettings.virtualRowSendsModifiers`, default on).
-  Activation deliberately changes *nothing* (no value change, no reset, no
-  focus move, silent on success, queued announcement on failure only), so
-  repeated double taps repeat the key; a three-finger scroll on a row
-  resets it to None without sending. **Send-on-adjust was tried and
-  field-rejected the same day (2026-07-18)**: swiping across a row fired
-  every intermediate key — don't reintroduce it. Known open issue:
-  VoiceOver's double-tap activation latency is system-inherent and still
-  feels sluggish to the user; split tap helps, and a direct-touch send pad
-  (`allowsDirectInteraction`) is the designed escalation if needed.
-- **Direct-touch key pad** (`VirtualKeyPad.swift`, added 2026-07-19 after the
-  rows' VoiceOver latency was field-rejected): ONE accessibility element
-  (never per-band regions — that would break explore-by-touch around it) with
-  `.allowsDirectInteraction` + `[.silentOnTouch, .requiresActivation]`, so
-  exploring can't misfire and one double tap enters direct mode. Default
-  **grid model** = VoiceOver touch-typing grammar: fixed bands (modifiers /
-  editing / navigation / F1–F12 / opt-in F13–F24 via
-  `virtualPadExtendedFKeys`), drag announces the key under the finger
-  (interrupting + haptic tick), lift sends it instantly, lift on a modifier
-  toggles it, two-finger tap clears modifiers, extra finger mid-drag aborts.
-  **Slider model** (`virtualPadSliderMode`) is the fallback: swipe
-  left/right = band, up/down = value, tap = send, two-finger swipe left =
-  reset band. Pad shares the toggled-modifier state with the rows and
-  **always** wraps sends in them (`virtualRowSendsModifiers` is rows-only).
-  The rows below stay — Switch Control / Full Keyboard Access path.
+- On-screen key sender (iOS-only tab), VoiceOver-first. The UI is the
+  **direct-touch key pad** plus a text field, a "will send" readout, and
+  Send (also magic tap on that tab). The earlier **adjustable-rows UI was
+  built, refined twice, and retired 2026-07-19** once the pad worked — the
+  user chose pad-only to give the pad the screen space. Lessons that must
+  survive the rows' removal: send-on-adjust fires every intermediate value
+  (field-rejected 2026-07-18, don't reintroduce anywhere); VoiceOver
+  double-tap activation latency is system-inherent — which is exactly why
+  the pad exists.
+- **Direct-touch key pad** (`VirtualKeyPad.swift`): ONE accessibility
+  element (never per-band regions — that would break explore-by-touch
+  around it) with `.allowsDirectInteraction` + `[.silentOnTouch]` —
+  **instant pass-through, no activation step**: `.requiresActivation` was
+  tried and field-rejected as an extra hop (2026-07-19); touching the pad
+  interacts immediately, piano-app style. Default **grid model** =
+  VoiceOver touch-typing grammar: fixed bands (modifiers / editing /
+  navigation / F1–F12 / opt-in F13–F24 via `virtualPadExtendedFKeys`), drag
+  announces the key under the finger (interrupting + haptic tick), lift
+  sends it instantly wrapped in the toggled modifiers, lift on a modifier
+  toggles it, two-finger tap clears modifiers, extra finger mid-drag
+  aborts. **Slider model** (`virtualPadSliderMode`) is the fallback: swipe
+  left/right = band, **swipe DOWN = forward / UP = back** (field-requested
+  reading-order direction, opposite of the VoiceOver-adjustable
+  convention), tap = send, two-finger swipe left = reset band.
   **The pad must live OUTSIDE the Form** (pinned above it): a scroll-view
   ancestor delays touch delivery and cancels moved touches, which kills
   drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside

@@ -82,16 +82,6 @@ public final class AppSettings {
 
     // MARK: Virtual input (iOS)
 
-    /// Whether selecting a key on a virtual-input row (which sends that key
-    /// immediately) wraps it in the modifiers currently toggled on. Off means
-    /// row selection sends the bare key and modifiers only apply through the
-    /// Send button. A setting because both behaviors are legitimate: wrapped
-    /// is fast Ctrl/Shift+Arrow navigation, bare keeps swiping across a row
-    /// from firing modified chords on every stop.
-    public var virtualRowSendsModifiers: Bool {
-        didSet { defaults.set(virtualRowSendsModifiers, forKey: Keys.virtualRowSendsModifiers) }
-    }
-
     /// Whether the Virtual Input key pad interprets gestures as virtual
     /// sliders (swipe left/right between rows, up/down to step the value,
     /// tap to send) instead of the default touch-typing grid (drag to hear
@@ -140,7 +130,6 @@ public final class AppSettings {
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         // Default true: `bool(forKey:)` can't express a true default, so read
         // the raw object.
-        self.virtualRowSendsModifiers = defaults.object(forKey: Keys.virtualRowSendsModifiers) as? Bool ?? true
         self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         if let data = defaults.data(forKey: Keys.toggleShortcut),
@@ -171,7 +160,8 @@ public final class AppSettings {
         static let legacyOptionMapping = "optionMapping"
         static let legacyCommandMapping = "commandMapping"
         static let toggleShortcut = "toggleShortcut"
-        static let virtualRowSendsModifiers = "virtualRowSendsModifiers"
+        // "virtualRowSendsModifiers" was the retired adjustable-rows wrap
+        // toggle; its stored value is simply ignored now.
         static let virtualPadSliderMode = "virtualPadSliderMode"
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
     }
