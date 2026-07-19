@@ -24,6 +24,8 @@ struct ContentView: View {
 
     private var isForwarding: Bool { bridge.forwardingEnabled }
 
+    @State private var showInfo = false
+
     var body: some View {
         ZStack {
             // Invisible first-responder view: the actual capture surface. It
@@ -40,10 +42,36 @@ struct ContentView: View {
                     if !voiceOverEnabled {
                         curtainSection
                     }
-                    diagnosticsSection
                 }
                 .navigationTitle("RemKeys")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        InfoButton { showInfo = true }
+                    }
+                }
+                .sheet(isPresented: $showInfo, onDismiss: {
+                    // The sheet took first responder; hand the hardware
+                    // keyboard back to the capture view.
+                    CaptureView.requestReclaim()
+                }) { infoSheet }
             }
+        }
+    }
+
+    /// Explanation + tips + the live diagnostics, moved off the main screen
+    /// (field request 2026-07-19) so Start stays a lean status-and-go page.
+    private var infoSheet: some View {
+        InfoSheet(title: "Start") {
+            Section("How forwarding works") {
+                Text("While forwarding is active, keys typed on a connected hardware keyboard are sent to the Windows PC instead of acting here. Keystrokes only forward while RemKeys is in the foreground with the screen on — that is an iOS rule, so the screen is kept awake while forwarding runs.")
+            }
+            Section("Tips") {
+                Text("A two-finger double tap anywhere toggles forwarding (on the Virtual Input tab it sends the built combination instead). A physical toggle shortcut can be recorded in Settings.")
+                if !voiceOverEnabled {
+                    Text("The screen curtain blacks out the display and drops brightness to zero to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on.")
+                }
+            }
+            diagnosticsSection
         }
     }
 
@@ -117,9 +145,9 @@ struct ContentView: View {
             .accessibilityHint(isForwarding
                 ? "Stops sending keystrokes to the Windows PC"
                 : "Connects and starts sending keystrokes to the Windows PC")
-        } footer: {
-            Text("Tip: two-finger double tap anywhere toggles forwarding. On the Virtual Input tab, the same gesture sends the built combination instead.")
         }
+        // The magic-tap tip and the rest of the teaching text live in the
+        // info sheet — Start stays lean.
     }
 
     /// Battery saver for long forwarding sessions: black overlay + brightness
@@ -133,7 +161,7 @@ struct ContentView: View {
             }
             .accessibilityHint("Turns the screen black to save battery. Keystrokes keep forwarding.")
         } footer: {
-            Text("Blacks out the screen and drops brightness to zero to save battery — forwarding keeps running. Double-tap the screen to turn it back on. While VoiceOver is on, this button is hidden: use VoiceOver's Screen Curtain (three-finger triple tap) instead.")
+            Text("Double-tap the screen to turn it back on.")
         }
     }
 

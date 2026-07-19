@@ -139,14 +139,25 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   sends it instantly wrapped in the toggled modifiers, lift on a modifier
   toggles it, two-finger tap clears modifiers, extra finger mid-drag
   aborts. **Slider model** (`virtualPadSliderMode`) is the fallback: swipe
-  left/right = band, **swipe DOWN = forward / UP = back** (field-requested
-  reading-order direction, opposite of the VoiceOver-adjustable
-  convention), tap = send, two-finger swipe left = reset band.
+  left/right = band, up = forward / down = back (the VoiceOver-adjustable
+  convention; a down-forward flip was requested and reverted as a mistake
+  the same day, 2026-07-19 — keep the convention), tap = send, two-finger
+  swipe left = reset band, and stepping past either end answers with a
+  harder edge haptic (`.rigid`) against the normal selection tick.
   **The pad must live OUTSIDE the Form** (pinned above it): a scroll-view
   ancestor delays touch delivery and cancels moved touches, which kills
   drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside
   a Form section and the pad was dead in the field (2026-07-19). Don't move
   it back into scrollable content.
+- **Tab layout (field-specified 2026-07-19):** "Will send" readout + Send on
+  top, text field + compact dismiss-keyboard button below it, pad filling
+  the whole rest of the screen. No Form on this tab.
+- **Every tab has a top-right info button** (`InfoSheet.swift`) opening a
+  sheet that explains the screen *as currently configured* (e.g. Virtual
+  Input's text follows `virtualPadSliderMode`). The Start tab's sheet also
+  hosts the tips and the live **diagnostics section** (moved off the main
+  screen to keep Start lean); its dismissal calls
+  `CaptureView.requestReclaim()`.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
   involved; AltGr is just `VK_RMENU`.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +

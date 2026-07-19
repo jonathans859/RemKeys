@@ -7,6 +7,7 @@ import BridgeCore
 struct SettingsView: View {
     let settings: AppSettings
     @State private var isRecordingShortcut = false
+    @State private var showInfo = false
 
     var body: some View {
         NavigationStack {
@@ -53,6 +54,35 @@ struct SettingsView: View {
                 virtualInputSection
             }
             .navigationTitle("Settings")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    InfoButton { showInfo = true }
+                }
+            }
+            .sheet(isPresented: $showInfo) { infoSheet }
+        }
+    }
+
+    /// The teaching text for each setting, adapted to the current values so
+    /// examples always describe what the app is doing right now.
+    private var infoSheet: some View {
+        InfoSheet(title: "Settings") {
+            Section("Toggle shortcut") {
+                Text(settings.toggleShortcut == nil
+                     ? "No shortcut is recorded, so forwarding is toggled with the Start button or a two-finger double tap. Record a physical chord to flip forwarding straight from the keyboard."
+                     : "Pressing \(settings.toggleShortcut?.displayString ?? "the recorded chord") on the physical keyboard flips forwarding, even while it is off. While forwarding is on, chords using the Command key are claimed for the PC, so prefer a shortcut without Command.")
+            }
+            Section("Modifier mapping") {
+                Text("There is no single correct way to map Apple modifiers to Windows ones, so Option and Command each map per physical side. Multi-OS keyboards often present their Win-labeled key as Command — press a key and check Last key seen in the Start tab's info sheet to find out what it reports as. Shift and Control always map straight across. AltGr matters on layouts like German, where it is the only way to type characters such as @ and the braces.")
+            }
+            Section("Virtual input") {
+                Text(settings.virtualPadSliderMode
+                     ? "The key pad currently uses slider gestures: swipe between rows and through keys, tap to send. Turn the toggle off for the grid, where dragging explores the keys and lifting sends."
+                     : "The key pad currently uses the grid: dragging explores the keys and lifting sends. Turn the slider toggle on for row-based swiping instead — an alternative if the grid zones feel too small.")
+                Text(settings.virtualPadExtendedFKeys
+                     ? "F13 to F24 are shown as a fifth band, which makes every zone a bit smaller."
+                     : "F13 to F24 are hidden; enable them to add a fifth band at the cost of smaller zones.")
+            }
         }
     }
 

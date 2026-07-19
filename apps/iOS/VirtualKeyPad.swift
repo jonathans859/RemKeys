@@ -20,9 +20,10 @@ import BridgeCore
 ///   VoiceOver's touch typing, and fixed positions build muscle memory.
 ///   An extra finger landing mid-drag aborts the drag, so nothing fires.
 /// - **Sliders (fallback):** one-finger swipe left/right moves between
-///   bands, swipe down steps forward / up steps back (0 = "None"), tap
+///   bands, swipe up steps forward / down steps back (0 = "None"), tap
 ///   sends the band's current key; the modifiers band browses and
-///   tap-toggles. Two-finger swipe left resets the current band.
+///   tap-toggles. Two-finger swipe left resets the current band; hitting
+///   either end of a row answers with a harder edge haptic.
 ///
 /// Both modes: two-finger tap clears all toggled modifiers. Success is
 /// silent (plus a light haptic); failures speak via the shared send path.
@@ -108,6 +109,9 @@ final class KeyPadUIView: UIView {
     private var labels: [[UILabel]] = []
     private let selectionTick = UISelectionFeedbackGenerator()
     private let sendThump = UIImpactFeedbackGenerator(style: .light)
+    /// Noticeably harder than the selection tick: felt when a swipe tries to
+    /// step past the first/last position — the non-visual "end of the row".
+    private let edgeThump = UIImpactFeedbackGenerator(style: .rigid)
 
     // Grid mode: the single tracked finger and the zone it is over.
     private var trackedTouch: UITouch?
@@ -182,7 +186,7 @@ final class KeyPadUIView: UIView {
 
     private func updateAccessibilityHint() {
         accessibilityHint = sliderMode
-            ? "Touches here work directly. Swipe left or right to choose a row, down to move forward through its keys, up to move back, and tap once to send. Two-finger swipe left resets the row, two-finger tap clears the modifiers."
+            ? "Touches here work directly. Swipe left or right to choose a row, up to move forward through its keys, down to move back, and tap once to send. Two-finger swipe left resets the row, two-finger tap clears the modifiers."
             : "Touches here work directly. Drag to hear the keys and lift on one to send it right away. Lifting on a modifier turns it on or off. Two-finger tap clears the modifiers."
     }
 
@@ -361,7 +365,10 @@ final class KeyPadUIView: UIView {
 
     private func moveBand(by delta: Int) {
         let target = min(max(currentBand + delta, 0), bands.count - 1)
-        guard target != currentBand else { return }
+        guard target != currentBand else {
+            edgeThump.impactOccurred()
+            return
+        }
         currentBand = target
         selectionTick.selectionChanged()
         let band = bands[currentBand]
@@ -384,7 +391,10 @@ final class KeyPadUIView: UIView {
         // selection there).
         let count = band.isModifierBand ? band.keys.count : band.keys.count + 1
         let target = min(max(bandPositions[currentBand] + delta, 0), count - 1)
-        guard target != bandPositions[currentBand] else { return }
+        guard target != bandPositions[currentBand] else {
+            edgeThump.impactOccurred()
+            return
+        }
         bandPositions[currentBand] = target
         selectionTick.selectionChanged()
         announce(currentPositionDescription())
@@ -392,10 +402,12 @@ final class KeyPadUIView: UIView {
 
     @objc private func handleSwipeRight() { moveBand(by: 1) }
     @objc private func handleSwipeLeft() { moveBand(by: -1) }
-    // Swipe DOWN = forward, up = back (field-requested 2026-07-19 — reading
-    // order, not the VoiceOver-adjustable convention).
-    @objc private func handleSwipeUp() { stepPosition(by: -1) }
-    @objc private func handleSwipeDown() { stepPosition(by: 1) }
+    // Swipe up = forward, down = back — the VoiceOver-adjustable convention.
+    // (Flipped to down-forward on request 2026-07-19 and reverted the same
+    // day; the user confirmed the request was a mistake. Keep the
+    // convention.)
+    @objc private func handleSwipeUp() { stepPosition(by: 1) }
+    @objc private func handleSwipeDown() { stepPosition(by: -1) }
 
     @objc private func handleSliderTap() {
         let band = bands[currentBand]

@@ -9,17 +9,19 @@ import BridgeCore
 ///   one accessibility element whose raw touches bypass VoiceOver's gesture
 ///   round-trip entirely — drag to hear keys, lift to send, lift on a
 ///   modifier to toggle it. The earlier adjustable rows were retired in its
-///   favor (field decision 2026-07-19: with the pad working, the rows only
-///   cost screen space) — the pad now takes that room, which also makes its
-///   zones bigger. The pad is pinned OUTSIDE the Form below it: a
-///   scroll-view ancestor cancels direct-touch drags (field-verified dead
-///   pad in build 25).
+///   favor (field decision 2026-07-19). Layout (also field-specified): the
+///   "Will send" readout + Send on top, then the text field with a compact
+///   dismiss-keyboard button beside it, and the pad filling the entire rest
+///   of the screen — the bigger the zones, the better the muscle memory.
+///   The pad must stay OUTSIDE any scroll container (a scroll ancestor
+///   cancels direct-touch drags; field-verified dead pad in build 25).
 /// - Plain text is typed into a normal text field and sent through the
 ///   layout-independent unicode path, so it types verbatim on any PC layout;
 ///   when modifiers are held it switches to US-position keys, because
 ///   shortcuts match keys, not characters.
-/// - The combination about to be sent is spelled out above the Send button,
-///   and a two-finger double tap (magic tap) sends from anywhere on this tab.
+/// - A two-finger double tap (magic tap) sends from anywhere on this tab,
+///   and the top-right info button explains the pad's current gesture set
+///   (it follows the slider-mode and F13–F24 settings).
 struct VirtualInputView: View {
     let bridge: BridgeClient
     let settings: AppSettings
@@ -29,30 +31,84 @@ struct VirtualInputView: View {
 
     @State private var selectedModifiers: Set<UInt16> = []
     @State private var text = ""
+    @State private var showInfo = false
     @FocusState private var textFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
+            VStack(spacing: 12) {
+                sendRow
+                textRow
                 pad
-                Form {
-                    textSection
-                    sendSection
+            }
+            .padding(.horizontal)
+            .navigationTitle("Virtual Input")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    InfoButton { showInfo = true }
                 }
             }
-            .navigationTitle("Virtual Input")
+            .sheet(isPresented: $showInfo) { infoSheet }
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.sendRequested)) { _ in
             send()
         }
     }
 
-    // MARK: Sections
+    // MARK: Layout
+
+    /// Top row: what Send will deliver, and Send itself to the right.
+    private var sendRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Will send")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(comboDescription)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Will send")
+            .accessibilityValue(comboDescription)
+            .accessibilityAddTraits(.updatesFrequently)
+
+            Button {
+                send()
+            } label: {
+                Text("Send")
+                    .fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!hasSomethingToSend)
+            .accessibilityHint("Sends the combination to the Windows PC")
+        }
+    }
+
+    /// Text entry with a compact dismiss-keyboard button beside it.
+    private var textRow: some View {
+        HStack(spacing: 8) {
+            TextField("Text to type", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .focused($textFieldFocused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityHint("Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
+            Button {
+                textFieldFocused = false
+            } label: {
+                Image(systemName: "keyboard.chevron.compact.down")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!textFieldFocused)
+            .accessibilityLabel("Dismiss keyboard")
+            .accessibilityHint("Closes the on-screen keyboard")
+        }
+    }
 
     /// The pad owns the toggled modifiers (toggle zones on its top band);
     /// the "Will send" readout and Send read the same state. Pad sends
-    /// always wrap in the toggled modifiers — the modifier band makes that
-    /// intent explicit.
+    /// always wrap in the toggled modifiers.
     private var pad: some View {
         VirtualKeyPad(
             settings: settings,
@@ -68,48 +124,42 @@ struct VirtualInputView: View {
             onSend: { key in sendImmediate(key) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal)
         .padding(.bottom, 8)
     }
 
-    private var textSection: some View {
-        Section {
-            TextField("Text to type", text: $text, axis: .vertical)
-                .focused($textFieldFocused)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .accessibilityHint("Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
-            Button("Dismiss keyboard") {
-                textFieldFocused = false
+    // MARK: Info sheet
+
+    /// Explains the tab as it currently behaves — the text follows the
+    /// slider-mode and F13–F24 settings so it never describes gestures the
+    /// pad doesn't have right now.
+    private var infoSheet: some View {
+        InfoSheet(title: "Virtual Input") {
+            Section("Key pad") {
+                if settings.virtualPadSliderMode {
+                    Text("The pad works as virtual sliders, one row per key group\(bandListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Swipe left or right to choose a row, swipe up to move forward through its keys, down to move back. Tap once to send the current key. A harder vibration means you reached the end of a row. Two-finger swipe left resets the row.")
+                } else {
+                    Text("The pad is a fixed grid of key zones\(bandListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Drag a finger to hear the key under it, with a small tick at each boundary, and lift to send that key at once. Lift on a modifier to turn it on or off. Landing a second finger cancels the drag, so nothing is sent.")
+                }
+                Text("Two-finger tap on the pad clears all toggled modifiers. Sending is silent when it works; you only hear a message when something failed.")
             }
-            .disabled(!textFieldFocused)
-            .accessibilityHint("Closes the on-screen keyboard")
-        } header: {
-            Text("Text").accessibilityAddTraits(.isHeader)
+            Section("Modifiers") {
+                Text("Modifiers you toggle on the pad stay on and wrap every key you send, until you clear them or press Send. The Will send line always shows what is active.")
+            }
+            Section("Text") {
+                Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers toggled, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
+            }
+            Section("Sending") {
+                Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text, then resets both. Sending needs forwarding: if it is off, Send turns it on and asks you to send again once connected.")
+            }
         }
     }
 
-    private var sendSection: some View {
-        Section {
-            LabeledContent("Will send") {
-                Text(comboDescription)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.updatesFrequently)
-
-            Button {
-                send()
-            } label: {
-                Text("Send")
-                    .frame(maxWidth: .infinity)
-                    .fontWeight(.semibold)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!hasSomethingToSend)
-            .accessibilityHint("Sends the combination to the Windows PC")
-        } footer: {
-            Text("Lifting on a pad key sends it right away, wrapped in the toggled modifiers. Send (or a two-finger double tap on this tab) delivers the modifiers plus the typed text, then resets both.")
-        }
+    /// ", from modifiers at the top to function keys at the bottom" — with
+    /// the extended band mentioned only when it is actually shown.
+    private var bandListSuffix: String {
+        settings.virtualPadExtendedFKeys
+            ? ": modifiers, editing, navigation, F1 to F12, and F13 to F24"
+            : ": modifiers, editing, navigation, and F1 to F12"
     }
 
     // MARK: Combination state
