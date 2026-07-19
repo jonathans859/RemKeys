@@ -286,9 +286,9 @@ must not be a service).
     a group with automatic distribution). Runs on `macos-26`: ASC's SDK floor
     applies to uploads only, so ci.yml stays on the stabler `macos-15`.
   - `deploy-macos.yml` — push to main → Developer ID-signed, notarized zip as
-    a run artifact (and Release asset on release). **Currently disabled**
-    (`gh workflow disable`) — its `DEVID_P12_PASSWORD` secret is wrong, so
-    every run failed at signing on billed minutes; re-enable once fixed.
+    a run artifact (and Release asset on release). Was disabled 2026-07-17
+    over a wrong `DEVID_P12_PASSWORD`; the secret was fixed and the workflow
+    re-enabled 2026-07-18 (green runs since).
   - `deploy-windows.yml` — push to main → agent zip as a run artifact (and
     Release asset on release).
 - fastlane lanes: `ios ios_beta`, `mac mac_release` (`fastlane/Fastfile`).
