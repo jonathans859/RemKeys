@@ -106,10 +106,20 @@ struct SettingsView: View {
                 set: { settings.virtualRowSendsModifiers = $0 }
             ))
             .accessibilityHint("Applies when double tapping a Virtual Input row to send its key")
+            Toggle("Key pad uses slider gestures", isOn: Binding(
+                get: { settings.virtualPadSliderMode },
+                set: { settings.virtualPadSliderMode = $0 }
+            ))
+            .accessibilityHint("Off: drag on the pad to hear keys and lift to send. On: swipe left or right to choose a row, up or down to choose its key, tap to send.")
+            Toggle("Key pad includes F13 to F24", isOn: Binding(
+                get: { settings.virtualPadExtendedFKeys },
+                set: { settings.virtualPadExtendedFKeys = $0 }
+            ))
+            .accessibilityHint("Adds a fifth band to the key pad. The other bands get less room.")
         } header: {
             Text("Virtual input")
         } footer: {
-            Text("Double tapping a Virtual Input row sends the key it shows. When this is on, that key is wrapped in the modifiers currently toggled on — fast Control or Shift plus arrows. When off, rows send the bare key and modifiers only apply through the Send button.")
+            Text("Double tapping a Virtual Input row sends the key it shows. When this is on, that key is wrapped in the modifiers currently toggled on — fast Control or Shift plus arrows. When off, rows send the bare key and modifiers only apply through the Send button. The key pad always applies the toggled modifiers.")
         }
     }
 

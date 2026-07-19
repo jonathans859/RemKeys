@@ -92,6 +92,21 @@ public final class AppSettings {
         didSet { defaults.set(virtualRowSendsModifiers, forKey: Keys.virtualRowSendsModifiers) }
     }
 
+    /// Whether the Virtual Input key pad interprets gestures as virtual
+    /// sliders (swipe left/right between rows, up/down to step the value,
+    /// tap to send) instead of the default touch-typing grid (drag to hear
+    /// the key under the finger, lift to send). The slider mode exists as a
+    /// fallback in case the grid's zone density doesn't work out on device.
+    public var virtualPadSliderMode: Bool {
+        didSet { defaults.set(virtualPadSliderMode, forKey: Keys.virtualPadSliderMode) }
+    }
+
+    /// Whether the key pad includes an F13–F24 band. Off by default: the
+    /// extra band shrinks every other zone, and F13+ is rarely needed.
+    public var virtualPadExtendedFKeys: Bool {
+        didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
+    }
+
     // MARK: Forwarding toggle shortcut
 
     /// Optional physical chord that turns forwarding on/off. `nil` means the
@@ -126,6 +141,8 @@ public final class AppSettings {
         // Default true: `bool(forKey:)` can't express a true default, so read
         // the raw object.
         self.virtualRowSendsModifiers = defaults.object(forKey: Keys.virtualRowSendsModifiers) as? Bool ?? true
+        self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
+        self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         if let data = defaults.data(forKey: Keys.toggleShortcut),
            let decoded = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
             self.toggleShortcut = decoded
@@ -155,5 +172,7 @@ public final class AppSettings {
         static let legacyCommandMapping = "commandMapping"
         static let toggleShortcut = "toggleShortcut"
         static let virtualRowSendsModifiers = "virtualRowSendsModifiers"
+        static let virtualPadSliderMode = "virtualPadSliderMode"
+        static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
     }
 }

@@ -61,4 +61,10 @@ enum VirtualKeys {
             VirtualKey(name: "F\($0)", vk: VK.f1 + UInt16($0 - 1))
         }),
     ]
+
+    /// F13–F24, offered only as an extra key-pad band and only when enabled
+    /// in Settings — an always-on fifth band would shrink every other zone.
+    static let extendedFunctionKeys: [VirtualKey] = (13...24).map {
+        VirtualKey(name: "F\($0)", vk: VK.f13 + UInt16($0 - 13))
+    }
 }

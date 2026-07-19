@@ -5,6 +5,11 @@ import BridgeCore
 /// On-screen key sender: build a key combination without a physical keyboard
 /// and ship it to the PC in one tap. VoiceOver-first by design:
 ///
+/// - A **direct-touch key pad** sits on top (see `VirtualKeyPad`): one
+///   accessibility element that, once activated, takes raw touches —
+///   drag to hear keys, lift to send — bypassing VoiceOver's activation
+///   latency entirely. The rows below remain the conservative path (and the
+///   only one for Switch Control / Full Keyboard Access).
 /// - Each key row is ONE adjustable element ("slider") whose position IS the
 ///   selection: option 0 is "None", swiping up/down lands on the key the row
 ///   will send — no double tap involved (activation is slow under VoiceOver,
@@ -53,6 +58,7 @@ struct VirtualInputView: View {
     var body: some View {
         NavigationStack {
             Form {
+                padSection
                 modifierSection
                 ForEach(VirtualKeys.categories) { category in
                     keySection(category)
@@ -68,6 +74,34 @@ struct VirtualInputView: View {
     }
 
     // MARK: Sections
+
+    /// The direct-touch pad (see `VirtualKeyPad`). It shares the toggled
+    /// modifiers with the modifier row below, so pad toggles show up in the
+    /// "Will send" readout and in Send. Pad sends always wrap in the toggled
+    /// modifiers — its modifier band makes the intent explicit, so the
+    /// `virtualRowSendsModifiers` row setting doesn't apply to it.
+    private var padSection: some View {
+        Section {
+            VirtualKeyPad(
+                settings: settings,
+                selectedModifiers: selectedModifiers,
+                onToggleModifier: { modifier in
+                    if selectedModifiers.contains(modifier.vk) {
+                        selectedModifiers.remove(modifier.vk)
+                    } else {
+                        selectedModifiers.insert(modifier.vk)
+                    }
+                },
+                onClearModifiers: { selectedModifiers.removeAll() },
+                onSend: { key in sendImmediate(key, wrapInModifiers: true) }
+            )
+            .listRowInsets(EdgeInsets())
+        } header: {
+            Text("Key pad").accessibilityAddTraits(.isHeader)
+        } footer: {
+            Text("The fast path: double tap the pad once, then drag to hear the keys and lift to send. The rows below do the same job the classic way.")
+        }
+    }
 
     private var modifierSection: some View {
         Section {
@@ -191,7 +225,7 @@ struct VirtualInputView: View {
             announce("No key selected")
             return
         }
-        sendImmediate(category.keys[index - 1])
+        sendImmediate(category.keys[index - 1], wrapInModifiers: settings.virtualRowSendsModifiers)
     }
 
     /// A horizontally scrolling "slider" of keys.
@@ -272,12 +306,14 @@ struct VirtualInputView: View {
 
     // MARK: Sending
 
-    /// Immediate path for a row's activate action: exactly one key, wrapped
-    /// in the toggled modifiers when the setting says so. Success is fully
-    /// silent and nothing resets or moves; state only clears via Send.
-    /// Unlike Send, a failure doesn't flip forwarding on — it just says the
-    /// key was not sent, and the selection sticks so Send can deliver it.
-    private func sendImmediate(_ key: VirtualKey) {
+    /// Immediate path shared by a row's activate action and the key pad:
+    /// exactly one key, optionally wrapped in the toggled modifiers (rows
+    /// pass the `virtualRowSendsModifiers` setting; the pad always wraps).
+    /// Success is fully silent and nothing resets or moves; state only
+    /// clears via Send. Unlike Send, a failure doesn't flip forwarding on —
+    /// it just says the key was not sent, and the selection sticks so Send
+    /// can deliver it.
+    private func sendImmediate(_ key: VirtualKey, wrapInModifiers: Bool) {
         guard bridge.forwardingEnabled else {
             announce("\(key.name) not sent. Forwarding is off.")
             return
@@ -286,7 +322,7 @@ struct VirtualInputView: View {
             announce("\(key.name) not sent. \(bridge.status.announcement)")
             return
         }
-        let modifiers = settings.virtualRowSendsModifiers ? orderedModifiers.map(\.vk) : []
+        let modifiers = wrapInModifiers ? orderedModifiers.map(\.vk) : []
         for vk in modifiers { bridge.sendKey(vk: vk, pressed: true) }
         tap(key.vk)
         for vk in modifiers.reversed() { bridge.sendKey(vk: vk, pressed: false) }

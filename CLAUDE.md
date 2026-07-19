@@ -103,6 +103,14 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   and if VoiceOver turns on mid-curtain. Idle timer is held while forwarding
   *or* curtained. Capture keeps working under the overlay.
 
+- **SDK 26 menu theft** (`AppDelegate.swift`): building against the iOS 26
+  SDK auto-creates a main menu (`UIMainMenuSystem`) whose default commands
+  (Cmd+B/I/U, Cmd+A/C/V/X/Z/F, …) consume matching chords **before
+  `pressesBegan`** — field-verified 2026-07-19 (Win+B reached the PC as a
+  bare Win press; Windows-side injection was exonerated by a RegisterHotKey
+  probe fed agent-identical scancode INPUTs). Fix: app-delegate
+  `buildMenu(with:)` removes every removable menu. Don't re-add menus.
+
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
 - On-screen key sender (iOS-only tab), VoiceOver-first: each category row
   (editing, navigation, F-keys) is exposed to VoiceOver as **one adjustable
@@ -125,6 +133,21 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   VoiceOver's double-tap activation latency is system-inherent and still
   feels sluggish to the user; split tap helps, and a direct-touch send pad
   (`allowsDirectInteraction`) is the designed escalation if needed.
+- **Direct-touch key pad** (`VirtualKeyPad.swift`, added 2026-07-19 after the
+  rows' VoiceOver latency was field-rejected): ONE accessibility element
+  (never per-band regions — that would break explore-by-touch around it) with
+  `.allowsDirectInteraction` + `[.silentOnTouch, .requiresActivation]`, so
+  exploring can't misfire and one double tap enters direct mode. Default
+  **grid model** = VoiceOver touch-typing grammar: fixed bands (modifiers /
+  editing / navigation / F1–F12 / opt-in F13–F24 via
+  `virtualPadExtendedFKeys`), drag announces the key under the finger
+  (interrupting + haptic tick), lift sends it instantly, lift on a modifier
+  toggles it, two-finger tap clears modifiers, extra finger mid-drag aborts.
+  **Slider model** (`virtualPadSliderMode`) is the fallback: swipe
+  left/right = band, up/down = value, tap = send, two-finger swipe left =
+  reset band. Pad shares the toggled-modifier state with the rows and
+  **always** wraps sends in them (`virtualRowSendsModifiers` is rows-only).
+  The rows below stay — Switch Control / Full Keyboard Access path.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
   involved; AltGr is just `VK_RMENU`.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +
