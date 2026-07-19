@@ -57,14 +57,16 @@ struct VirtualInputView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                padSection
-                modifierSection
-                ForEach(VirtualKeys.categories) { category in
-                    keySection(category)
+            VStack(spacing: 0) {
+                pad
+                Form {
+                    modifierSection
+                    ForEach(VirtualKeys.categories) { category in
+                        keySection(category)
+                    }
+                    textSection
+                    sendSection
                 }
-                textSection
-                sendSection
             }
             .navigationTitle("Virtual Input")
         }
@@ -75,32 +77,34 @@ struct VirtualInputView: View {
 
     // MARK: Sections
 
-    /// The direct-touch pad (see `VirtualKeyPad`). It shares the toggled
-    /// modifiers with the modifier row below, so pad toggles show up in the
-    /// "Will send" readout and in Send. Pad sends always wrap in the toggled
-    /// modifiers — its modifier band makes the intent explicit, so the
+    /// The direct-touch pad (see `VirtualKeyPad`). It lives OUTSIDE the
+    /// Form on purpose: inside it, the Form's scroll view delayed initial
+    /// touch delivery and cancelled any touch that moved more than a few
+    /// points — under direct touch that killed drag-to-hear and lift-to-send
+    /// outright (field-reported "not working", build 25). Pinned above the
+    /// Form there is no competing gesture, and the primary input surface
+    /// can't scroll off-screen. It shares the toggled modifiers with the
+    /// modifier row below, so pad toggles show up in the "Will send" readout
+    /// and in Send. Pad sends always wrap in the toggled modifiers — its
+    /// modifier band makes the intent explicit, so the
     /// `virtualRowSendsModifiers` row setting doesn't apply to it.
-    private var padSection: some View {
-        Section {
-            VirtualKeyPad(
-                settings: settings,
-                selectedModifiers: selectedModifiers,
-                onToggleModifier: { modifier in
-                    if selectedModifiers.contains(modifier.vk) {
-                        selectedModifiers.remove(modifier.vk)
-                    } else {
-                        selectedModifiers.insert(modifier.vk)
-                    }
-                },
-                onClearModifiers: { selectedModifiers.removeAll() },
-                onSend: { key in sendImmediate(key, wrapInModifiers: true) }
-            )
-            .listRowInsets(EdgeInsets())
-        } header: {
-            Text("Key pad").accessibilityAddTraits(.isHeader)
-        } footer: {
-            Text("The fast path: double tap the pad once, then drag to hear the keys and lift to send. The rows below do the same job the classic way.")
-        }
+    private var pad: some View {
+        VirtualKeyPad(
+            settings: settings,
+            selectedModifiers: selectedModifiers,
+            onToggleModifier: { modifier in
+                if selectedModifiers.contains(modifier.vk) {
+                    selectedModifiers.remove(modifier.vk)
+                } else {
+                    selectedModifiers.insert(modifier.vk)
+                }
+            },
+            onClearModifiers: { selectedModifiers.removeAll() },
+            onSend: { key in sendImmediate(key, wrapInModifiers: true) }
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
 
     private var modifierSection: some View {

@@ -148,6 +148,11 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   reset band. Pad shares the toggled-modifier state with the rows and
   **always** wraps sends in them (`virtualRowSendsModifiers` is rows-only).
   The rows below stay — Switch Control / Full Keyboard Access path.
+  **The pad must live OUTSIDE the Form** (pinned above it): a scroll-view
+  ancestor delays touch delivery and cancels moved touches, which kills
+  drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside
+  a Form section and the pad was dead in the field (2026-07-19). Don't move
+  it back into scrollable content.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
   involved; AltGr is just `VK_RMENU`.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +
