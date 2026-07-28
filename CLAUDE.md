@@ -24,7 +24,7 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
 |---|---|---|
 | **BridgeCore** | `BridgeCore/` | Shared Swift package: wire format, Windows VK constants, settings, network client. Used by both apps. |
 | **iOS app** | `apps/iOS/` | SwiftUI app, three tabs: Start (captures an external keyboard via a first-responder `UIView`, forwards while foreground), Virtual Input (on-screen key sender, no physical keyboard needed), Settings. |
-| **macOS app** | `apps/macOS/` | Menu-bar (`LSUIElement`) app. System-wide capture via `CGEventTap` + `IOHIDManager`. |
+| **macOS app** | `apps/macOS/` | Menu-bar (`LSUIElement`) app; the icon opens a real window (⌘-Tab-able while open). System-wide capture via `CGEventTap` + `IOHIDManager`. |
 | **Windows agent** | `windows-agent/` | C#/.NET 8 Worker Service. Listens on TCP, replays keystrokes via `SendInput`. |
 
 ## Architecture and why
@@ -184,6 +184,35 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   plus a platform-neutral modifier set.
 - **Always-on-top red border overlay** (`CaptureOverlay.swift`) while
   capturing, same as UTM. Purely a redundant visual cue.
+- **fn-key row** (`FunctionKeyRow.swift`, setting `forwardFunctionKeyRow`, on
+  by default): with macOS's default "special keys" behaviour the top row never
+  becomes a key event at all — the keyboard emits Apple-vendor / consumer HID
+  usages (brightness `0xFF00000005`, play/pause `0xC000000CD`, Mission Control
+  `0xFF0100000010`) that the system turns into actions *below* the event tap,
+  so there is nothing to capture or swallow and the user must hold fn. Fixed
+  the supported way (Apple TN2450): `hidutil property --set UserKeyMapping`
+  rewrites those usages to keyboard-page F1–F12 *before* the tap sees them, so
+  they arrive as ordinary F-key events on the normal `MacKeyVK` path. No root,
+  effective immediately, gone at reboot. It is **system-wide and one list per
+  user**, so it is installed only while forwarding is on and cleared on
+  stop/quit — clearing resets the list to empty, dropping any hand-made
+  `hidutil` remap the user had. Don't "improve" this into a `CGEventTap`
+  translation of `NX_SYSDEFINED` events: several fn-row keys (Mission Control,
+  Spotlight) never produce one.
+
+### macOS UI (`apps/macOS/AppDelegate.swift`, `main.swift`)
+- **AppKit entry point, no SwiftUI `App`/`MenuBarExtra`.** A `MenuBarExtra`
+  only ever shows a popover: it dismisses on the next click elsewhere and can
+  never appear in ⌘-Tab. The status item and window are owned by
+  `AppDelegate`; `MenuContentView` is hosted in a real `NSWindow` via
+  `NSHostingController`. The main menu is built by hand (no nib) so the window
+  has Close/Hide/Quit.
+- **Clicking the menu-bar icon opens that window and leaves it open** (click
+  again to put it away). While it is up the app switches to `.regular`, which
+  is what puts RemKeys in ⌘-Tab — and, inseparably, in the Dock. Closing the
+  window, or hiding the app (⌘H / `applicationDidHide`), goes back to
+  `.accessory`, i.e. menu-bar only. `LSUIElement` stays true; the policy is
+  flipped at runtime.
 
 ## Accessibility (non-negotiable — daily personal use)
 - Every control has a label/hint; no state is conveyed by color/visuals alone.

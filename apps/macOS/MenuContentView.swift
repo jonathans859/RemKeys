@@ -2,10 +2,11 @@ import SwiftUI
 import AppKit
 import BridgeCore
 
-/// The menu-bar popover: status, the forwarding toggle, connection target, and
-/// modifier mappings. Kept in one window-style popover so a VoiceOver user can
-/// reach every control by tabbing, and every state has a text value (not just
-/// the border/icon).
+/// The app's window contents: status, the forwarding toggle, connection target,
+/// and mappings. Hosted in a real `NSWindow` by `AppDelegate` (not a popover —
+/// a popover dismisses on the next click elsewhere and never shows up in
+/// ⌘-Tab), so a VoiceOver user can reach every control by tabbing and leave the
+/// window open. Every state has a text value, not just the border/icon.
 struct MenuContentView: View {
     @Bindable var model: AppModel
 
@@ -115,7 +116,25 @@ struct MenuContentView: View {
                 set: { settings.rightCommandMapping = $0 }))
 
             Divider()
+            functionKeyRowControl
+
+            Divider()
             toggleShortcutControl
+        }
+    }
+
+    /// macOS's own fn-row behaviour (brightness, volume, Mission Control…)
+    /// happens below the event tap, so without this remap the top row only
+    /// reaches the PC when fn is held. See `FunctionKeyRow`.
+    private var functionKeyRowControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Function keys").font(.caption).foregroundStyle(.secondary)
+            Toggle("Send F1–F12 without holding fn", isOn: $model.forwardFunctionKeyRow)
+                .accessibilityHint(
+                    "While forwarding is on, the top row sends F1 to F12 to the Windows PC "
+                    + "instead of running the Mac's brightness, volume and Mission Control "
+                    + "functions. The Mac gets those keys back as soon as forwarding stops."
+                )
         }
     }
 

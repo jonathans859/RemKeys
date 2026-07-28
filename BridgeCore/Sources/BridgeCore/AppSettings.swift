@@ -97,6 +97,19 @@ public final class AppSettings {
         didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
     }
 
+    // MARK: Function-key row (macOS)
+
+    /// Whether the Mac's fn-key row is remapped to send plain F1–F12 while
+    /// forwarding. With macOS's default "special keys" behaviour the top row
+    /// never produces a key event at all (it emits Apple-vendor/consumer HID
+    /// usages that become brightness/volume/Mission Control below the event
+    /// tap), so without this the user has to hold fn for every F-key. On by
+    /// default; the remap is installed only while forwarding is on and removed
+    /// again when it stops. Unused on iOS.
+    public var forwardFunctionKeyRow: Bool {
+        didSet { defaults.set(forwardFunctionKeyRow, forKey: Keys.forwardFunctionKeyRow) }
+    }
+
     // MARK: Forwarding toggle shortcut
 
     /// Optional physical chord that turns forwarding on/off. `nil` means the
@@ -128,10 +141,11 @@ public final class AppSettings {
         self.rightOptionMapping = mapping(Keys.rightOptionMapping, legacy: Keys.legacyOptionMapping, default: .alt)
         self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
-        // Default true: `bool(forKey:)` can't express a true default, so read
-        // the raw object.
         self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
+        // Defaults to true: `bool(forKey:)` can't express that, so read the raw
+        // object and fall back only when nothing was ever stored.
+        self.forwardFunctionKeyRow = defaults.object(forKey: Keys.forwardFunctionKeyRow) as? Bool ?? true
         if let data = defaults.data(forKey: Keys.toggleShortcut),
            let decoded = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
             self.toggleShortcut = decoded
@@ -164,5 +178,6 @@ public final class AppSettings {
         // toggle; its stored value is simply ignored now.
         static let virtualPadSliderMode = "virtualPadSliderMode"
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
+        static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
     }
 }

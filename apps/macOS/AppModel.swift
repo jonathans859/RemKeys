@@ -25,6 +25,16 @@ final class AppModel {
     /// value; written as a full sentence.
     private(set) var statusLine: String = "Forwarding off"
 
+    /// Fires whenever `statusLine` / forwarding state changes, so the AppKit
+    /// status item (which isn't a SwiftUI view and can't observe) can refresh
+    /// its icon, tooltip and VoiceOver value.
+    @ObservationIgnored var menuStateDidChange: (@MainActor () -> Void)?
+
+    /// True while our `hidutil` fn-row remap is installed. Tracked so we only
+    /// ever clear a mapping we put there ourselves — `hidutil` keeps one
+    /// system-wide list per user.
+    @ObservationIgnored private var functionKeyRowApplied = false
+
     init() {
         let settings = AppSettings()
         let bridge = BridgeClient(settings: settings)
@@ -53,10 +63,45 @@ final class AppModel {
         refreshStatusLine()
     }
 
+    /// Tear down state that outlives the process. Called from
+    /// `applicationWillTerminate`, so the fn-row remap can't be left behind.
+    func shutdown() {
+        if functionKeyRowApplied {
+            FunctionKeyRow.clear(waitForCompletion: true)
+            functionKeyRowApplied = false
+        }
+    }
+
     var isForwarding: Bool { bridge.forwardingEnabled }
 
     func toggleForwarding() {
         capture.toggleForwarding()
+    }
+
+    // MARK: Function-key row
+
+    /// Mirrors `settings.forwardFunctionKeyRow`, but going through the model
+    /// means flipping it mid-session installs or removes the remap right away
+    /// instead of at the next forwarding toggle.
+    var forwardFunctionKeyRow: Bool {
+        get { settings.forwardFunctionKeyRow }
+        set {
+            settings.forwardFunctionKeyRow = newValue
+            syncFunctionKeyRow()
+        }
+    }
+
+    /// The remap is macOS-wide, so it is installed only while forwarding is
+    /// actually running and removed the moment it stops.
+    private func syncFunctionKeyRow() {
+        let shouldApply = settings.forwardFunctionKeyRow && bridge.forwardingEnabled
+        guard shouldApply != functionKeyRowApplied else { return }
+        functionKeyRowApplied = shouldApply
+        if shouldApply {
+            FunctionKeyRow.apply()
+        } else {
+            FunctionKeyRow.clear()
+        }
     }
 
     // MARK: Toggle-shortcut recording
@@ -84,6 +129,7 @@ final class AppModel {
 
     private func handleForwardingChange(_ enabled: Bool) {
         overlay.setVisible(enabled)
+        syncFunctionKeyRow()
         play(enabled ? .toggleOn : .toggleOff)
         announce(enabled ? "Forwarding on" : "Forwarding off")
         refreshStatusLine()
@@ -105,6 +151,7 @@ final class AppModel {
         } else {
             statusLine = "Forwarding off"
         }
+        menuStateDidChange?()
     }
 
     // MARK: Cues
