@@ -249,6 +249,7 @@ final class KeyCapture {
             guard bridge.forwardingEnabled else { return Unmanaged.passUnretained(event) }
             if let vk = MacKeyVK.vk(
                 forKeyCode: keyCode,
+                isISOKeyboard: MacKeyboardLayout.isISO(event),
                 leftOptionMapping: settings.leftOptionMapping,
                 rightOptionMapping: settings.rightOptionMapping,
                 leftCommandMapping: settings.leftCommandMapping,
@@ -288,6 +289,9 @@ final class KeyCapture {
         guard bridge.forwardingEnabled else { return Unmanaged.passUnretained(event) }
         if let vk = MacKeyVK.vk(
             forKeyCode: keyCode,
+            // Modifiers are the same key code on both layouts; passed for
+            // completeness only.
+            isISOKeyboard: MacKeyboardLayout.isISO(event),
             leftOptionMapping: settings.leftOptionMapping,
             rightOptionMapping: settings.rightOptionMapping,
             leftCommandMapping: settings.leftCommandMapping,

@@ -46,7 +46,13 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   `apps/macOS/MacKeyVK.swift` (CGKeyCode → VK). Both cover full alphanumerics,
   every modifier individually, F1–F20/F24, numpad, the nav/edit cluster, and
   media keys. **Anything unmapped is logged, never silently dropped**, so gaps
-  are visible during on-device testing.
+  are visible during on-device testing. One macOS wrinkle: key codes `0x32` and
+  `0x0A` swap physical positions between ANSI and ISO boards (ANSI: 0x32 is the
+  key left of 1, 0x0A doesn't exist; ISO: 0x0A is left of 1, 0x32 is the 102nd
+  key next to left Shift), so `MacKeyVK` picks per event via
+  `MacKeyboardLayout.isISO` (Carbon `KBGetLayoutType` on the event's keyboard
+  type). Field-reported unswapped 2026-07-28. iOS is immune — HID usages are
+  positional.
 - **Modifier mapping is configurable** because there is no fixed correct
   mapping between the Apple and Windows layouts. Option and Command each map
   **per physical side** on both platforms — four `ModifierMapping` settings

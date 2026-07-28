@@ -14,6 +14,7 @@ enum MacKeyVK {
 
     static func vk(
         forKeyCode keyCode: CGKeyCode,
+        isISOKeyboard: Bool,
         leftOptionMapping: ModifierMapping,
         rightOptionMapping: ModifierMapping,
         leftCommandMapping: ModifierMapping,
@@ -71,8 +72,16 @@ enum MacKeyVK {
         case 0x2B: return VK.oemComma     // , <
         case 0x2F: return VK.oemPeriod    // . >
         case 0x2C: return VK.oem2         // / ?
-        case 0x32: return VK.oem3         // ` ~
-        case 0x0A: return VK.oem102       // ISO § / < >
+
+        // MARK: The two keys ISO and ANSI boards disagree about
+        // On an **ANSI** keyboard 0x32 is the key left of 1 (` ~) and 0x0A
+        // doesn't exist. On an **ISO** keyboard the positions are the other way
+        // round: 0x0A is the key left of 1 (§ / ^ °) and 0x32 is the extra
+        // 102nd key next to left Shift (< > |). Sending them unswapped puts
+        // each one on the other's Windows scancode — field-reported on a German
+        // ISO board 2026-07-28 as "grave and < are swapped".
+        case 0x32: return isISOKeyboard ? VK.oem102 : VK.oem3
+        case 0x0A: return isISOKeyboard ? VK.oem3 : VK.oem102
 
         // MARK: Editing / whitespace
         case 0x24: return VK.return
