@@ -13,9 +13,11 @@ import BridgeCore
 ///   revised 2026-08-05): the pad fills everything from the title down —
 ///   the bigger the zones, the better the muscle memory — over a **single
 ///   control row** at the bottom: text field, dismiss keyboard, keep text,
-///   Send. There is no separate "Will send" readout; it cost a whole row,
-///   so what Send will deliver rides on Send's own VoiceOver hint, and the
-///   pad already tints the modifiers it has toggled on.
+///   Send. That row is a **bottom `safeAreaInset`**, the messenger input-bar
+///   pattern, so it rises with the on-screen keyboard rather than hiding
+///   under it. There is no separate "Will send" readout; it cost a whole
+///   row, so what Send will deliver rides on Send's own VoiceOver hint, and
+///   the pad already tints the modifiers it has toggled on.
 ///   The pad must stay OUTSIDE any scroll container (a scroll ancestor
 ///   cancels direct-touch drags; field-verified dead pad in build 25).
 /// - Plain text is typed into a normal text field and sent through the
@@ -42,19 +44,27 @@ struct VirtualInputView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
-                pad
-                controlRow
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 4)
-            .navigationTitle("Virtual Input")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    InfoButton { showInfo = true }
+            pad
+                .padding(.horizontal)
+                // Messenger-style input bar: as a bottom safe-area inset the
+                // row rides *up* with the on-screen keyboard instead of being
+                // covered by it (a plain VStack let the keyboard bury Send,
+                // keep text and dismiss — field-reported 2026-08-05). The pad
+                // gives up the height, so every band stays reachable while
+                // typing, and gets it back when the keyboard goes away.
+                .safeAreaInset(edge: .bottom, spacing: 8) {
+                    controlRow
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(.bar)
                 }
-            }
-            .sheet(isPresented: $showInfo) { infoSheet }
+                .navigationTitle("Virtual Input")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        InfoButton { showInfo = true }
+                    }
+                }
+                .sheet(isPresented: $showInfo) { infoSheet }
         }
         .onReceive(NotificationCenter.default.publisher(for: Self.sendRequested)) { _ in
             send()
