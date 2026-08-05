@@ -9,10 +9,13 @@ import BridgeCore
 ///   one accessibility element whose raw touches bypass VoiceOver's gesture
 ///   round-trip entirely — drag to hear keys, lift to send, lift on a
 ///   modifier to toggle it. The earlier adjustable rows were retired in its
-///   favor (field decision 2026-07-19). Layout (also field-specified): the
-///   "Will send" readout + Send on top, then the text field with a compact
-///   dismiss-keyboard button beside it, and the pad filling the entire rest
-///   of the screen — the bigger the zones, the better the muscle memory.
+///   favor (field decision 2026-07-19). Layout (also field-specified,
+///   revised 2026-08-05): the pad fills everything from the title down —
+///   the bigger the zones, the better the muscle memory — over a **single
+///   control row** at the bottom: text field, dismiss keyboard, keep text,
+///   Send. There is no separate "Will send" readout; it cost a whole row,
+///   so what Send will deliver rides on Send's own VoiceOver hint, and the
+///   pad already tints the modifiers it has toggled on.
 ///   The pad must stay OUTSIDE any scroll container (a scroll ancestor
 ///   cancels direct-touch drags; field-verified dead pad in build 25).
 /// - Plain text is typed into a normal text field and sent through the
@@ -39,12 +42,12 @@ struct VirtualInputView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                sendRow
-                textRow
+            VStack(spacing: 8) {
                 pad
+                controlRow
             }
             .padding(.horizontal)
+            .padding(.bottom, 4)
             .navigationTitle("Virtual Input")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -60,38 +63,11 @@ struct VirtualInputView: View {
 
     // MARK: Layout
 
-    /// Top row: what Send will deliver, and Send itself to the right.
-    private var sendRow: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Will send")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(comboDescription)
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Will send")
-            .accessibilityValue(comboDescription)
-            .accessibilityAddTraits(.updatesFrequently)
-
-            Button {
-                send()
-            } label: {
-                Text("Send")
-                    .fontWeight(.semibold)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!hasSomethingToSend)
-            .accessibilityHint("Sends the combination to the Windows PC")
-        }
-    }
-
-    /// Text entry, then the keep-text toggle and a compact dismiss-keyboard
-    /// button. Keep text sits here rather than in Settings because it is
-    /// flipped several times in a session (field decision 2026-08-05).
-    private var textRow: some View {
+    /// The one and only chrome row, under the pad: text field, dismiss
+    /// keyboard, keep text, Send. Everything but the field is icon-sized so
+    /// the field keeps usable width on a phone, and the row sits right above
+    /// the on-screen keyboard when it comes up.
+    private var controlRow: some View {
         HStack(spacing: 8) {
             TextField("Text to type", text: $text)
                 .textFieldStyle(.roundedBorder)
@@ -101,6 +77,16 @@ struct VirtualInputView: View {
                 .accessibilityHint(settings.virtualInputKeepText
                     ? "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts. It is kept after sending, so Send repeats it."
                     : "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
+
+            Button {
+                textFieldFocused = false
+            } label: {
+                Image(systemName: "keyboard.chevron.compact.down")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!textFieldFocused)
+            .accessibilityLabel("Dismiss keyboard")
+            .accessibilityHint("Closes the on-screen keyboard")
 
             Toggle(isOn: Binding(
                 get: { settings.virtualInputKeepText },
@@ -117,20 +103,28 @@ struct VirtualInputView: View {
             .accessibilityHint("On: Send leaves the text in the field, so pressing Send again repeats it. Off: the field is cleared after each send.")
 
             Button {
-                textFieldFocused = false
+                send()
             } label: {
-                Image(systemName: "keyboard.chevron.compact.down")
+                Text("Send")
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .fixedSize()
             }
-            .buttonStyle(.bordered)
-            .disabled(!textFieldFocused)
-            .accessibilityLabel("Dismiss keyboard")
-            .accessibilityHint("Closes the on-screen keyboard")
+            .buttonStyle(.borderedProminent)
+            .disabled(!hasSomethingToSend)
+            // Replaces the old "Will send" readout: the combination is spoken
+            // as the hint, so focusing Send tells you what it delivers without
+            // a row of its own. Recomputed on every focus, so it never goes
+            // stale as modifiers are toggled on the pad.
+            .accessibilityHint(hasSomethingToSend
+                ? "Sends \(comboDescription) to the Windows PC"
+                : "Nothing selected to send")
         }
     }
 
-    /// The pad owns the toggled modifiers (toggle zones on its top band);
-    /// the "Will send" readout and Send read the same state. Pad sends
-    /// always wrap in the toggled modifiers.
+    /// The pad owns the toggled modifiers (toggle zones on its top band) and
+    /// tints the ones that are on; Send reads the same state for its hint.
+    /// Pad sends always wrap in the toggled modifiers.
     private var pad: some View {
         VirtualKeyPad(
             settings: settings,
@@ -146,7 +140,6 @@ struct VirtualInputView: View {
             onSend: { key in sendImmediate(key) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.bottom, 8)
     }
 
     // MARK: Info sheet
@@ -165,7 +158,7 @@ struct VirtualInputView: View {
                 Text("Two-finger tap on the pad clears all toggled modifiers. Sending is silent when it works; you only hear a message when something failed.")
             }
             Section("Modifiers") {
-                Text("Modifiers you toggle on the pad stay on and wrap every key you send, until you clear them or press Send. The Will send line always shows what is active.")
+                Text("Modifiers you toggle on the pad stay on and wrap every key you send, until you clear them or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
             }
             Section("Text") {
                 Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers toggled, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
@@ -174,7 +167,7 @@ struct VirtualInputView: View {
                 if settings.virtualInputKeepText {
                     Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text. Keep text after sending is on, so the modifiers reset but the text stays in the field: pressing Send again repeats it. Clear the field yourself, or turn the button off, when you are done with that text.")
                 } else {
-                    Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text, then resets both. To repeat the same text — a single letter for screen-reader navigation, say — turn on Keep text after sending, the button between the text field and Dismiss keyboard.")
+                    Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text, then resets both. To repeat the same text — a single letter for screen-reader navigation, say — turn on Keep text after sending, the button just left of Send.")
                 }
                 Text("Sending needs forwarding: if it is off, Send turns it on and asks you to send again once connected.")
             }

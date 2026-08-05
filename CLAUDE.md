@@ -155,9 +155,13 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside
   a Form section and the pad was dead in the field (2026-07-19). Don't move
   it back into scrollable content.
-- **Tab layout (field-specified 2026-07-19):** "Will send" readout + Send on
-  top, text field + compact dismiss-keyboard button below it, pad filling
-  the whole rest of the screen. No Form on this tab.
+- **Tab layout (field-specified 2026-07-19, revised 2026-08-05):** pad
+  filling everything from the title down, over a **single control row** at
+  the bottom: text field, dismiss keyboard, keep text, Send. No Form on this
+  tab. The separate "Will send" readout was **removed** — it cost a whole row
+  for something only VoiceOver read; what Send will deliver is now Send's
+  **accessibility hint** (`comboDescription`, recomputed on focus), and the
+  pad already tints its toggled modifiers. Don't reintroduce the readout row.
 - **Every tab has a top-right info button** (`InfoSheet.swift`) opening a
   sheet that explains the screen *as currently configured* (e.g. Virtual
   Input's text follows `virtualPadSliderMode`). The Start tab's sheet also
