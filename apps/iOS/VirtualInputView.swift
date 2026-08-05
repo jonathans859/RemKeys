@@ -18,7 +18,10 @@ import BridgeCore
 /// - Plain text is typed into a normal text field and sent through the
 ///   layout-independent unicode path, so it types verbatim on any PC layout;
 ///   when modifiers are held it switches to US-position keys, because
-///   shortcuts match keys, not characters.
+///   shortcuts match keys, not characters. The field normally clears after
+///   Send; `virtualInputKeepText` pins it instead, for repeating one
+///   keystroke (single-letter screen-reader navigation on the PC) without
+///   retyping it between sends.
 /// - A two-finger double tap (magic tap) sends from anywhere on this tab,
 ///   and the top-right info button explains the pad's current gesture set
 ///   (it follows the slider-mode and F13–F24 settings).
@@ -85,7 +88,9 @@ struct VirtualInputView: View {
         }
     }
 
-    /// Text entry with a compact dismiss-keyboard button beside it.
+    /// Text entry, then the keep-text toggle and a compact dismiss-keyboard
+    /// button. Keep text sits here rather than in Settings because it is
+    /// flipped several times in a session (field decision 2026-08-05).
     private var textRow: some View {
         HStack(spacing: 8) {
             TextField("Text to type", text: $text)
@@ -93,7 +98,24 @@ struct VirtualInputView: View {
                 .focused($textFieldFocused)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .accessibilityHint("Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
+                .accessibilityHint(settings.virtualInputKeepText
+                    ? "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts. It is kept after sending, so Send repeats it."
+                    : "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
+
+            Toggle(isOn: Binding(
+                get: { settings.virtualInputKeepText },
+                set: { settings.virtualInputKeepText = $0 }
+            )) {
+                Image(systemName: settings.virtualInputKeepText ? "pin.fill" : "pin")
+            }
+            .toggleStyle(.button)
+            // The button style carries the state visually (tinted) and as the
+            // "selected" trait; the explicit value guarantees VoiceOver speaks
+            // it either way, since nothing else on screen shows it.
+            .accessibilityLabel("Keep text after sending")
+            .accessibilityValue(settings.virtualInputKeepText ? "On" : "Off")
+            .accessibilityHint("On: Send leaves the text in the field, so pressing Send again repeats it. Off: the field is cleared after each send.")
+
             Button {
                 textFieldFocused = false
             } label: {
@@ -149,7 +171,12 @@ struct VirtualInputView: View {
                 Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers toggled, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
             }
             Section("Sending") {
-                Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text, then resets both. Sending needs forwarding: if it is off, Send turns it on and asks you to send again once connected.")
+                if settings.virtualInputKeepText {
+                    Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text. Keep text after sending is on, so the modifiers reset but the text stays in the field: pressing Send again repeats it. Clear the field yourself, or turn the button off, when you are done with that text.")
+                } else {
+                    Text("Send — or a two-finger double tap anywhere on this tab — delivers the toggled modifiers plus the typed text, then resets both. To repeat the same text — a single letter for screen-reader navigation, say — turn on Keep text after sending, the button between the text field and Dismiss keyboard.")
+                }
+                Text("Sending needs forwarding: if it is off, Send turns it on and asks you to send again once connected.")
             }
         }
     }
@@ -249,9 +276,10 @@ struct VirtualInputView: View {
         for vk in modifiers.reversed() { bridge.sendKey(vk: vk, pressed: false) }
 
         // Reset so the next combination starts clean: modifiers off, text
-        // cleared.
+        // cleared — unless the text is pinned, in which case it stays put so
+        // the same keystroke can be fired again with a single Send.
         selectedModifiers.removeAll()
-        text = ""
+        if !settings.virtualInputKeepText { text = "" }
 
         var confirmation = "Sent \(sentDescription)"
         if skippedCharacters > 0 {

@@ -97,6 +97,17 @@ public final class AppSettings {
         didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
     }
 
+    /// Whether the Virtual Input text field keeps its contents after Send
+    /// instead of clearing. Off by default (one combination, then a clean
+    /// slate), but a screen-reader user driving single-letter navigation on
+    /// the PC — "h" for headings, "k" for links — sends the *same* text over
+    /// and over, and retyping it into the field after every send is the whole
+    /// cost of the feature. Modifiers still reset either way; only the text
+    /// is sticky.
+    public var virtualInputKeepText: Bool {
+        didSet { defaults.set(virtualInputKeepText, forKey: Keys.virtualInputKeepText) }
+    }
+
     // MARK: Function-key row (macOS)
 
     /// Whether the Mac's fn-key row is remapped to send plain F1–F12 while
@@ -143,6 +154,7 @@ public final class AppSettings {
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
+        self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
         // Defaults to true: `bool(forKey:)` can't express that, so read the raw
         // object and fall back only when nothing was ever stored.
         self.forwardFunctionKeyRow = defaults.object(forKey: Keys.forwardFunctionKeyRow) as? Bool ?? true
@@ -178,6 +190,7 @@ public final class AppSettings {
         // toggle; its stored value is simply ignored now.
         static let virtualPadSliderMode = "virtualPadSliderMode"
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
+        static let virtualInputKeepText = "virtualInputKeepText"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
     }
 }

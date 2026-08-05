@@ -173,6 +173,14 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   work); **with modifiers → US-position VKs** via `USCharVK` (shortcut
   semantics, Shift-wrapped as needed, unmappable characters skipped and
   announced).
+- **Sticky text** (`virtualInputKeepText`, off by default): Send normally
+  clears the text field; with this on it keeps its contents so the same text
+  fires again on the next Send. Requested 2026-08-05 for single-letter
+  screen-reader navigation on the PC (`h` for headings), where retyping the
+  letter after every send was the whole cost. Modifiers still reset on Send in
+  both modes — only the text is sticky. Its toggle lives **in the text row**
+  (between the field and Dismiss keyboard), not in Settings: it is flipped
+  several times per session, unlike the set-and-forget pad settings.
 
 ### macOS (`apps/macOS/KeyCapture.swift`)
 - **`CGEventTap` at `.cghidEventTap`** sees every keyDown/keyUp/flagsChanged

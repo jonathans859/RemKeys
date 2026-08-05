@@ -9,12 +9,15 @@ final class AppSettingsTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         XCTAssertFalse(settings.virtualPadSliderMode)
         XCTAssertFalse(settings.virtualPadExtendedFKeys)
+        XCTAssertFalse(settings.virtualInputKeepText)
 
         settings.virtualPadSliderMode = true
         settings.virtualPadExtendedFKeys = true
+        settings.virtualInputKeepText = true
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertTrue(reloaded.virtualPadSliderMode)
         XCTAssertTrue(reloaded.virtualPadExtendedFKeys)
+        XCTAssertTrue(reloaded.virtualInputKeepText)
     }
 
     /// This one defaults to *true*, which `bool(forKey:)` can't express — so a
