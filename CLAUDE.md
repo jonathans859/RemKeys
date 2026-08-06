@@ -73,11 +73,25 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
 
 ### iOS (`apps/iOS/KeyboardCapture.swift`)
 - A `UIViewRepresentable`-hosted `CaptureView` holds first responder and reads
-  raw `pressesBegan/Ended/Cancelled`. Not UIKeyCommand (no key-up, no
-  individual modifiers). Not GCKeyboard — it *does* expose per-key up/down
-  including left/right modifiers via `keyChangedHandler`, but the handler has
-  a history of silently never firing on real devices (SDL issue #6465), which
-  is disqualifying for an input bridge.
+  raw `pressesBegan/Ended/Cancelled`. Not UIKeyCommand as the *main* path (no
+  key-up, no individual modifiers).
+- **Two capture sources, merged** (`GameControllerCapture.swift`, since
+  2026-08-06). `pressesBegan` stays primary, but GCKeyboard's
+  `keyChangedHandler` runs beside it: it reads the keyboard at the HID layer,
+  below the responder chain and below whatever the system claims, so it still
+  sees the Cmd chords UIKit never delivers. It is *not* the sole source
+  because the handler has a history of silently never firing on real devices
+  (SDL #6465) — so both run and `CaptureView.report(_:pressed:from:)` merges
+  them by counting **holders per HID usage**: a key goes down when the first
+  source reports it and up when the last one lets go. Whichever source sees a
+  key carries it; a key both see is forwarded once; a dead GCKeyboard leaves
+  behavior exactly as before. `GCKeyCode` raw values *are* HID usages, so both
+  sources resolve through the same `HIDToVK` table (usage-keyed entry point).
+  Two gates the HID source needs and the responder chain gave for free:
+  it only forwards while the capture view is first responder (it is delivered
+  app-wide, so otherwise it would forward what the user types into the app's
+  own text fields), and the toggle shortcut's key is suppressed explicitly
+  (`swallowedGameControllerKeys`) or it would type itself on the PC.
 - **No "priority override" exists — none is needed.** The reference code's
   `_wantsPriorityOverSystemBehaviorWhenKeyboardEvent()` was dead code, and the
   first attempted fix (`override func
@@ -113,15 +127,31 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   Cmd chords (Cmd+B/I/U, Cmd+A/C/V/X/Z/F, …) **before `pressesBegan`** —
   field-verified 2026-07-19 (Win+B reached the PC as a bare Win press;
   Windows-side injection was exonerated by a RegisterHotKey probe fed
-  agent-identical scancode INPUTs). Stripping the auto-built main menu via
-  app-delegate `buildMenu(with:)` (`AppDelegate.swift`, kept as belt) was
-  **field-tested INSUFFICIENT** (build 24). The working fix lives in
-  `CaptureView.keyCommands`: while forwarding, claim every Cmd/Cmd+Shift
-  letter/digit chord with priority `UIKeyCommand`s
-  (`wantsPriorityOverSystemBehavior = true`) and forward a synthetic
-  down+up via `USCharVK` (held modifiers were already forwarded as their
-  own presses). Tap-only semantics for claimed chords; claim list is empty
-  while forwarding is off.
+  agent-identical scancode INPUTs). **Two fixes have already failed in the
+  field**, don't re-try either on its own: stripping the auto-built main menu
+  via app-delegate `buildMenu(with:)` (build 24), and claiming the chords
+  back in `CaptureView.keyCommands` with priority `UIKeyCommand`s (build 39,
+  reported 2026-08-06). Both are kept as belts, plus a third: the
+  **GCKeyboard source is the actual carrier** — it sits below the layer doing
+  the stealing, which is the only structural reason to expect it to hold.
+  Supporting changes shipped with it:
+  - `keyCommands` is no longer gated on `forwardingEnabled`. UIKit collects a
+    responder's key commands when the responder chain changes, not per
+    keystroke, so the old list — empty at the moment the view took first
+    responder — plausibly stayed empty all session. A constant list has
+    nothing to invalidate. It is safe because the app's text fields are never
+    *below* the capture view in the responder chain.
+  - `AppDelegate` now also removes the menu groups **upfront** via iOS 26's
+    `UIMainMenuSystem.shared.setBuildConfiguration` (`textFormattingPreference
+    = .removed` etc.) in `didFinishLaunchingWithOptions`. `buildMenu(with:)`
+    runs *after* the menu is built and its chords reserved, which is the
+    likeliest reason build 24's removals changed nothing.
+  - A claimed chord no longer forwards its synthetic `USCharVK` down+up when
+    the HID source is live — that would type the key twice.
+  - Diagnostics gained **HID capture / Last HID key / Command chords claimed**,
+    so one field test now says which layer a missing chord died at: "Last key
+    seen" is UIKit, "Last HID key" is GCKeyboard, and a chord that shows up in
+    neither never reached the app at all.
 
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
 - On-screen key sender (iOS-only tab), VoiceOver-first. The UI is the

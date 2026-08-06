@@ -29,6 +29,18 @@ final class CaptureDiagnostics {
     var lastKey: String?
     /// Key-downs seen that had no Windows VK mapping.
     var unmappedSeen = 0
+    /// Whether the HID-level (GameController) source has ever delivered a key.
+    /// False while typing means `keyChangedHandler` is silently dead on this
+    /// device (SDL #6465) and Cmd chords depend on the UIKeyCommand claim.
+    var gameControllerIsLive = false
+    /// Key transitions seen on the HID-level source, forwarded or not.
+    var gameControllerKeysSeen = 0
+    /// Readable name of the last key-down the HID-level source reported. The
+    /// decisive row for a stolen chord: a name here with nothing in
+    /// `lastKey` means UIKit never got the key but the app did.
+    var lastGameControllerKey: String?
+    /// Cmd chords intercepted by the priority `UIKeyCommand` claim.
+    var chordsClaimed = 0
 
     private init() {
         refreshKeyboard()

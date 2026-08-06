@@ -201,6 +201,20 @@ struct ContentView: View {
                 Text(diagnostics.lastKey ?? "None yet")
             }
             .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("HID capture") {
+                Text(diagnostics.gameControllerIsLive
+                     ? "Live, \(diagnostics.gameControllerKeysSeen) events"
+                     : "No events yet")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("Last HID key") {
+                Text(diagnostics.lastGameControllerKey ?? "None yet")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
+            LabeledContent("Command chords claimed") {
+                Text("\(diagnostics.chordsClaimed)")
+            }
+            .accessibilityAddTraits(.updatesFrequently)
             if diagnostics.unmappedSeen > 0 {
                 LabeledContent("Unmapped key-downs") {
                     Text("\(diagnostics.unmappedSeen)")
@@ -209,7 +223,7 @@ struct ContentView: View {
         } header: {
             Text("Diagnostics")
         } footer: {
-            Text("If a keyboard is detected but Key-downs seen stays at zero while you type, another layer is consuming keys before they reach RemKeys — with VoiceOver running that is usually QuickNav. Try turning QuickNav off (press Left and Right arrow together) and typing again.")
+            Text("If a keyboard is detected but Key-downs seen stays at zero while you type, another layer is consuming keys before they reach RemKeys — with VoiceOver running that is usually QuickNav. Try turning QuickNav off (press Left and Right arrow together) and typing again. Key-downs seen counts keys UIKit delivers; HID capture counts the same keys read straight from the keyboard, which is the path that still sees Command chords when the system keeps them.")
         }
     }
 

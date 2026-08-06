@@ -19,7 +19,26 @@ enum HIDToVK {
         leftCommandMapping: ModifierMapping,
         rightCommandMapping: ModifierMapping
     ) -> UInt16? {
-        switch key.keyCode {
+        vk(
+            for: key.keyCode,
+            leftOptionMapping: leftOptionMapping,
+            rightOptionMapping: rightOptionMapping,
+            leftCommandMapping: leftCommandMapping,
+            rightCommandMapping: rightCommandMapping
+        )
+    }
+
+    /// Usage-based entry point. The table is keyed on the HID usage alone so
+    /// GameController (`GCKeyCode` raw values *are* HID usages) resolves
+    /// through exactly the same mapping as UIKit's `UIKey`.
+    static func vk(
+        for usage: UIKeyboardHIDUsage,
+        leftOptionMapping: ModifierMapping,
+        rightOptionMapping: ModifierMapping,
+        leftCommandMapping: ModifierMapping,
+        rightCommandMapping: ModifierMapping
+    ) -> UInt16? {
+        switch usage {
         // MARK: Letters
         case .keyboardA: return VK.a
         case .keyboardB: return VK.b
@@ -170,6 +189,11 @@ enum HIDToVK {
         log.notice("Unmapped key: hidUsage=\(key.keyCode.rawValue, privacy: .public) chars=\(key.characters, privacy: .public)")
     }
 
+    /// Same, for a source that only knows the usage (GameController).
+    static func logUnmapped(usage: UIKeyboardHIDUsage) {
+        log.notice("Unmapped key: hidUsage=\(usage.rawValue, privacy: .public)")
+    }
+
     // MARK: Toggle-shortcut support
 
     /// True if the key is a modifier — never valid as a shortcut's *main* key.
@@ -206,6 +230,25 @@ enum HIDToVK {
             return chars.uppercased()
         }
         return "Key \(key.keyCode.rawValue)"
+    }
+
+    /// Readable name from a bare usage — the GameController path has no
+    /// `UIKey`, so letters and digits are derived from the usage ranges.
+    static func keyName(forUsage usage: UIKeyboardHIDUsage) -> String {
+        if let special = specialNames[usage] { return special }
+        let raw = usage.rawValue
+        let firstLetter = UIKeyboardHIDUsage.keyboardA.rawValue
+        if raw >= firstLetter, raw <= UIKeyboardHIDUsage.keyboardZ.rawValue {
+            let scalar = Unicode.Scalar(UInt8(ascii: "A") + UInt8(raw - firstLetter))
+            return String(Character(scalar))
+        }
+        if raw >= UIKeyboardHIDUsage.keyboard1.rawValue, raw <= UIKeyboardHIDUsage.keyboard0.rawValue {
+            let digit = raw == UIKeyboardHIDUsage.keyboard0.rawValue
+                ? 0
+                : raw - UIKeyboardHIDUsage.keyboard1.rawValue + 1
+            return String(digit)
+        }
+        return "Key \(raw)"
     }
 
     private static let specialNames: [UIKeyboardHIDUsage: String] = [
