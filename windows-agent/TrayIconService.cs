@@ -7,15 +7,18 @@ namespace KeyBridgeAgent;
 /// <summary>
 /// System-tray presence for the otherwise windowless agent: an icon whose
 /// tooltip and context menu carry the live status (waiting / connected /
-/// port busy, plus a "not elevated" marker), and an Exit item that stops the
-/// host cleanly. The tooltip text is what a screen reader announces when
-/// navigating the tray, so it is the accessible status channel — full
-/// sentences, no icon-only state.
+/// port busy, plus a "not elevated" marker), an item that switches lock-screen
+/// support on or off, and an Exit item that stops the agent cleanly. The
+/// tooltip text is what a screen reader announces when navigating the tray, so
+/// it is the accessible status channel — full sentences, no icon-only state.
+///
+/// Runs in standalone mode and in the Default-desktop helper; which of those
+/// it is only shows through <see cref="ITrayHost"/>.
 /// </summary>
 public sealed class TrayIconService : IHostedService
 {
     private readonly AgentStatus _status;
-    private readonly IHostApplicationLifetime _lifetime;
+    private readonly ITrayHost _host;
     private readonly ILogger<TrayIconService> _logger;
 
     private Thread? _uiThread;
@@ -24,10 +27,10 @@ public sealed class TrayIconService : IHostedService
     private ToolStripMenuItem? _statusItem;
     private nint _iconHandle;
 
-    public TrayIconService(AgentStatus status, IHostApplicationLifetime lifetime, ILogger<TrayIconService> logger)
+    public TrayIconService(AgentStatus status, ITrayHost host, ILogger<TrayIconService> logger)
     {
         _status = status;
-        _lifetime = lifetime;
+        _host = host;
         _logger = logger;
     }
 
@@ -53,8 +56,11 @@ public sealed class TrayIconService : IHostedService
             _statusItem = new ToolStripMenuItem(_status.Description) { Enabled = false };
             var menu = new ContextMenuStrip();
             menu.Items.Add(_statusItem);
+            menu.Items.Add(new ToolStripMenuItem(_host.ModeLine) { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit RemKeys agent", null, (_, _) => _lifetime.StopApplication());
+            menu.Items.Add(_host.ToggleLabel, null, (_, _) => SafeInvoke(_host.Toggle));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("Exit RemKeys agent", null, (_, _) => SafeInvoke(_host.Exit));
 
             _icon = new NotifyIcon
             {
@@ -74,6 +80,22 @@ public sealed class TrayIconService : IHostedService
             // The tray is a convenience — its death must never take the
             // keystroke service down with it.
             _logger.LogError(ex, "Tray icon thread failed; agent continues without a tray icon.");
+        }
+    }
+
+    /// <summary>
+    /// A menu handler that throws would take down the tray thread and, with
+    /// it, the only status channel a screen reader has.
+    /// </summary>
+    private void SafeInvoke(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "A tray menu action failed.");
         }
     }
 

@@ -10,6 +10,11 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+REM Lock screen support first: its service would otherwise respawn the desktop
+REM helpers that taskkill is about to remove.
+sc stop KeyBridgeSecureAgent >nul 2>&1
+sc delete KeyBridgeSecureAgent >nul 2>&1
+
 schtasks /End /TN "KeyBridgeAgent" >nul 2>&1
 taskkill /IM KeyBridgeAgent.exe /F >nul 2>&1
 schtasks /Delete /TN "KeyBridgeAgent" /F >nul 2>&1

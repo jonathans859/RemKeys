@@ -41,6 +41,20 @@ public sealed class AgentStatus
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Adopt a status line verbatim. Used by a desktop helper, whose status is
+    /// really the service's — the helper has no listener of its own to describe,
+    /// and the text arriving over the pipe already carries any marker.
+    /// </summary>
+    public void SetDescription(string description)
+    {
+        lock (_gate)
+        {
+            _detail = description;
+        }
+        Changed?.Invoke();
+    }
+
     public AgentState State
     {
         get { lock (_gate) { return _state; } }

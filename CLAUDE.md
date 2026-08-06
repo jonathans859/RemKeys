@@ -255,8 +255,12 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   user can track remote state from the sound alone.
 
 ## Windows agent
-- .NET 8 worker host. **Runs as a logon scheduled task in the user's
-  session, NOT a Windows service** (`install-agent.bat` /
+- .NET 8 worker host, **one exe with four modes** (`AgentMode.cs`): no args =
+  the in-session agent, `--service` = the lock-screen supervisor, `--helper
+  --desktop <name>` = a per-desktop injector, and `--install-service` /
+  `--uninstall-service` = the one-shot mode switchers.
+- **Default install: a logon scheduled task in the user's session, and the
+  injecting process is NEVER a session 0 service** (`install-agent.bat` /
   `uninstall-agent.bat`, **run as Administrator**). A service lives in
   session 0, where `SendInput` cannot reach the interactive desktop — every
   injection is rejected (verified in the field 2026-07-17; the agent
@@ -268,6 +272,59 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   root is pinned to `AppContext.BaseDirectory` because the task starts in
   `System32`, where the default (CWD) content root would silently miss the
   `appsettings.json` next to the exe.
+
+### Optional lock-screen support (service + per-desktop helpers)
+- **The problem it solves is a *desktop* problem, not a privilege one.** The
+  lock screen, the sign-in screen and the UAC consent prompt render on the
+  `Winlogon` desktop; `SendInput` only ever reaches the input queue of the
+  desktop the calling thread is attached to. No integrity level and no
+  uiAccess flag crosses that boundary — **uiAccess would buy nothing here**
+  (and is unreachable unsigned anyway). The only fix is a process *on that
+  desktop*.
+- **Shape**: a LocalSystem service (`KeyBridgeSecureAgent`) owns the socket,
+  the wire parser and the peer policy in session 0, and never injects.
+  `DesktopSupervisor` duplicates the service's own token, re-homes it to the
+  console session (`WTSGetActiveConsoleSessionId` +
+  `SetTokenInformation(TokenSessionId)`) and `CreateProcessAsUser`s one helper
+  per desktop with `STARTUPINFO.lpDesktop` = `WinSta0\Default` /
+  `WinSta0\Winlogon` (`Native.cs`). Parsed events go out over a named pipe
+  (`InjectionChannel.cs`) as the *same* newline wire format, so helpers reuse
+  `WireProtocol`/`LineReader` and never see anything the parser didn't approve.
+- **Helpers self-route**: the hub broadcasts to both, and each injects only
+  while `OpenInputDesktop` says its own desktop is in front (50 ms cache,
+  250 ms poll). That decision must live in the helper — session 0 is on a
+  different window station and cannot see these desktops at all. When a helper
+  goes inactive it **releases every key it still holds**, or locking mid-chord
+  leaves a modifier stuck on the desktop being left.
+- Helpers run as **LocalSystem, i.e. above High IL**, so elevated windows and
+  NVDA's uiAccess dialogs work with no certificate and no elevation dance —
+  the un-elevated footgun simply doesn't exist in this mode. It also starts
+  **before sign-in**, so the password can be typed at a cold boot.
+- **A helper's life is one pipe session.** It exits when the pipe drops rather
+  than reconnecting; the supervisor spawns a fresh one. A lingering helper
+  plus a new one would be two injectors on one desktop typing everything
+  twice. For the same reason the hub is registered *after* the supervisor:
+  hosted services stop in reverse, so pipes close (helpers leave cleanly,
+  releasing held keys) before the supervisor reaches for `Kill()`.
+- **Exactly one of the two installs may run** — they would fight for port
+  5391. Switching is a tray menu item ("Turn on/off lock screen support…",
+  `TrayHosts.cs`) that relaunches the exe with the install/uninstall verb;
+  `install-lockscreen.bat` / `uninstall-lockscreen.bat` are the no-tray
+  recovery path. Installing removes the logon task, uninstalling re-creates it
+  (asking WTS who is signed in, since LocalSystem has no "current user").
+- **Security consequence, deliberate**: with this on, anyone who can reach the
+  port can type at the lock screen, and the listener is LocalSystem. So in
+  service mode *only*, the peer policy tightens — loopback is refused
+  (otherwise any medium-IL process on the PC could type as SYSTEM on the
+  secure desktop, a local EoP that doesn't exist otherwise) and peers outside
+  Tailscale's ranges (100.64.0.0/10, fd7a:115c:a1e0::/48) are refused.
+  `AllowLoopbackPeers` / `AllowNonTailscalePeers` override. The in-session
+  agent keeps its old laxer policy: it can only do what the signed-in user
+  already could.
+- **Ctrl+Alt+Del cannot be injected** — SAS is handled below the input stack.
+  On a box with *Require Ctrl+Alt+Del* set, that needs `SendSAS()` and the
+  `SoftwareSASGeneration` policy; on a default Windows 11 install any keypress
+  goes straight to the password field. Not implemented.
 - **Must run elevated — un-elevated failure is silent and dialog-specific.**
   `SendInput` into windows of **uiAccess** processes (installed NVDA runs
   `uiAccess="True"` — its own dialogs!) or elevated apps is discarded by
@@ -284,11 +341,14 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   carry live status ("Waiting for a connection on port 5391" /
   "Connected to <ip>" / "Port busy", with a "not elevated!" marker) — the
   tooltip is what NVDA announces in the tray, so it's the accessible status
-  channel. Exit menu item stops the host cleanly. `install-agent.bat` also
+  channel. Exit menu item stops the host cleanly (in lock-screen mode it asks
+  the service to stop, taking the helpers with it). `install-agent.bat` also
   clears schtasks defaults that killed the agent (72-h execution limit,
-  stop-on-battery).
+  stop-on-battery). In lock-screen mode the tray lives in the **Default**
+  helper only — nothing on the secure desktop could show one, or read it.
 - `appsettings.json`: `ListenPort` (default 5391), optional `AllowedRemoteIP`
-  (empty = accept any Tailscale peer), `LogDirectory`.
+  (empty = accept any Tailscale peer), `LogDirectory`, and the lock-screen-only
+  `AllowLoopbackPeers` / `AllowNonTailscalePeers` (both off).
 - Keystroke injection via `SendInput` (`KeystrokeInjector.cs`), with the
   extended-key flag set for the nav cluster, right-hand modifiers, numpad
   divide, Win/Apps, and media keys. **All keys are injected scancode-primary
@@ -402,6 +462,10 @@ to TestFlight.
   overlay, menu-bar UI, a11y via audio cues + status line.
 - ✅ Windows agent: TCP listener, wire parser, SendInput injection, service
   scripts, file logging.
+- ✅ Windows agent lock-screen mode: LocalSystem supervisor service +
+  per-desktop helpers, tray toggle, tightened peer policy. **Written but never
+  run** — no .NET SDK on Jonathan's PC, so CI is its first compile and
+  milestone 4 its first execution.
 - ✅ XcodeGen project, fastlane, CI + release workflows, docs.
 - ✅ Signing secrets wired; asset catalogs with a **generated placeholder
   icon** (gradient + "KB→", `apps/{iOS,macOS}/Assets.xcassets`) — replace
@@ -416,3 +480,8 @@ to TestFlight.
 2. **macOS → Windows** — build the Mac app locally, set the Tailscale IP,
    Caps Lock+F11, type into a Windows editor.
 3. **iOS → Windows** — TestFlight build, external keyboard, Start forwarding.
+4. **Lock-screen mode** — tray → "Turn on lock screen support…", confirm the
+   tray comes back and normal typing still works; then Win+L and type; then a
+   UAC prompt; then a full reboot and type the password at the sign-in screen.
+   Check the log has `(helper:Winlogon)` lines. Turn it off again from the tray
+   and confirm the logon task is back.

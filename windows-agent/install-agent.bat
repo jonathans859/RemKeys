@@ -2,10 +2,16 @@
 REM Registers the KeyBridge agent as a LOGON SCHEDULED TASK and starts it.
 REM Run as Administrator, from the folder containing KeyBridgeAgent.exe.
 REM
-REM Why not a Windows service: services run in session 0, where SendInput
-REM cannot reach the interactive desktop - every injected keystroke is
-REM rejected. A logon task runs inside the logged-in user's session, with
+REM Why not a Windows service that injects: services run in session 0, where
+REM SendInput cannot reach the interactive desktop - every injected keystroke
+REM is rejected. A logon task runs inside the logged-in user's session, with
 REM highest privileges so keystrokes also reach elevated windows.
+REM
+REM This install cannot reach the lock screen, the sign-in screen or the UAC
+REM prompt: those render on a separate desktop (Winlogon) that only a process
+REM running ON that desktop can inject into. For that, use the tray menu's
+REM "Turn on lock screen support..." (or install-lockscreen.bat), which adds a
+REM supervising service that spawns a helper per desktop.
 
 setlocal
 set TASK_NAME=KeyBridgeAgent
@@ -32,6 +38,16 @@ if %errorlevel% equ 0 (
     echo Removing old KeyBridgeAgent Windows service...
     sc stop KeyBridgeAgent >nul 2>&1
     sc delete KeyBridgeAgent >nul 2>&1
+)
+
+REM Lock screen support, if it is on, owns the port. Exactly one of the two may
+REM run, and asking for the logon task means asking for the in-session agent.
+sc query KeyBridgeSecureAgent >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Turning off lock screen support first ^(it would fight for the port^)...
+    sc stop KeyBridgeSecureAgent >nul 2>&1
+    sc delete KeyBridgeSecureAgent >nul 2>&1
+    timeout /t 2 /nobreak >nul 2>&1
 )
 
 echo Registering logon task "%TASK_NAME%"...

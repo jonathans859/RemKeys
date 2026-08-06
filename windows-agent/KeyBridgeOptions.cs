@@ -23,4 +23,25 @@ public sealed class KeyBridgeOptions
     /// next to the executable.
     /// </summary>
     public string LogDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Lock-screen mode only: accept connections from outside Tailscale's
+    /// address ranges (100.64.0.0/10 and fd7a:115c:a1e0::/48).
+    ///
+    /// Off by default because in that mode the listener runs as LocalSystem and
+    /// can type on the secure desktop — a connection from anywhere else is a
+    /// way past the lock screen. The classic in-session agent ignores this;
+    /// it can only do what the signed-in user could do anyway.
+    /// </summary>
+    public bool AllowNonTailscalePeers { get; set; }
+
+    /// <summary>
+    /// Lock-screen mode only: accept connections from this machine itself.
+    ///
+    /// Off by default: with a LocalSystem listener, loopback turns any ordinary
+    /// process on this PC into a way to type as SYSTEM on the secure desktop —
+    /// a local privilege-escalation path that does not exist without the
+    /// service.
+    /// </summary>
+    public bool AllowLoopbackPeers { get; set; }
 }

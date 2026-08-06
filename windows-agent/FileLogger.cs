@@ -10,13 +10,21 @@ namespace KeyBridgeAgent;
 public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _directory;
+    private readonly string _tag;
     private readonly object _gate = new();
 
-    public FileLoggerProvider(string directory)
+    /// <param name="tag">
+    /// Which of the agent's processes this is ("agent", "service",
+    /// "helper:Winlogon", …). With lock-screen support on, three processes
+    /// share one log file, and a line is close to useless without knowing
+    /// which desktop it came from.
+    /// </param>
+    public FileLoggerProvider(string directory, string tag = "agent")
     {
         _directory = string.IsNullOrWhiteSpace(directory)
             ? Path.Combine(AppContext.BaseDirectory, "logs")
             : directory;
+        _tag = tag;
         try { Directory.CreateDirectory(_directory); } catch { /* logged path may be invalid; ignore */ }
     }
 
@@ -26,7 +34,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     internal void Write(string categoryName, LogLevel level, string message, Exception? exception)
     {
-        var line = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {categoryName}: {message}";
+        var line = $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] ({_tag}) {categoryName}: {message}";
         if (exception is not null)
         {
             line += Environment.NewLine + exception;
@@ -35,8 +43,23 @@ public sealed class FileLoggerProvider : ILoggerProvider
         var path = Path.Combine(_directory, $"keybridge-{DateTime.Now:yyyy-MM-dd}.log");
         lock (_gate)
         {
-            try { File.AppendAllText(path, line + Environment.NewLine); }
-            catch { /* never crash on a logging failure */ }
+            // The lock only covers this process. With lock-screen support on,
+            // the service and both helpers append to the same file, so a
+            // sharing violation is normal rather than exceptional — retry
+            // briefly before giving the line up.
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                try
+                {
+                    File.AppendAllText(path, line + Environment.NewLine);
+                    return;
+                }
+                catch (IOException)
+                {
+                    Thread.Sleep(5 * (attempt + 1));
+                }
+                catch { return; /* never crash on a logging failure */ }
+            }
         }
     }
 
