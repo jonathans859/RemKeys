@@ -1,10 +1,10 @@
 name: Deploy Windows agent
 
-# Every push to main that touches the agent produces a ready-to-run zip
-# (self-contained build — .NET runtime bundled, no install prerequisites —
-# plus install/uninstall scripts and appsettings.json) attached to the
-# workflow run as an artifact. On Release publish the same zip is also
-# attached to the Release. No signing secrets.
+# Every push to main that touches the agent produces a ready-to-run build
+# (self-contained — .NET runtime bundled, no install prerequisites — plus
+# install/uninstall scripts and appsettings.json) attached to the workflow run
+# as an artifact, which downloads as one zip of loose files. On Release publish
+# the same files go up as a single zip asset. No signing secrets.
 
 on:
   push:
@@ -30,18 +30,26 @@ jobs:
       - name: Publish
         working-directory: windows-agent
         run: dotnet publish KeyBridgeAgent.csproj -c Release -r win-x64 --self-contained true -o publish
-      - name: Package
+      - name: Add the install scripts
         working-directory: windows-agent
         shell: pwsh
-        run: |
-          Copy-Item install-agent.bat, uninstall-agent.bat, install-lockscreen.bat, uninstall-lockscreen.bat publish/
-          Compress-Archive -Path publish/* -DestinationPath KeyBridgeAgent-win-x64.zip
-      - name: Attach zip to this run
+        run: Copy-Item install-agent.bat, uninstall-agent.bat, install-lockscreen.bat, uninstall-lockscreen.bat publish/
+      # Upload the publish folder itself, NOT a zip of it: upload-artifact
+      # already zips what it is given, so handing it a .zip produced a zip
+      # nested inside the downloaded zip.
+      - name: Attach the build to this run
         uses: actions/upload-artifact@v4
         with:
           name: KeyBridgeAgent-win-x64
-          path: windows-agent/KeyBridgeAgent-win-x64.zip
+          path: windows-agent/publish/*
           if-no-files-found: error
+      # A Release asset does want to be one file, so that zip is built here
+      # only, where it is actually the deliverable.
+      - name: Zip for the Release
+        if: github.event_name == 'release'
+        working-directory: windows-agent
+        shell: pwsh
+        run: Compress-Archive -Path publish/* -DestinationPath KeyBridgeAgent-win-x64.zip
       - name: Attach zip to the Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
