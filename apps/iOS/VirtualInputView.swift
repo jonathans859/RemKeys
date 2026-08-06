@@ -10,10 +10,12 @@ import BridgeCore
 ///   round-trip entirely — drag to hear keys, lift to send, lift on a
 ///   modifier to toggle it. The earlier adjustable rows were retired in its
 ///   favor (field decision 2026-07-19). Layout (also field-specified,
-///   revised 2026-08-05): the pad fills everything from the title down —
-///   the bigger the zones, the better the muscle memory — over a **single
-///   control row** at the bottom: text field, dismiss keyboard, keep text,
-///   Send. That row is a **bottom `safeAreaInset`**, the messenger input-bar
+///   revised 2026-08-06): the pad fills everything from the **inline**
+///   title down — the bigger the zones, the better the muscle memory —
+///   over a **single control row** at the bottom: text field, dismiss
+///   keyboard, keep text, Send. The title is inline app-wide because the
+///   large one sits low, costs the pad ~50 points, and overlapped it when
+///   the keyboard came up. That row is a **bottom `safeAreaInset`**, the messenger input-bar
 ///   pattern, so it rises with the on-screen keyboard rather than hiding
 ///   under it. There is no separate "Will send" readout; it cost a whole
 ///   row, so what Send will deliver rides on Send's own VoiceOver hint, and
@@ -45,7 +47,10 @@ struct VirtualInputView: View {
     var body: some View {
         NavigationStack {
             pad
-                .padding(.horizontal)
+                // Tighter than the standard margin on purpose: every point of
+                // width widens the zones, and the pad is aimed at by feel.
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
                 // Messenger-style input bar: as a bottom safe-area inset the
                 // row rides *up* with the on-screen keyboard instead of being
                 // covered by it (a plain VStack let the keyboard bury Send,
@@ -59,6 +64,12 @@ struct VirtualInputView: View {
                         .background(.bar)
                 }
                 .navigationTitle("Virtual Input")
+                // Inline, not the default large title: the large one sits low,
+                // eats ~50 points the pad wants, and — since the pad is not
+                // scrollable content — it had nothing to collapse into, so it
+                // overlapped the pad once the on-screen keyboard squeezed the
+                // layout (field-reported 2026-08-06).
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         InfoButton { showInfo = true }

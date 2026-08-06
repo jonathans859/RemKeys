@@ -54,6 +54,7 @@ struct SettingsView: View {
                 virtualInputSection
             }
             .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     InfoButton { showInfo = true }

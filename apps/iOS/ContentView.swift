@@ -44,6 +44,9 @@ struct ContentView: View {
                     }
                 }
                 .navigationTitle("RemKeys")
+                // Compact title app-wide: it sits at the top of the screen and
+                // leaves the content the height the large title would take.
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         InfoButton { showInfo = true }

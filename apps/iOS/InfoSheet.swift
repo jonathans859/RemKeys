@@ -15,6 +15,7 @@ struct InfoSheet<Content: View>: View {
         NavigationStack {
             Form { content }
                 .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { dismiss() }
