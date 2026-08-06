@@ -13,16 +13,26 @@ namespace KeyBridgeAgent;
 /// </summary>
 public static class PipeProtocol
 {
-    /// <summary>Full path is <c>\\.\pipe\KeyBridgeAgent.inject</c>.</summary>
+    /// <summary>
+    /// Full path is <c>\\.\pipe\KeyBridgeAgent.inject</c>. LocalSystem only —
+    /// this one types on the secure desktop, so its ACL is a security boundary.
+    /// </summary>
     public const string PipeName = "KeyBridgeAgent.inject";
+
+    /// <summary>
+    /// Full path is <c>\\.\pipe\KeyBridgeAgent.status</c>. Deliberately a
+    /// separate pipe with a wider ACL: the tray runs as the signed-in user and
+    /// must never be able to reach the injection channel.
+    /// </summary>
+    public const string StatusPipeName = "KeyBridgeAgent.status";
 
     /// <summary>Helper→service, once on connect: <c>hello &lt;desktop&gt;</c>.</summary>
     public const string Hello = "hello";
 
-    /// <summary>Service→helper: <c>status &lt;text&gt;</c>, for the tray tooltip.</summary>
+    /// <summary>Service→tray: <c>status &lt;text&gt;</c>, for the tooltip and menu.</summary>
     public const string Status = "status";
 
-    /// <summary>Helper→service: the tray's Exit item. Stops the whole service.</summary>
+    /// <summary>Tray→service: the Exit item. Stops the whole service.</summary>
     public const string Stop = "stop";
 
     public static string KeyLine(ushort vk, bool pressed) => $"key {vk} pressed={(pressed ? 1 : 0)}";
@@ -76,17 +86,10 @@ public sealed class InjectionHub : BackgroundService, IKeystrokeSink
     private const int MaxHelpers = 4;
 
     private readonly ILogger<InjectionHub> _logger;
-    private readonly AgentStatus _status;
-    private readonly IHostApplicationLifetime _lifetime;
     private readonly List<HelperConnection> _clients = new();
     private readonly object _gate = new();
 
-    public InjectionHub(ILogger<InjectionHub> logger, AgentStatus status, IHostApplicationLifetime lifetime)
-    {
-        _logger = logger;
-        _status = status;
-        _lifetime = lifetime;
-    }
+    public InjectionHub(ILogger<InjectionHub> logger) => _logger = logger;
 
     public void Key(ushort vk, bool pressed) => Broadcast(PipeProtocol.KeyLine(vk, pressed));
 
@@ -94,7 +97,6 @@ public sealed class InjectionHub : BackgroundService, IKeystrokeSink
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _status.Changed += OnStatusChanged;
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -142,7 +144,6 @@ public sealed class InjectionHub : BackgroundService, IKeystrokeSink
         }
         finally
         {
-            _status.Changed -= OnStatusChanged;
             DisconnectAll();
         }
     }
@@ -151,10 +152,6 @@ public sealed class InjectionHub : BackgroundService, IKeystrokeSink
     {
         var connection = new HelperConnection(server);
         lock (_gate) { _clients.Add(connection); }
-
-        // Whatever the current status is, the freshly connected tray should say
-        // it immediately rather than waiting for the next change.
-        connection.Enqueue($"{PipeProtocol.Status} {_status.Description}");
 
         var pump = Task.Run(() => connection.PumpAsync(stoppingToken), CancellationToken.None);
 
@@ -201,17 +198,11 @@ public sealed class InjectionHub : BackgroundService, IKeystrokeSink
                 connection.Desktop = rest.Length > 0 ? rest : "unknown";
                 _logger.LogInformation("Helper for desktop {Desktop} connected.", connection.Desktop);
                 break;
-            case PipeProtocol.Stop:
-                _logger.LogInformation("Helper for desktop {Desktop} asked the service to stop.", connection.Desktop);
-                _lifetime.StopApplication();
-                break;
             default:
                 _logger.LogWarning("Ignoring unknown line from helper {Desktop}: {Line}", connection.Desktop, trimmed);
                 break;
         }
     }
-
-    private void OnStatusChanged() => Broadcast($"{PipeProtocol.Status} {_status.Description}");
 
     private void Broadcast(string line)
     {

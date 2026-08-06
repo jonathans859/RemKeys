@@ -69,10 +69,12 @@ public static class ServiceSetup
         // seconds retrying.
         WaitForProcessExit(mode.WaitForPid, TimeSpan.FromSeconds(15));
 
-        // Only one of the two may run: the task and the service would fight
-        // over the port, and the winner would be whichever started first.
+        // The logon task stays registered — it is what puts the tray in the
+        // user's session, and only a process there can show a menu a screen
+        // reader can read. It is stopped just long enough to hand the port
+        // over; when it comes back it will see the service running and start
+        // as a tray client instead of a listener.
         Run("schtasks", "/End", "/TN", TaskName);
-        Run("schtasks", "/Delete", "/TN", TaskName, "/F");
 
         // /End returns before the process is actually gone. Two seconds is
         // enough in practice, and the service's listener retries anyway if the
@@ -113,6 +115,20 @@ public static class ServiceSetup
             return 1;
         }
 
+        // Bring the tray back in the user's session. Without it the service
+        // runs headless: no accessible way to read its state, and no way to
+        // turn it off again short of a batch file.
+        var task = EnsureLogonTask(exe);
+        if (task.ExitCode != 0)
+        {
+            Ui.Error("RemKeys",
+                "Lock screen support is on, but the tray icon could not be restored.\r\n\r\n" +
+                task.Output + "\r\n\r\n" +
+                "Keystrokes still work. Run install-agent.bat as Administrator to get the tray back.");
+            return 0;
+        }
+        Run("schtasks", "/Run", "/TN", TaskName);
+
         Ui.Info("RemKeys",
             "Lock screen support is on.\r\n\r\n" +
             "RemKeys now runs as a Windows service and starts before you sign in, so you can type " +
@@ -138,8 +154,36 @@ public static class ServiceSetup
             StopAndDeleteService();
         }
 
-        // Put the classic logon task back. We may be running as LocalSystem
-        // (launched from the helper's tray), which has no "current user" of its
+        var task = EnsureLogonTask(exe);
+        if (task.ExitCode != 0)
+        {
+            Ui.Error("RemKeys",
+                "Lock screen support was removed, but the normal logon task could not be restored.\r\n\r\n" +
+                task.Output + "\r\n\r\n" +
+                "Run install-agent.bat as Administrator to finish putting the agent back.");
+            return task.ExitCode;
+        }
+
+        // Restart it so the tray process notices the service is gone and comes
+        // back up as a full agent rather than a tray client.
+        Run("schtasks", "/End", "/TN", TaskName);
+        Run("schtasks", "/Run", "/TN", TaskName);
+
+        Ui.Info("RemKeys",
+            "Lock screen support is off.\r\n\r\n" +
+            "RemKeys is back to the normal agent that runs while you are signed in. Keystrokes no " +
+            "longer reach the lock screen, the sign-in screen or UAC prompts.");
+        return 0;
+    }
+
+    /// <summary>
+    /// (Re)register the logon task. It is wanted in both modes — as the agent
+    /// itself when lock-screen support is off, and as the tray client when it
+    /// is on — so both directions come through here.
+    /// </summary>
+    private static (int ExitCode, string Output) EnsureLogonTask(string exe)
+    {
+        // We may be running as LocalSystem, which has no "current user" of its
         // own — ask the session who is signed in.
         var user = Native.GetSessionUserName(Native.WTSGetActiveConsoleSessionId());
 
@@ -154,29 +198,16 @@ public static class ServiceSetup
             args.Add("/IT");
         }
 
-        var create = Run("schtasks", args.ToArray());
-        if (create.ExitCode != 0)
+        var result = Run("schtasks", args.ToArray());
+        if (result.ExitCode == 0)
         {
-            Ui.Error("RemKeys",
-                "Lock screen support was removed, but the normal logon task could not be restored.\r\n\r\n" +
-                create.Output + "\r\n\r\n" +
-                "Run install-agent.bat as Administrator to finish putting the agent back.");
-            return create.ExitCode;
+            // schtasks defaults would stop the agent after 72 hours and refuse
+            // to run on battery — same fix-up install-agent.bat applies.
+            Run("powershell", "-NoProfile", "-Command",
+                $"Set-ScheduledTask -TaskName '{TaskName}' -Settings (New-ScheduledTaskSettingsSet " +
+                "-ExecutionTimeLimit (New-TimeSpan -Seconds 0) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries)");
         }
-
-        // schtasks defaults would stop the agent after 72 hours and refuse to
-        // run on battery — same fix-up install-agent.bat applies.
-        Run("powershell", "-NoProfile", "-Command",
-            $"Set-ScheduledTask -TaskName '{TaskName}' -Settings (New-ScheduledTaskSettingsSet " +
-            "-ExecutionTimeLimit (New-TimeSpan -Seconds 0) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries)");
-
-        Run("schtasks", "/Run", "/TN", TaskName);
-
-        Ui.Info("RemKeys",
-            "Lock screen support is off.\r\n\r\n" +
-            "RemKeys is back to the normal agent that runs while you are signed in. Keystrokes no " +
-            "longer reach the lock screen, the sign-in screen or UAC prompts.");
-        return 0;
+        return result;
     }
 
     private static void StopAndDeleteService()

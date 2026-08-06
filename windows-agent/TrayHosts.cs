@@ -95,18 +95,24 @@ public sealed class StandaloneTrayHost : ITrayHost
 }
 
 /// <summary>
-/// Service install, seen from the Default-desktop helper — the only one of the
-/// two helpers that has a tray icon (nothing on the secure desktop could show
-/// one, and there would be no one to see it).
+/// Service install, seen from the ordinary logon-task process — which, while
+/// lock-screen support is on, runs no listener and injects nothing, and exists
+/// only to carry this tray.
+///
+/// It has to be this process and not a desktop helper: helpers are LocalSystem
+/// (System integrity), and a screen reader at medium integrity with uiAccess
+/// cannot read the UI of a System-integrity process, so a helper-owned menu
+/// reads as empty (field-reported 2026-08-06). The logon task runs as the user,
+/// exactly where the tray has always worked.
 /// </summary>
-public sealed class HelperTrayHost : ITrayHost
+public sealed class ServiceClientTrayHost : ITrayHost
 {
-    private readonly HelperWorker _helper;
-    private readonly ILogger<HelperTrayHost> _logger;
+    private readonly TrayClientWorker _client;
+    private readonly ILogger<ServiceClientTrayHost> _logger;
 
-    public HelperTrayHost(HelperWorker helper, ILogger<HelperTrayHost> logger)
+    public ServiceClientTrayHost(TrayClientWorker client, ILogger<ServiceClientTrayHost> logger)
     {
-        _helper = helper;
+        _client = client;
         _logger = logger;
     }
 
@@ -135,18 +141,25 @@ public sealed class HelperTrayHost : ITrayHost
             return;
         }
 
-        // No "runas" needed: this helper is already LocalSystem, so the child
-        // inherits everything the uninstall requires.
+        // Removing a service needs administrator rights, and this process is
+        // just the signed-in user — so this one does prompt.
         var startInfo = new ProcessStartInfo(exe)
         {
             Arguments = "--uninstall-service",
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            UseShellExecute = true,
+            Verb = "runas",
         };
 
         try
         {
             Process.Start(startInfo);
+        }
+        catch (Win32Exception ex)
+        {
+            // 1223 = the user declined the UAC prompt.
+            _logger.LogInformation("Lock screen uninstall was not started: {Message}", ex.Message);
+            MessageBox.Show("Lock screen support was not turned off.", "RemKeys",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
@@ -156,5 +169,5 @@ public sealed class HelperTrayHost : ITrayHost
         }
     }
 
-    public void Exit() => _helper.RequestServiceStop();
+    public void Exit() => _client.RequestServiceStop();
 }

@@ -306,12 +306,27 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   twice. For the same reason the hub is registered *after* the supervisor:
   hosted services stop in reverse, so pipes close (helpers leave cleanly,
   releasing held keys) before the supervisor reaches for `Kill()`.
-- **Exactly one of the two installs may run** — they would fight for port
-  5391. Switching is a tray menu item ("Turn on/off lock screen support…",
-  `TrayHosts.cs`) that relaunches the exe with the install/uninstall verb;
-  `install-lockscreen.bat` / `uninstall-lockscreen.bat` are the no-tray
-  recovery path. Installing removes the logon task, uninstalling re-creates it
-  (asking WTS who is signed in, since LocalSystem has no "current user").
+- **The tray must NOT live in a helper.** Helpers are LocalSystem, i.e. System
+  integrity, and a screen reader at medium IL with uiAccess **cannot read the
+  UI of a System-integrity process** — uiAccess reaches into *elevated* apps,
+  not into SYSTEM ones. Build 1 put the tray in the Default helper and the menu
+  came up **empty in NVDA** (field-reported 2026-08-06), taking the accessible
+  status channel with it. So the **logon task stays registered in both modes**:
+  with the service on, that user-session process runs no listener and injects
+  nothing — it is just the tray, fed by a second pipe
+  (`KeyBridgeAgent.status`, `StatusChannel.cs`) carrying the status line out
+  and exactly one command (`stop`) back. That pipe is separate from the
+  injection pipe *on purpose*: the injection pipe stays LocalSystem-only
+  because it types on the secure desktop, while the status pipe is ACL'd for
+  `Interactive` so the signed-in user can read it.
+- **Exactly one of the two may own the port** — the service and an in-session
+  *listener* would fight for 5391. Switching is a tray menu item ("Turn on/off
+  lock screen support…", `TrayHosts.cs`) that relaunches the exe with the
+  install/uninstall verb; `install-lockscreen.bat` / `uninstall-lockscreen.bat`
+  are the no-tray recovery path. Install stops the logon task just long enough
+  to hand the port over, then re-creates and re-runs it (asking WTS who is
+  signed in, since LocalSystem has no "current user"); the restarted process
+  sees the service running and comes up as a tray client instead.
 - **Security consequence, deliberate**: with this on, anyone who can reach the
   port can type at the lock screen, and the listener is LocalSystem. So in
   service mode *only*, the peer policy tightens — loopback is refused
@@ -342,10 +357,11 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   "Connected to <ip>" / "Port busy", with a "not elevated!" marker) — the
   tooltip is what NVDA announces in the tray, so it's the accessible status
   channel. Exit menu item stops the host cleanly (in lock-screen mode it asks
-  the service to stop, taking the helpers with it). `install-agent.bat` also
-  clears schtasks defaults that killed the agent (72-h execution limit,
-  stop-on-battery). In lock-screen mode the tray lives in the **Default**
-  helper only — nothing on the secure desktop could show one, or read it.
+  the service to stop over the status pipe, taking the helpers with it).
+  `install-agent.bat` also clears schtasks defaults that killed the agent
+  (72-h execution limit, stop-on-battery). The tray always runs in the
+  **user's session** (the logon task), never in a LocalSystem process — see
+  the lock-screen section for why.
 - `appsettings.json`: `ListenPort` (default 5391), optional `AllowedRemoteIP`
   (empty = accept any Tailscale peer), `LogDirectory`, and the lock-screen-only
   `AllowLoopbackPeers` / `AllowNonTailscalePeers` (both off).

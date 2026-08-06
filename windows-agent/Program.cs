@@ -61,26 +61,35 @@ switch (mode.Role)
         // killed mid-chord with a modifier stuck down.
         builder.Services.AddHostedService<DesktopSupervisor>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<InjectionHub>());
+        builder.Services.AddHostedService<StatusHub>();
         builder.Services.AddHostedService<Worker>();
         break;
 
     case AgentRole.Helper:
+        // No tray here, in either helper. A helper is LocalSystem, and a
+        // screen reader cannot read the UI of a System-integrity process — the
+        // tray lives in the logon-task process below instead.
         builder.Services.AddSingleton<HelperWorker>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<HelperWorker>());
-        if (!mode.IsWinlogonHelper)
-        {
-            // Only the Default-desktop helper carries the tray icon: a tray on
-            // the secure desktop would have no shell to live in and nobody to
-            // read it.
-            builder.Services.AddSingleton<ITrayHost, HelperTrayHost>();
-            builder.Services.AddHostedService<TrayIconService>();
-        }
         break;
 
     default:
-        builder.Services.AddSingleton<IKeystrokeSink, LocalKeystrokeSink>();
-        builder.Services.AddHostedService<Worker>();
-        builder.Services.AddSingleton<ITrayHost, StandaloneTrayHost>();
+        if (ServiceSetup.IsRunning())
+        {
+            // Lock-screen support is on: the service owns the port and the
+            // helpers do the typing, so this process is the tray and nothing
+            // else. It stays the logon task either way, which is what keeps
+            // the tray in the user's session where NVDA can read it.
+            builder.Services.AddSingleton<TrayClientWorker>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<TrayClientWorker>());
+            builder.Services.AddSingleton<ITrayHost, ServiceClientTrayHost>();
+        }
+        else
+        {
+            builder.Services.AddSingleton<IKeystrokeSink, LocalKeystrokeSink>();
+            builder.Services.AddHostedService<Worker>();
+            builder.Services.AddSingleton<ITrayHost, StandaloneTrayHost>();
+        }
         builder.Services.AddHostedService<TrayIconService>();
         break;
 }
@@ -112,17 +121,8 @@ if (mode.Role != AgentRole.Service)
 
 using (singleInstance)
 {
-    if (mode.Role == AgentRole.Standalone)
+    if (mode.Role == AgentRole.Standalone && !ServiceSetup.IsRunning())
     {
-        // Both would bind port 5391 and the loser would spin on retries. The
-        // service is the one that can reach the lock screen, so it wins.
-        if (ServiceSetup.IsRunning())
-        {
-            logger.LogWarning("The RemKeys lock screen service is running; the in-session agent is not needed " +
-                "and would fight it for the port. Exiting.");
-            return 0;
-        }
-
         // Elevation check. An un-elevated agent LOOKS fine: SendInput into
         // windows of elevated or uiAccess processes (screen readers — NVDA's
         // own dialogs, for example) is silently discarded by UIPI, with no

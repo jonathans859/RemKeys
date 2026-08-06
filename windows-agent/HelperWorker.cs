@@ -35,7 +35,6 @@ public sealed class HelperWorker : BackgroundService
 
     private readonly ILogger<HelperWorker> _logger;
     private readonly AgentMode _mode;
-    private readonly AgentStatus _status;
     private readonly IHostApplicationLifetime _lifetime;
 
     private readonly object _heldGate = new();
@@ -45,17 +44,13 @@ public sealed class HelperWorker : BackgroundService
     private bool _isActive;
     private long _activityCheckedAt = -1;
 
-    private NamedPipeClientStream? _pipe;
-
     public HelperWorker(
         ILogger<HelperWorker> logger,
         AgentMode mode,
-        AgentStatus status,
         IHostApplicationLifetime lifetime)
     {
         _logger = logger;
         _mode = mode;
-        _status = status;
         _lifetime = lifetime;
     }
 
@@ -116,27 +111,19 @@ public sealed class HelperWorker : BackgroundService
             TokenImpersonationLevel.Impersonation);
 
         await pipe.ConnectAsync(stoppingToken);
-        _pipe = pipe;
         _logger.LogInformation("Connected to the injection pipe.");
 
         await WriteLineAsync(pipe, $"{PipeProtocol.Hello} {_mode.Desktop}", stoppingToken);
 
-        try
+        var reader = new LineReader();
+        var buffer = new byte[1024];
+        int read;
+        while ((read = await pipe.ReadAsync(buffer.AsMemory(), stoppingToken)) > 0)
         {
-            var reader = new LineReader();
-            var buffer = new byte[1024];
-            int read;
-            while ((read = await pipe.ReadAsync(buffer.AsMemory(), stoppingToken)) > 0)
+            foreach (var line in reader.Feed(buffer.AsSpan(0, read)))
             {
-                foreach (var line in reader.Feed(buffer.AsSpan(0, read)))
-                {
-                    Handle(line);
-                }
+                Handle(line);
             }
-        }
-        finally
-        {
-            _pipe = null;
         }
     }
 
@@ -159,12 +146,6 @@ public sealed class HelperWorker : BackgroundService
         }
 
         var trimmed = line.Trim();
-        if (trimmed.StartsWith(PipeProtocol.Status + " ", StringComparison.Ordinal))
-        {
-            _status.SetDescription(trimmed[(PipeProtocol.Status.Length + 1)..]);
-            return;
-        }
-
         if (trimmed.Length > 0)
         {
             _logger.LogWarning("Ignoring malformed pipe line: {Line}", trimmed);
@@ -273,31 +254,6 @@ public sealed class HelperWorker : BackgroundService
         foreach (var vk in stuck)
         {
             KeystrokeInjector.Send(vk, false);
-        }
-    }
-
-    /// <summary>Ask the service to shut the whole agent down (tray Exit).</summary>
-    public void RequestServiceStop()
-    {
-        var pipe = _pipe;
-        if (pipe is null || !pipe.IsConnected)
-        {
-            // No link to the service — at least take this helper down; the
-            // supervisor will not bring it back once the service is stopping.
-            _lifetime.StopApplication();
-            return;
-        }
-
-        try
-        {
-            var bytes = Encoding.UTF8.GetBytes(PipeProtocol.Stop + "\n");
-            pipe.Write(bytes, 0, bytes.Length);
-            pipe.Flush();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Could not ask the service to stop.");
-            _lifetime.StopApplication();
         }
     }
 
