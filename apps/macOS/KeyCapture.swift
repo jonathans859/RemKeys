@@ -59,12 +59,15 @@ final class KeyCapture {
 
     /// Physical Caps Lock state, from the HID hook (not the toggle LED).
     @ObservationIgnored private var capsHeld = false
-    /// True once we've forwarded a Caps Lock *down* — guards the matching up
-    /// so a Caps Lock press that merely armed `capslock+F11` is never sent.
-    @ObservationIgnored private var capsForwarded = false
-    /// Physical down-state of the non-Caps modifiers. `flagsChanged` only
-    /// reports a transition, not a direction, so we recover it by toggling.
+    /// Physical down-state of the non-Caps modifiers. Only consulted for
+    /// modifier key codes missing from `modifierFlagBits`; known ones read
+    /// their direction straight out of the event (see `handleFlagsChanged`).
     @ObservationIgnored private var downModifiers: Set<CGKeyCode> = []
+    /// Key codes whose *down* we have forwarded and not yet released. Guards
+    /// the matching up: a key the user was already holding when forwarding
+    /// came on (the toggle chord's own modifiers, above all) must not send the
+    /// remote an up for a down it never received.
+    @ObservationIgnored private var forwardedDown: Set<CGKeyCode> = []
 
     init(bridge: BridgeClient, settings: AppSettings) {
         self.bridge = bridge
@@ -121,20 +124,40 @@ final class KeyCapture {
         hidManager = nil
 
         capsHeld = false
-        capsForwarded = false
         downModifiers.removeAll()
+        forwardedDown.removeAll()
         if state == .running { state = .stopped }
     }
 
     // MARK: Forwarding toggle
 
     /// Flip forwarding on/off. Called by the hotkey, the menu command, and the
-    /// on-screen toggle. Clears modifier bookkeeping so a chord held across the
-    /// toggle can't strand a key on the remote.
+    /// on-screen toggle.
+    ///
+    /// Only what we believe the *remote* holds is reset: `BridgeClient` emits
+    /// an up for every still-held key when forwarding goes off, and turning it
+    /// on can't have forwarded anything yet, so after either transition the
+    /// remote holds nothing. The **physical** state (`downModifiers`,
+    /// `capsHeld`) is deliberately left alone — it describes the user's
+    /// fingers, not the remote, and clearing it mid-chord used to make the
+    /// release of the toggle chord's own modifiers read as a press.
     func toggleForwarding() {
         bridge.forwardingEnabled.toggle()
-        downModifiers.removeAll()
-        capsForwarded = false
+        forwardedDown.removeAll()
+    }
+
+    /// Send one key transition, keeping `forwardedDown` in step. A release is
+    /// dropped unless we forwarded the matching press, so the toggle chord's
+    /// modifiers — held across the moment forwarding came on — don't reach the
+    /// PC as a bare key-up.
+    private func forward(keyCode: CGKeyCode, vk: UInt16, pressed: Bool) {
+        if pressed {
+            guard bridge.forwardingEnabled else { return }
+            forwardedDown.insert(keyCode)
+        } else {
+            guard forwardedDown.remove(keyCode) != nil else { return }
+        }
+        bridge.sendKey(vk: vk, pressed: pressed)
     }
 
     // MARK: Shortcut recording
@@ -255,7 +278,7 @@ final class KeyCapture {
                 leftCommandMapping: settings.leftCommandMapping,
                 rightCommandMapping: settings.rightCommandMapping
             ) {
-                bridge.sendKey(vk: vk, pressed: type == .keyDown)
+                forward(keyCode: keyCode, vk: vk, pressed: type == .keyDown)
             }
             // Swallow everything while forwarding — even unmapped keys — so
             // the local Mac never reacts to a keystroke meant for the slave.
@@ -277,8 +300,16 @@ final class KeyCapture {
             return bridge.forwardingEnabled ? nil : Unmanaged.passUnretained(event)
         }
 
+        // Direction comes from the event's own flags whenever we know this
+        // key's bit — self-correcting, so a transition the tap never saw (the
+        // swallowed toggle chord, a re-armed tap, a modifier already held at
+        // launch) can't invert this key from then on. Toggling a set is only
+        // the fallback for a modifier key code we have no bit for.
         let pressed: Bool
-        if downModifiers.contains(keyCode) {
+        if let flagState = MacModifierFlag.isPressed(keyCode: keyCode, flags: event.flags) {
+            pressed = flagState
+            if pressed { downModifiers.insert(keyCode) } else { downModifiers.remove(keyCode) }
+        } else if downModifiers.contains(keyCode) {
             downModifiers.remove(keyCode)
             pressed = false
         } else {
@@ -297,25 +328,17 @@ final class KeyCapture {
             leftCommandMapping: settings.leftCommandMapping,
             rightCommandMapping: settings.rightCommandMapping
         ) {
-            bridge.sendKey(vk: vk, pressed: pressed)
+            forward(keyCode: keyCode, vk: vk, pressed: pressed)
         }
         return nil
     }
 
-    /// Raw Caps Lock press/release straight from the HID report.
+    /// Raw Caps Lock press/release straight from the HID report. `forward`
+    /// supplies the guard that matters here: a Caps Lock press that merely
+    /// armed the toggle chord was never sent, so its release isn't either.
     func handleCapsLock(pressed: Bool) {
         capsHeld = pressed
-        if pressed {
-            if bridge.forwardingEnabled {
-                bridge.sendKey(vk: VK.capital, pressed: true)
-                capsForwarded = true
-            }
-        } else {
-            if capsForwarded, bridge.forwardingEnabled {
-                bridge.sendKey(vk: VK.capital, pressed: false)
-            }
-            capsForwarded = false
-        }
+        forward(keyCode: MacKeyCode.capsLock, vk: VK.capital, pressed: pressed)
     }
 
     /// The generic modifier set currently held. Caps Lock comes from the HID

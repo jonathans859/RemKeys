@@ -240,6 +240,25 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   through the same tap (so it can capture Caps Lock via HID and swallow the
   chord so it has no side effect); the recorded key code is a raw `CGKeyCode`
   plus a platform-neutral modifier set.
+- **Modifier direction comes from the event's own flag bit, never from
+  inferring.** `flagsChanged` names the key that changed but not whether it
+  went down or up; recovering that by toggling a `Set<CGKeyCode>` breaks the
+  moment a transition is missed, and the toggle shortcut misses them by design
+  (its modifiers straddle the flip). Field-reported 2026-08-08 as **Alt stuck
+  held on the PC** after using `Caps+Alt+K`: `toggleForwarding()` cleared the
+  set mid-chord, so Alt's *release* read as a press — and the phantom left
+  behind inverted Alt for the rest of the session. Now `MacModifierFlag`
+  (`MacKeyCode.swift`) tests that key's device-dependent bit
+  (`NX_DEVICE…KEYMASK`, side-specific) in `event.flags`, which re-states the
+  truth on every event and self-corrects. Toggling a set survives only as the
+  fallback for a key code with no known bit. Two invariants go with it:
+  `downModifiers`/`capsHeld` are **physical** state and are never cleared on
+  toggle (only `forwardedDown`, our idea of what the *remote* holds, is), and
+  `KeyCapture.forward(keyCode:vk:pressed:)` drops any release whose press we
+  didn't forward — otherwise the chord's own modifiers reach Windows as a bare
+  key-up, and a lone Alt up focuses the menu bar in many apps. Modifiers still
+  held when forwarding turns *on* are deliberately not pressed on the remote,
+  for the same reason.
 - **Always-on-top red border overlay** (`CaptureOverlay.swift`) while
   capturing, same as UTM. Purely a redundant visual cue.
 - **fn-key row** (`FunctionKeyRow.swift`, setting `forwardFunctionKeyRow`, on
