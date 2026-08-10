@@ -52,6 +52,7 @@ struct SettingsView: View {
                     Text("Left and right keys map independently — for a key right of Space that should act as AltGr, set only that side. Not sure which side a key reports as? Press it and check Last key seen in Diagnostics. Shift and Control always map to Windows Shift and Control.")
                 }
                 virtualInputSection
+                holdSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -83,6 +84,12 @@ struct SettingsView: View {
                 Text(settings.virtualPadExtendedFKeys
                      ? "F13 to F24 are shown as a fifth band, which makes every zone a bit smaller."
                      : "F13 to F24 are hidden; enable them to add a fifth band at the cost of smaller zones.")
+            }
+            Section("Hold a key on the pad") {
+                Text(settings.virtualPadHoldEnabled
+                     ? "Holding a key on the pad for \(secondsLabel(settings.virtualPadLatchDelay)) turns it on like a modifier, so it wraps everything you send afterwards — Caps Lock lives in that row too, for screen-reader keys such as NVDA's. Keep holding for another \(secondsLabel(settings.virtualPadHoldDelay)) and the key is pressed down on the PC and repeats until you lift, which also turns it off again."
+                     : "Holding is off, so the pad only acts when you lift: modifiers toggle, other keys send. Turn it on to hold a key down on the PC for key repeat, or to turn a key on without sending it.")
+                Text("Vibrations mark every stage whether or not the spoken cues are on: a gentle one when the key turns on, a firmer one when it goes down on the PC, a light one when it is released.")
             }
         }
     }
@@ -145,8 +152,81 @@ struct SettingsView: View {
         } header: {
             Text("Virtual input")
         } footer: {
-            Text("Keys sent from the key pad are always wrapped in the modifiers currently toggled on.")
+            Text("Keys sent from the key pad are always wrapped in the keys currently turned on.")
         }
+    }
+
+    /// The hold gesture's timings. Sliders rather than steppers: one
+    /// adjustable element per value beats a dozen taps, and the value is
+    /// spoken in real units.
+    private var holdSection: some View {
+        Section {
+            Toggle("Hold a key to turn it on", isOn: Binding(
+                get: { settings.virtualPadHoldEnabled },
+                set: { settings.virtualPadHoldEnabled = $0 }
+            ))
+            .accessibilityHint("On: holding a key on the pad turns it on like a modifier, and holding longer presses it down on the PC until you lift. Off: the pad only sends on lift.")
+
+            if settings.virtualPadHoldEnabled {
+                delaySlider(
+                    title: "Turns on after",
+                    value: Binding(
+                        get: { settings.virtualPadLatchDelay },
+                        set: { settings.virtualPadLatchDelay = $0 }
+                    ),
+                    range: AppSettings.latchDelayRange,
+                    hint: "How long a key has to be held before it turns on. Default 0.6 seconds."
+                )
+                delaySlider(
+                    title: "Then presses down after",
+                    value: Binding(
+                        get: { settings.virtualPadHoldDelay },
+                        set: { settings.virtualPadHoldDelay = $0 }
+                    ),
+                    range: AppSettings.holdDelayRange,
+                    hint: "Further time, counted from the moment the key turned on, before it is pressed down on the PC. Default 0.6 seconds."
+                )
+
+                Toggle("Speak the hold stages", isOn: Binding(
+                    get: { settings.virtualPadHoldSpeech },
+                    set: { settings.virtualPadHoldSpeech = $0 }
+                ))
+                .accessibilityHint("On: the pad says when a key turns on, is pressed down, and is released. Off: only the vibrations mark the stages.")
+            }
+        } header: {
+            Text("Hold a key on the pad")
+        } footer: {
+            Text("Holding a key turns it on like a modifier; holding longer presses it down on the PC so it repeats, until you lift your finger — lifting from there turns it off again. A gentle vibration marks turning on, a firmer one the press.")
+        }
+    }
+
+    /// One timing row: a caption line carrying the current value for sighted
+    /// users (SwiftUI never draws a Slider's own label on iOS) over the
+    /// slider itself, which is the single adjustable element VoiceOver sees —
+    /// with the value spoken in real units.
+    private func delaySlider(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        hint: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            LabeledContent(title) {
+                Text(secondsLabel(value.wrappedValue))
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityHidden(true)
+            Slider(value: value, in: range, step: 0.1) {
+                Text(title)
+            }
+            .accessibilityLabel(title)
+            .accessibilityValue(secondsLabel(value.wrappedValue))
+            .accessibilityHint(hint)
+        }
+    }
+
+    private func secondsLabel(_ seconds: Double) -> String {
+        VirtualKeys.secondsDescription(seconds)
     }
 
     private func mappingPicker(

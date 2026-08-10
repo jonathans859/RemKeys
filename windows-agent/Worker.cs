@@ -24,6 +24,8 @@ public sealed class Worker : BackgroundService
     private readonly AgentStatus _status;
     private readonly IKeystrokeSink _sink;
     private readonly AgentMode _mode;
+    /// <summary>Keys the current peer has pressed and not released yet.</summary>
+    private readonly HashSet<ushort> _held = new();
     private int _port;
 
     public Worker(
@@ -129,9 +131,33 @@ public sealed class Worker : BackgroundService
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            ReleaseHeldKeys(remote);
             _logger.LogInformation("Peer {Remote} session ended.", remote);
             _status.Set(AgentState.Listening, $"Waiting for a connection on port {_port}");
         }
+    }
+
+    /// <summary>
+    /// Let go of every key the peer left down when its session ended. The
+    /// Apple side can hold a key on purpose — the iOS key pad's hold gesture
+    /// keeps one down for as long as the finger is on it, and a physical key
+    /// can still be down when forwarding stops — and if the socket dies in
+    /// that window, the matching release line never arrives and Windows
+    /// repeats that key forever. Only this end can clean that up: the sender
+    /// is already gone. The desktop helpers do the same thing when their
+    /// desktop leaves the foreground; this covers the network case, in every
+    /// mode. Sessions are handled one at a time, so no locking is needed.
+    /// </summary>
+    private void ReleaseHeldKeys(string remote)
+    {
+        if (_held.Count == 0) return;
+
+        _logger.LogInformation("Releasing {Count} key(s) left down by {Remote}.", _held.Count, remote);
+        foreach (var vk in _held)
+        {
+            _sink.Key(vk, false);
+        }
+        _held.Clear();
     }
 
     private void ProcessLine(string line)
@@ -141,6 +167,7 @@ public sealed class Worker : BackgroundService
         // helpers, so nothing a helper injects has skipped this check.
         if (WireProtocol.TryParse(line, out var vk, out var pressed))
         {
+            if (pressed) _held.Add(vk); else _held.Remove(vk);
             _sink.Key(vk, pressed);
         }
         else if (WireProtocol.TryParseChar(line, out var codepoint))

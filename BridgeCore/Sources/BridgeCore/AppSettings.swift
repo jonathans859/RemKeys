@@ -97,6 +97,50 @@ public final class AppSettings {
         didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
     }
 
+    /// Whether pressing and holding a key-pad zone runs the two-stage hold:
+    /// hold past `virtualPadLatchDelay` and the key latches on (it then wraps
+    /// everything sent afterwards, exactly like a modifier); keep holding for
+    /// `virtualPadHoldDelay` more and it is pressed *down* on the PC and stays
+    /// down until the finger lifts, so the PC's own key repeat runs. On by
+    /// default. Turning it off restores the plain "lift sends" pad, which is
+    /// what a user who rests a finger on a zone before lifting will want.
+    public var virtualPadHoldEnabled: Bool {
+        didSet { defaults.set(virtualPadHoldEnabled, forKey: Keys.virtualPadHoldEnabled) }
+    }
+
+    /// Seconds a key-pad zone must be held before the key latches on.
+    public var virtualPadLatchDelay: Double {
+        didSet {
+            virtualPadLatchDelay = Self.clamp(virtualPadLatchDelay, Self.latchDelayRange)
+            defaults.set(virtualPadLatchDelay, forKey: Keys.virtualPadLatchDelay)
+        }
+    }
+
+    /// Further seconds — counted from the moment it latched, not from the
+    /// touch — before the latched key is pressed down on the PC.
+    public var virtualPadHoldDelay: Double {
+        didSet {
+            virtualPadHoldDelay = Self.clamp(virtualPadHoldDelay, Self.holdDelayRange)
+            defaults.set(virtualPadHoldDelay, forKey: Keys.virtualPadHoldDelay)
+        }
+    }
+
+    /// Whether the hold stages are spoken as well as felt. The haptics alone
+    /// are unambiguous once learned (soft = latched, hard = down, light =
+    /// released), so this is the setting that makes the pad quiet again.
+    public var virtualPadHoldSpeech: Bool {
+        didSet { defaults.set(virtualPadHoldSpeech, forKey: Keys.virtualPadHoldSpeech) }
+    }
+
+    /// Allowed range for `virtualPadLatchDelay`, also the UI's slider bounds.
+    public static let latchDelayRange: ClosedRange<Double> = 0.2...2.0
+    /// Allowed range for `virtualPadHoldDelay`, also the UI's slider bounds.
+    public static let holdDelayRange: ClosedRange<Double> = 0.2...3.0
+
+    private static func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
     /// Whether the Virtual Input text field keeps its contents after Send
     /// instead of clearing. Off by default (one combination, then a clean
     /// slate), but a screen-reader user driving single-letter navigation on
@@ -155,6 +199,19 @@ public final class AppSettings {
         self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
+        // Hold defaults are all "on" / non-zero, which `bool(forKey:)` and
+        // `double(forKey:)` can't express — read the raw object and fall back
+        // only when nothing was ever stored.
+        self.virtualPadHoldEnabled = defaults.object(forKey: Keys.virtualPadHoldEnabled) as? Bool ?? true
+        self.virtualPadLatchDelay = Self.clamp(
+            defaults.object(forKey: Keys.virtualPadLatchDelay) as? Double ?? 0.6,
+            Self.latchDelayRange
+        )
+        self.virtualPadHoldDelay = Self.clamp(
+            defaults.object(forKey: Keys.virtualPadHoldDelay) as? Double ?? 0.6,
+            Self.holdDelayRange
+        )
+        self.virtualPadHoldSpeech = defaults.object(forKey: Keys.virtualPadHoldSpeech) as? Bool ?? true
         // Defaults to true: `bool(forKey:)` can't express that, so read the raw
         // object and fall back only when nothing was ever stored.
         self.forwardFunctionKeyRow = defaults.object(forKey: Keys.forwardFunctionKeyRow) as? Bool ?? true
@@ -191,6 +248,10 @@ public final class AppSettings {
         static let virtualPadSliderMode = "virtualPadSliderMode"
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
         static let virtualInputKeepText = "virtualInputKeepText"
+        static let virtualPadHoldEnabled = "virtualPadHoldEnabled"
+        static let virtualPadLatchDelay = "virtualPadLatchDelay"
+        static let virtualPadHoldDelay = "virtualPadHoldDelay"
+        static let virtualPadHoldSpeech = "virtualPadHoldSpeech"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
     }
 }

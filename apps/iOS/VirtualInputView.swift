@@ -8,7 +8,9 @@ import BridgeCore
 /// - The **direct-touch key pad** (`VirtualKeyPad`) IS the key interface:
 ///   one accessibility element whose raw touches bypass VoiceOver's gesture
 ///   round-trip entirely — drag to hear keys, lift to send, lift on a
-///   modifier to toggle it. The earlier adjustable rows were retired in its
+///   modifier to toggle it, and **hold** any key to turn it on like a
+///   modifier or (holding longer) press it down on the PC until you lift.
+///   The earlier adjustable rows were retired in its
 ///   favor (field decision 2026-07-19). Layout (also field-specified,
 ///   revised 2026-08-06): the pad fills everything from the **inline**
 ///   title down — the bigger the zones, the better the muscle memory —
@@ -39,7 +41,15 @@ struct VirtualInputView: View {
     /// Posted by the root magic-tap handler while this tab is frontmost.
     static let sendRequested = Notification.Name("KeyBridge.virtualInputSendRequested")
 
-    @State private var selectedModifiers: Set<UInt16> = []
+    /// Everything currently latched on the pad, in the order it was latched:
+    /// the modifier band's toggles and any key latched by holding it. All of
+    /// it wraps whatever is sent next, which is why this is one list rather
+    /// than a modifiers-only set.
+    @State private var latched: [VirtualKey] = []
+    /// The key the pad is holding *down* on the PC right now, plus the keys
+    /// pressed around it, so the release lets go of exactly what it pressed.
+    @State private var heldKey: VirtualKey?
+    @State private var holdWrap: [VirtualKey] = []
     @State private var text = ""
     @State private var showInfo = false
     @FocusState private var textFieldFocused: Bool
@@ -143,22 +153,25 @@ struct VirtualInputView: View {
         }
     }
 
-    /// The pad owns the toggled modifiers (toggle zones on its top band) and
-    /// tints the ones that are on; Send reads the same state for its hint.
-    /// Pad sends always wrap in the toggled modifiers.
+    /// The pad drives the latched keys (its modifier band's toggles, plus
+    /// anything latched by holding) and tints the ones that are on; Send reads
+    /// the same state for its hint. Pad sends always wrap in them.
     private var pad: some View {
         VirtualKeyPad(
             settings: settings,
-            selectedModifiers: selectedModifiers,
-            onToggleModifier: { modifier in
-                if selectedModifiers.contains(modifier.vk) {
-                    selectedModifiers.remove(modifier.vk)
+            latchedKeys: latchedVKs,
+            onSetLatched: { key, on in
+                if on {
+                    guard !latched.contains(where: { $0.vk == key.vk }) else { return }
+                    latched.append(key)
                 } else {
-                    selectedModifiers.insert(modifier.vk)
+                    latched.removeAll { $0.vk == key.vk }
                 }
             },
-            onClearModifiers: { selectedModifiers.removeAll() },
-            onSend: { key in sendImmediate(key) }
+            onClearLatched: { latched.removeAll() },
+            onSend: { key in sendImmediate(key) },
+            onHoldBegin: { key in beginHold(key) },
+            onHoldEnd: { key in endHold(key) }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -176,10 +189,17 @@ struct VirtualInputView: View {
                 } else {
                     Text("The pad is a fixed grid of key zones\(bandListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Drag a finger to hear the key under it, with a small tick at each boundary, and lift to send that key at once. Lift on a modifier to turn it on or off. Landing a second finger cancels the drag, so nothing is sent.")
                 }
-                Text("Two-finger tap on the pad clears all toggled modifiers. Sending is silent when it works; you only hear a message when something failed.")
+                Text("Two-finger tap on the pad clears everything that is turned on. Sending is silent when it works; you only hear a message when something failed.")
             }
             Section("Modifiers") {
-                Text("Modifiers you toggle on the pad stay on and wrap every key you send, until you clear them or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
+                Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
+                Text("Caps Lock sits in the modifiers row because that is what it is on the PC when a screen reader is running — NVDA's desktop layout uses it as the screen-reader key. Turn it on, then send a key, and the PC gets Caps Lock plus that key. To flip the lock itself instead, hold the Caps Lock zone until it is pressed down, then lift.")
+            }
+            if settings.virtualPadHoldEnabled {
+                Section("Holding a key") {
+                    Text("Press and keep holding any key on the pad. After \(VirtualKeys.secondsDescription(settings.virtualPadLatchDelay)) it turns on and stays on, just like a modifier — a gentle vibration marks the moment. Keep holding for another \(VirtualKeys.secondsDescription(settings.virtualPadHoldDelay)) and the key is pressed down on the PC and stays down, with a firmer vibration: that is how you get key repeat, such as holding Backspace to delete a run of text or Down to keep scrolling.")
+                    Text("Lifting your finger always releases the key on the PC, and a key you held that far is turned off again as well. Lift while it is only turned on and it stays on for the keys you send next. Press a key that is on to turn it off. The timings and the spoken cues can be changed in Settings; the vibrations stay either way.")
+                }
             }
             Section("Text") {
                 Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers toggled, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
@@ -205,29 +225,38 @@ struct VirtualInputView: View {
 
     // MARK: Combination state
 
-    private var orderedModifiers: [VirtualKey] {
-        VirtualKeys.modifiers.filter { selectedModifiers.contains($0.vk) }
+    private var latchedVKs: Set<UInt16> { Set(latched.map(\.vk)) }
+
+    /// What gets pressed around whatever is sent, in send order: the
+    /// modifiers first, in the canonical order the pad shows them, then any
+    /// other latched key in the order it was latched.
+    private var wrapKeys: [VirtualKey] {
+        let modifiers = VirtualKeys.modifiers.filter { latchedVKs.contains($0.vk) }
+        let others = latched.filter { key in
+            !VirtualKeys.modifiers.contains { $0.vk == key.vk }
+        }
+        return modifiers + others
     }
 
     private var hasSomethingToSend: Bool {
-        !selectedModifiers.isEmpty || !text.isEmpty
+        !latched.isEmpty || !text.isEmpty
     }
 
     /// Human-readable spelling of exactly what Send will do, e.g.
     /// "Control + Shift + Escape" or "Control + “c”" or "“hello”".
     private var comboDescription: String {
-        var parts = orderedModifiers.map(\.name)
+        var parts = wrapKeys.map(\.name)
         if !text.isEmpty { parts.append("“\(text)”") }
         return parts.isEmpty ? "Nothing selected" : parts.joined(separator: " + ")
     }
 
     // MARK: Sending
 
-    /// Immediate path for the pad: exactly one key, wrapped in the toggled
-    /// modifiers. Success is fully silent (the pad adds its own haptic) and
-    /// nothing resets; modifiers only clear via Send or the pad's clear
-    /// gesture. A failure doesn't flip forwarding on — it just says the key
-    /// was not sent.
+    /// Immediate path for the pad: exactly one key, wrapped in whatever is
+    /// latched. Success is fully silent (the pad adds its own haptic) and
+    /// nothing resets; latched keys only clear via Send, pressing them again,
+    /// or the pad's clear gesture. A failure doesn't flip forwarding on — it
+    /// just says the key was not sent.
     private func sendImmediate(_ key: VirtualKey) {
         guard bridge.forwardingEnabled else {
             announce("\(key.name) not sent. Forwarding is off.")
@@ -237,10 +266,44 @@ struct VirtualInputView: View {
             announce("\(key.name) not sent. \(bridge.status.announcement)")
             return
         }
-        let modifiers = orderedModifiers.map(\.vk)
-        for vk in modifiers { bridge.sendKey(vk: vk, pressed: true) }
+        let wrap = wrapKeys.map(\.vk)
+        for vk in wrap { bridge.sendKey(vk: vk, pressed: true) }
         tap(key.vk)
-        for vk in modifiers.reversed() { bridge.sendKey(vk: vk, pressed: false) }
+        for vk in wrap.reversed() { bridge.sendKey(vk: vk, pressed: false) }
+    }
+
+    /// The pad's hold stage: the key goes *down* on the PC and stays down
+    /// until the finger lifts, so the PC's own auto-repeat runs (hold
+    /// Backspace to eat a word). The latched keys are pressed around it
+    /// exactly as they wrap a tap — the held key itself is excluded, since a
+    /// key can be latched and then held. Returns false when nothing was sent,
+    /// so the pad doesn't claim a key is down that never went out.
+    private func beginHold(_ key: VirtualKey) -> Bool {
+        guard bridge.forwardingEnabled else {
+            announce("\(key.name) not held down. Forwarding is off.")
+            return false
+        }
+        guard bridge.status.isConnected else {
+            announce("\(key.name) not held down. \(bridge.status.announcement)")
+            return false
+        }
+        let wrap = wrapKeys.filter { $0.vk != key.vk }
+        for modifier in wrap { bridge.sendKey(vk: modifier.vk, pressed: true) }
+        holdWrap = wrap
+        heldKey = key
+        bridge.sendKey(vk: key.vk, pressed: true)
+        return true
+    }
+
+    /// Let go of a held key and the wrap that went down with it. Releasing in
+    /// reverse is the same discipline the tap path uses, so the PC never sees
+    /// a modifier outlive the key it was modifying.
+    private func endHold(_ key: VirtualKey) {
+        guard heldKey?.vk == key.vk else { return }
+        bridge.sendKey(vk: key.vk, pressed: false)
+        for modifier in holdWrap.reversed() { bridge.sendKey(vk: modifier.vk, pressed: false) }
+        heldKey = nil
+        holdWrap = []
     }
 
     private func send() {
@@ -262,12 +325,12 @@ struct VirtualInputView: View {
         }
 
         let sentDescription = comboDescription
-        let modifiers = orderedModifiers.map(\.vk)
-        for vk in modifiers { bridge.sendKey(vk: vk, pressed: true) }
+        let wrap = wrapKeys.map(\.vk)
+        for vk in wrap { bridge.sendKey(vk: vk, pressed: true) }
 
         var skippedCharacters = 0
         if !text.isEmpty {
-            if modifiers.isEmpty {
+            if wrap.isEmpty {
                 // Plain text: unicode path, layout-proof, types verbatim.
                 for scalar in text.unicodeScalars {
                     bridge.sendCharacter(scalar)
@@ -279,7 +342,7 @@ struct VirtualInputView: View {
                         skippedCharacters += 1
                         continue
                     }
-                    let wrapInShift = key.shift && !selectedModifiers.contains(VK.shift)
+                    let wrapInShift = key.shift && !latchedVKs.contains(VK.shift)
                     if wrapInShift { bridge.sendKey(vk: VK.shift, pressed: true) }
                     tap(key.vk)
                     if wrapInShift { bridge.sendKey(vk: VK.shift, pressed: false) }
@@ -287,12 +350,12 @@ struct VirtualInputView: View {
             }
         }
 
-        for vk in modifiers.reversed() { bridge.sendKey(vk: vk, pressed: false) }
+        for vk in wrap.reversed() { bridge.sendKey(vk: vk, pressed: false) }
 
-        // Reset so the next combination starts clean: modifiers off, text
+        // Reset so the next combination starts clean: latched keys off, text
         // cleared — unless the text is pinned, in which case it stays put so
         // the same keystroke can be fired again with a single Send.
-        selectedModifiers.removeAll()
+        latched.removeAll()
         if !settings.virtualInputKeepText { text = "" }
 
         var confirmation = "Sent \(sentDescription)"

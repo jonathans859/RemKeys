@@ -25,12 +25,20 @@ enum VirtualKeys {
     /// Modifiers are multi-selectable (checkable) and sent as held keys
     /// around the rest of the combination. Order here is the display and
     /// announcement order.
+    ///
+    /// Caps Lock lives here rather than among the ordinary keys because on the
+    /// PC it is a *modifier* in the case that matters: NVDA's default desktop
+    /// layout uses it as the screen-reader key (Caps Lock + H for headings),
+    /// which only works if it wraps the key it modifies. A plain Caps Lock
+    /// press — the one that flips the lock — is still reachable: hold the zone
+    /// until the pad presses the key down, then lift.
     static let modifiers: [VirtualKey] = [
         VirtualKey(name: "Control", vk: VK.control),
         VirtualKey(name: "Shift", vk: VK.shift),
         VirtualKey(name: "Alt", vk: VK.menu),
         VirtualKey(name: "Windows", vk: VK.lwin),
         VirtualKey(name: "AltGr", vk: VK.rmenu),
+        VirtualKey(name: "Caps Lock", vk: VK.capital),
     ]
 
     /// Non-modifier keys: exactly one can be selected as the combination's
@@ -61,6 +69,18 @@ enum VirtualKeys {
             VirtualKey(name: "F\($0)", vk: VK.f1 + UInt16($0 - 1))
         }),
     ]
+
+    /// Spoken form of a hold timing: "0.6 seconds", "1 second". Used by both
+    /// the Settings sliders and the info sheet, which must agree word for word
+    /// — they describe the same number to the same user.
+    static func secondsDescription(_ seconds: Double) -> String {
+        let rounded = (seconds * 10).rounded() / 10
+        if rounded == 1 { return "1 second" }
+        let value = rounded == rounded.rounded()
+            ? String(Int(rounded))
+            : String(format: "%.1f", rounded)
+        return "\(value) seconds"
+    }
 
     /// F13–F24, offered only as an extra key-pad band and only when enabled
     /// in Settings — an always-on fifth band would shrink every other zone.

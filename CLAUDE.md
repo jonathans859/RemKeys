@@ -180,6 +180,30 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   the same day, 2026-07-19 — keep the convention), tap = send, two-finger
   swipe left = reset band, and stepping past either end answers with a
   harder edge haptic (`.rigid`) against the normal selection tick.
+  **Press and hold is the pad's second verb** (`virtualPadHoldEnabled`, on by
+  default; requested 2026-08-10), in *both* gesture models, and it is what
+  lets a one-finger pad express more than "tap = send". Touching a zone starts
+  a countdown (moving to another zone restarts it there): after
+  `virtualPadLatchDelay` the key **latches on** and from then on wraps
+  everything sent, exactly like a modifier; after `virtualPadHoldDelay` more
+  it is **pressed down on the PC** and stays down until the finger lifts, so
+  the PC's own auto-repeat runs (hold Backspace to eat a word). Lifting from
+  the held stage releases the key **and drops the latch** — a hold is
+  momentary end to end and never leaves state behind (field decision
+  2026-08-10); lifting at the latch stage leaves the key on. Pressing a
+  latched key again is what turns it off, in any band. Each stage has its own
+  haptic (soft = on, `.rigid` = down on the PC, light = released) plus
+  optional speech (`virtualPadHoldSpeech`) — the haptics are never optional,
+  because they are the channel that works with the phone in a pocket.
+  Consequences that shaped the code: latching is no longer a modifier-band
+  privilege, so the tab tracks an ordered **`latched: [VirtualKey]`** (modifier
+  toggles *and* held keys) that wraps every send, and the pad tints latched
+  keys in every band. A refused hold (forwarding off / not connected) must
+  leave the press at the latch stage rather than pretend a key is down —
+  hence `onHoldBegin` returning `Bool`. Every path that ends a press
+  abnormally (second finger, cancel, finger leaving the pad, mode switch, pad
+  leaving the window) releases the held key first; the Windows agent releasing
+  on peer disconnect is the backstop for the one case iOS can't cover.
   **The pad must live OUTSIDE the Form** (pinned above it): a scroll-view
   ancestor delays touch delivery and cancels moved touches, which kills
   drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside
@@ -209,7 +233,12 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   screen to keep Start lean); its dismissal calls
   `CaptureView.requestReclaim()`.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
-  involved; AltGr is just `VK_RMENU`.
+  involved; AltGr is just `VK_RMENU`. **Caps Lock sits in the modifiers band**,
+  not among the ordinary keys (added 2026-08-10): on the PC it *is* a modifier
+  in the case that matters, since NVDA's desktop layout uses it as the
+  screen-reader key, and that only works if it wraps the key it modifies. The
+  plain press that flips the lock is still reachable — hold the zone until the
+  key goes down, then lift.
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +
   connected). If off, Send turns it on and asks the user to re-trigger —
   deliberately no queuing of the combo.
@@ -430,6 +459,13 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   and Pause is E1-multi-byte, the one key left on the VK path. Anti-cheat
   systems that filter injected input entirely (Vanguard etc.) are out of
   scope — that needs a driver.
+- **A dropped connection releases whatever the peer left down** (`Worker.cs`,
+  every mode). The Apple side holds keys on purpose — the iOS pad's hold
+  gesture keeps one down for as long as the finger is on it, and a physical
+  key can still be down when forwarding stops — so if the socket dies in that
+  window the release line never arrives and Windows repeats that key forever.
+  Only this end can clean it up; the sender is already gone. (The desktop
+  helpers do the same for their own desktop-switch case.)
 - **Never crashes on bad config**: invalid port or busy socket → logs and
   retries; malformed line → logged and skipped, not fatal. Logs to a per-day
   file (`FileLogger.cs`).
