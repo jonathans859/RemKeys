@@ -204,6 +204,11 @@ struct SettingsView: View {
     /// users (SwiftUI never draws a Slider's own label on iOS) over the
     /// slider itself, which is the single adjustable element VoiceOver sees —
     /// with the value spoken in real units.
+    ///
+    /// The caption is a plain `Text`, not a `LabeledContent`: as a
+    /// `LabeledContent` it stayed visible to VoiceOver despite
+    /// `.accessibilityHidden(true)`, so every row was read twice — once as
+    /// text, once as the slider (field-reported 2026-08-10).
     private func delaySlider(
         title: String,
         value: Binding<Double>,
@@ -211,14 +216,14 @@ struct SettingsView: View {
         hint: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            LabeledContent(title) {
-                Text(secondsLabel(value.wrappedValue))
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityHidden(true)
+            Text("\(title): \(secondsLabel(value.wrappedValue))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Slider(value: value, in: range, step: 0.1) {
                 Text(title)
             }
+            .labelsHidden()
             .accessibilityLabel(title)
             .accessibilityValue(secondsLabel(value.wrappedValue))
             .accessibilityHint(hint)

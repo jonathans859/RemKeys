@@ -192,6 +192,10 @@ final class KeyPadUIView: UIView {
     private var holdTimer: Timer?
     /// The key currently down on the PC, for the label highlight.
     private var heldVK: UInt16?
+    /// Whether the hold actually reached the PC. A refused one still counts
+    /// as the stage being reached (so the latch drops), but there is nothing
+    /// to release and nothing to announce as released.
+    private var holdIsLive = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -306,20 +310,27 @@ final class KeyPadUIView: UIView {
         setNeedsLayout()
     }
 
-    /// Latched keys are tinted and a size larger in *every* band now, not just
-    /// the modifier one — holding can latch an F-key just as well.
+    /// Three visibly distinct key states, in *every* band now — holding can
+    /// turn an F-key on just as well as a modifier. A **filled background** is
+    /// the primary cue (field-requested 2026-08-10): tinted text alone was too
+    /// quiet to find at a glance on a pad this dense. Off is untinted, on is a
+    /// light wash, down-on-the-PC is the same hue at full strength, so the two
+    /// live states can't be mistaken for each other either.
     private func refreshLabels() {
         for (bandIndex, band) in bands.enumerated() {
             for (keyIndex, key) in band.keys.enumerated() {
                 let label = labels[bandIndex][keyIndex]
+                let down = key.vk == heldVK
                 let on = latchedKeys.contains(key.vk)
-                label.textColor = on ? tintColor : .label
-                label.font = on
+                label.backgroundColor = down
+                    ? tintColor.withAlphaComponent(0.45)
+                    : (on ? tintColor.withAlphaComponent(0.2) : .clear)
+                // Dark text on the strong fill, tinted text on the light one:
+                // tint-on-tint at 45% would be the one unreadable combination.
+                label.textColor = on && !down ? tintColor : .label
+                label.font = on || down
                     ? .preferredFont(forTextStyle: .caption1)
                     : .preferredFont(forTextStyle: .caption2)
-                label.backgroundColor = key.vk == heldVK
-                    ? tintColor.withAlphaComponent(0.25)
-                    : .clear
             }
         }
     }
@@ -423,28 +434,35 @@ final class KeyPadUIView: UIView {
 
     private func holdStageFired() {
         guard pressStage == .latched, let key = pressKey else { return }
-        // A refused hold (forwarding off, not connected) leaves the press at
-        // the latched stage; the tab has already said why.
-        guard onHoldBegin?(key) == true else { return }
         pressStage = .held
-        heldVK = key.vk
+        // Passing this stage ends the "on" state there and then — being down
+        // on the PC replaces it, it doesn't come on top of it. That has to
+        // happen even when the press is refused below (forwarding off, not
+        // connected): a key that announced itself as held must never still be
+        // sitting there turned on afterwards (field-reported 2026-08-10).
+        setLatched(key, false)
+        holdIsLive = onHoldBegin?(key) == true
+        if holdIsLive { heldVK = key.vk }
         refreshLabels()
         edgeThump.impactOccurred()
-        announceStage("\(key.name) held down")
+        // A refused hold said why through the tab; don't claim it went down.
+        if holdIsLive { announceStage("\(key.name) held down") }
     }
 
-    /// Release a key this press put down on the PC, and drop its latch with
-    /// it: a hold is momentary from end to end, so lifting leaves nothing
-    /// selected (field decision 2026-08-10).
+    /// Release a key this press put down on the PC. The latch is already gone
+    /// (dropped when the hold stage was reached), so a hold is momentary from
+    /// end to end and leaves nothing selected.
     private func endHoldIfNeeded() {
         guard pressStage == .held, let key = pressKey else { return }
         pressStage = .spent
+        let wasLive = holdIsLive
+        holdIsLive = false
         heldVK = nil
-        onHoldEnd?(key)
+        if wasLive { onHoldEnd?(key) }
         setLatched(key, false)
         refreshLabels()
         sendThump.impactOccurred()
-        announceStage("\(key.name) released")
+        if wasLive { announceStage("\(key.name) released") }
     }
 
     /// A press that ended before the latch stage: the pad's original grammar —

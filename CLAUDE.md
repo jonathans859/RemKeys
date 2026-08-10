@@ -187,11 +187,16 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   `virtualPadLatchDelay` the key **latches on** and from then on wraps
   everything sent, exactly like a modifier; after `virtualPadHoldDelay` more
   it is **pressed down on the PC** and stays down until the finger lifts, so
-  the PC's own auto-repeat runs (hold Backspace to eat a word). Lifting from
-  the held stage releases the key **and drops the latch** — a hold is
-  momentary end to end and never leaves state behind (field decision
-  2026-08-10); lifting at the latch stage leaves the key on. Pressing a
-  latched key again is what turns it off, in any band. Each stage has its own
+  the PC's own auto-repeat runs (hold Backspace to eat a word). **Reaching**
+  the held stage drops the latch there and then — being down replaces "on"
+  instead of stacking on it — and it must do so **even when the hold is
+  refused** (offline/not connected), or a key that just announced itself as
+  held is still sitting there turned on (field-reported 2026-08-10). Lifting
+  then only releases it; lifting at the latch stage leaves the key on.
+  Pressing a latched key again is what turns it off, in any band. State is
+  carried by a **filled background** — light tint = on, strong tint = down on
+  the PC — not by tinted text, which was too quiet to find at a glance on a
+  pad this dense (field-reported 2026-08-10). Each stage has its own
   haptic (soft = on, `.rigid` = down on the PC, light = released) plus
   optional speech (`virtualPadHoldSpeech`) — the haptics are never optional,
   because they are the channel that works with the phone in a pocket.

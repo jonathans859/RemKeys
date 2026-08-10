@@ -198,7 +198,7 @@ struct VirtualInputView: View {
             if settings.virtualPadHoldEnabled {
                 Section("Holding a key") {
                     Text("Press and keep holding any key on the pad. After \(VirtualKeys.secondsDescription(settings.virtualPadLatchDelay)) it turns on and stays on, just like a modifier — a gentle vibration marks the moment. Keep holding for another \(VirtualKeys.secondsDescription(settings.virtualPadHoldDelay)) and the key is pressed down on the PC and stays down, with a firmer vibration: that is how you get key repeat, such as holding Backspace to delete a run of text or Down to keep scrolling.")
-                    Text("Lifting your finger always releases the key on the PC, and a key you held that far is turned off again as well. Lift while it is only turned on and it stays on for the keys you send next. Press a key that is on to turn it off. The timings and the spoken cues can be changed in Settings; the vibrations stay either way.")
+                    Text("The moment a key goes down on the PC it stops being turned on — being held down is the stronger state, not an extra one — so lifting releases it and leaves nothing selected. Lift while it is only turned on and it stays on for the keys you send next; press a key that is on to turn it off again. On the pad, a key that is on carries a light coloured background and the key currently down on the PC a stronger one. The timings and the spoken cues can be changed in Settings; the vibrations stay either way.")
                 }
             }
             Section("Text") {
