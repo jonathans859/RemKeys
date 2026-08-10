@@ -108,22 +108,34 @@ public final class AppSettings {
         didSet { defaults.set(virtualPadHoldEnabled, forKey: Keys.virtualPadHoldEnabled) }
     }
 
+    // The two delays clamp what they are given, which rules out a `didSet`:
+    // under `@Observable` the stored property becomes a computed one, so
+    // assigning the clamped value from inside its own observer re-enters the
+    // setter forever and blows the stack (CI, signal 11, 2026-08-10). A
+    // computed property over private storage clamps once, in the one place a
+    // value can arrive, and the storage stays observable.
+
     /// Seconds a key-pad zone must be held before the key latches on.
     public var virtualPadLatchDelay: Double {
-        didSet {
-            virtualPadLatchDelay = Self.clamp(virtualPadLatchDelay, Self.latchDelayRange)
-            defaults.set(virtualPadLatchDelay, forKey: Keys.virtualPadLatchDelay)
+        get { latchDelayStorage }
+        set {
+            latchDelayStorage = Self.clamp(newValue, Self.latchDelayRange)
+            defaults.set(latchDelayStorage, forKey: Keys.virtualPadLatchDelay)
         }
     }
 
     /// Further seconds — counted from the moment it latched, not from the
     /// touch — before the latched key is pressed down on the PC.
     public var virtualPadHoldDelay: Double {
-        didSet {
-            virtualPadHoldDelay = Self.clamp(virtualPadHoldDelay, Self.holdDelayRange)
-            defaults.set(virtualPadHoldDelay, forKey: Keys.virtualPadHoldDelay)
+        get { holdDelayStorage }
+        set {
+            holdDelayStorage = Self.clamp(newValue, Self.holdDelayRange)
+            defaults.set(holdDelayStorage, forKey: Keys.virtualPadHoldDelay)
         }
     }
+
+    private var latchDelayStorage: Double
+    private var holdDelayStorage: Double
 
     /// Whether the hold stages are spoken as well as felt. The haptics alone
     /// are unambiguous once learned (soft = latched, hard = down, light =
@@ -203,11 +215,11 @@ public final class AppSettings {
         // `double(forKey:)` can't express — read the raw object and fall back
         // only when nothing was ever stored.
         self.virtualPadHoldEnabled = defaults.object(forKey: Keys.virtualPadHoldEnabled) as? Bool ?? true
-        self.virtualPadLatchDelay = Self.clamp(
+        self.latchDelayStorage = Self.clamp(
             defaults.object(forKey: Keys.virtualPadLatchDelay) as? Double ?? 0.6,
             Self.latchDelayRange
         )
-        self.virtualPadHoldDelay = Self.clamp(
+        self.holdDelayStorage = Self.clamp(
             defaults.object(forKey: Keys.virtualPadHoldDelay) as? Double ?? 0.6,
             Self.holdDelayRange
         )
