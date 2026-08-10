@@ -108,6 +108,18 @@ struct VirtualInputView: View {
                 .accessibilityHint(settings.virtualInputKeepText
                     ? "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts. It is kept after sending, so Send repeats it."
                     : "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
+                // Emptying the field otherwise means holding Backspace on the
+                // on-screen keyboard, character by character — and with "keep
+                // text" on, the field is *meant* to stay filled, so clearing it
+                // is a routine step, not an edge case. Offered only when there
+                // is something to clear, so it never pads the action list of an
+                // empty field. Silent on purpose: the value change is on the
+                // focused element, and an announcement alongside it clips.
+                .accessibilityActions {
+                    if !text.isEmpty {
+                        Button("Clear text") { text = "" }
+                    }
+                }
 
             Button {
                 textFieldFocused = false
@@ -203,6 +215,7 @@ struct VirtualInputView: View {
             }
             Section("Text") {
                 Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers toggled, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
+                Text("To empty the field in one step, focus it with VoiceOver and use its Clear text action — swipe up or down to find it, then double tap.")
             }
             Section("Sending") {
                 if settings.virtualInputKeepText {
