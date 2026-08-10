@@ -163,6 +163,31 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   (field-rejected 2026-07-18, don't reintroduce anywhere); VoiceOver
   double-tap activation latency is system-inherent — which is exactly why
   the pad exists.
+- **Two arrangements, picked by the pad's own aspect ratio**
+  (`virtualPadLayout`, added 2026-08-10): the original **key bands** and a
+  full **PC keyboard** (`VirtualKeys.keyboardRows`). Default
+  `keyboardInLandscape` = bands upright, keyboard once the pad is wider than
+  tall (`bounds.width > bounds.height * 1.2` — the *shape*, not the size
+  class, because an iPad in a wide Split View slot is "regular" either way).
+  Landscape gives ~718×278 pt, ≈2.6:1 against a real keyboard's ≈3:1, so keys
+  land at ~48×46 pt — bigger than iOS's own landscape keyboard keys; portrait
+  can never hold one, which is why orientation is the switch. Why bother: the
+  bands ask a blind user to memorise "third band, fifth key", a keyboard asks
+  where W is — and it finally puts letters on the pad, so single-letter NVDA
+  navigation is one drag and lift instead of the text field plus Send.
+  Shape rules that must survive edits: **every row sums to 15 grid units**
+  (rows normalise to their own total, so equal totals are what makes keys line
+  up between rows — there's a DEBUG assert), the main block keeps its real
+  shape **anchored to the bottom edge** with optional rows added at the *top*
+  (so the edges stay the landmarks a glass surface otherwise lacks), the
+  nav/edit cluster is unrolled into its own row rather than a block on the
+  right, and arrows run flat along the bottom row (an inverted T needs
+  half-height keys). Both Shifts send the generic VK, so latching one lights
+  both — what's latched is *Shift*, not a side.
+  Keys are still **positional**: `pcKeyboardLayout` (US/German) renames and
+  re-speaks them only — QWERTZ swaps the Y/Z *labels* and gives left Shift a
+  unit back for the ISO 102nd key, while the VK sent is unchanged. Hearing
+  "Y" while the PC types z is the failure this setting exists to prevent.
 - **Direct-touch key pad** (`VirtualKeyPad.swift`): ONE accessibility
   element (never per-band regions — that would break explore-by-touch
   around it) with `.allowsDirectInteraction` + `[.silentOnTouch]` —
@@ -200,6 +225,15 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   haptic (soft = on, `.rigid` = down on the PC, light = released) plus
   optional speech (`virtualPadHoldSpeech`) — the haptics are never optional,
   because they are the channel that works with the phone in a pocket.
+  **Haptics also carry key state while dragging** (`virtualPadRichHaptics`,
+  on by default; requested 2026-08-10): one tick = off, **two quick ticks =
+  turned on**, a firm `.rigid` = down on the PC, and a soft swell *before*
+  the tick when the finger crosses into another row (how you count rows
+  without looking). On a 60-key layout speech is the slow channel — the finger
+  passes far more zones than announcements can keep up with. The second tick
+  is a cancellable `DispatchWorkItem` (~0.08 s) killed the moment the finger
+  moves on, or a fast drag queues stale pulses; generators are `prepare()`d in
+  `touchesBegan` so a drag's first boundary isn't the sluggish one.
   Consequences that shaped the code: latching is no longer a modifier-band
   privilege, so the tab tracks an ordered **`latched: [VirtualKey]`** (modifier
   toggles *and* held keys) that wraps every send, and the pad tints latched
@@ -214,6 +248,18 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside
   a Form section and the pad was dead in the field (2026-07-19). Don't move
   it back into scrollable content.
+- **Sizing (fixed 2026-08-10):** the representable implements
+  `sizeThatFits(_:uiView:context:)` returning the proposal. Without it a
+  `UIViewRepresentable` that has an `intrinsicContentSize` is sized to that
+  size and **centred** inside `.frame(maxHeight: .infinity)` rather than
+  filling it — the pad was a fixed `rows × 56` strip with dead space around
+  it, worst in landscape. Two companions: any **resize aborts the press**
+  (`layoutSubviews` compares against the last laid-out size), because
+  rotation moves every zone out from under a finger that is already down and
+  a held key must be released; and in **compact height with the text field
+  focused the pad is removed entirely** rather than squeezed — sideways with
+  the keyboard up there is ~70 pt left, which is a few points per row.
+  Unmounting it releases anything held via `willMove(toWindow:)`.
 - **Tab layout (field-specified 2026-07-19, revised 2026-08-06):** pad
   filling everything from the title down, over a **single control row** at
   the bottom: text field, dismiss keyboard, keep text, Send. No Form on this
@@ -238,8 +284,11 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   screen to keep Start lean); its dismissal calls
   `CaptureView.requestReclaim()`.
 - Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
-  involved; AltGr is just `VK_RMENU`. **Caps Lock sits in the modifiers band**,
-  not among the ordinary keys (added 2026-08-10): on the PC it *is* a modifier
+  involved; AltGr is just `VK_RMENU`. Which keys toggle instead of sending is
+  a property of the *key* (`VirtualKeys.modifierVKs`), not of the row, since
+  the keyboard layout scatters Shift/Ctrl/Alt/Win/Caps across three rows.
+  **Caps Lock counts as a modifier**,
+  not as an ordinary key (added 2026-08-10): on the PC it *is* a modifier
   in the case that matters, since NVDA's desktop layout uses it as the
   screen-reader key, and that only works if it wraps the key it modifies. The
   plain press that flips the lock is still reachable — hold the zone until the

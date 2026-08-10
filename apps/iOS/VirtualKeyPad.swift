@@ -10,20 +10,31 @@ import BridgeCore
 /// direct interaction, piano-app style — field-chosen over
 /// `.requiresActivation`).
 ///
-/// Two gesture models, chosen in Settings (`virtualPadSliderMode`):
+/// Two **arrangements** (`virtualPadLayout`), picked by the pad's own shape:
 ///
-/// - **Grid (default, touch-typing model):** fixed spatial bands — modifiers,
-///   editing, navigation, F1–F12, optionally F13–F24 — with the band's keys
-///   side by side. Drag to hear the key under the finger (interrupting
-///   announcement + a selection tick per boundary), lift on a key to send it
-///   immediately, lift on a modifier to toggle it. Same grammar as
+/// - **Key bands** — modifiers, editing, navigation, F1–F12, optionally
+///   F13–F24, each band a row of equal cells. The portrait layout: a tall
+///   narrow rectangle can hold nothing denser.
+/// - **Keyboard** — a real PC key block, letters and all
+///   (`VirtualKeys.keyboardRows`). Used once the pad is wider than tall,
+///   because that rectangle is close to a physical keyboard's proportions and
+///   the resulting keys come out bigger than iOS's own landscape keyboard.
+///   The point is not looks: it replaces "third band, fifth key" with a
+///   layout the user's hands already know, and the screen edges become the
+///   landmarks (left edge going up really is Shift / Caps / Tab / Esc).
+///
+/// Two gesture models, chosen in Settings (`virtualPadSliderMode`), and both
+/// work with either arrangement:
+///
+/// - **Grid (default, touch-typing model):** drag to hear the key under the
+///   finger (interrupting announcement + a tick per boundary), lift on a key
+///   to send it immediately, lift on a modifier to toggle it. Same grammar as
 ///   VoiceOver's touch typing, and fixed positions build muscle memory.
 ///   An extra finger landing mid-drag aborts the drag, so nothing fires.
 /// - **Sliders (fallback):** one-finger swipe left/right moves between
-///   bands, swipe up steps forward / down steps back (0 = "None"), tap
-///   sends the band's current key; the modifiers band browses and
-///   tap-toggles. Two-finger swipe left resets the current band; hitting
-///   either end of a row answers with a harder edge haptic.
+///   rows, swipe up steps forward / down steps back (0 = "None"), tap
+///   sends the row's current key; modifiers tap-toggle. Two-finger swipe left
+///   resets the current row; hitting either end answers with a harder haptic.
 ///
 /// **Press and hold works in both models** (`virtualPadHoldEnabled`), and is
 /// what makes a one-finger pad able to express more than "tap = send":
@@ -42,11 +53,10 @@ import BridgeCore
 ///
 /// Both modes: two-finger tap clears the whole selection. Success is
 /// silent (plus a light haptic); failures speak via the shared send path.
-/// Keys always send wrapped in whatever is latched — the pad's modifier band
-/// and the hold gesture make that intent explicit.
+/// Keys always send wrapped in whatever is latched.
 struct VirtualKeyPad: UIViewRepresentable {
     let settings: AppSettings
-    /// Snapshot of the tab's latched keys (modifier band toggles and anything
+    /// Snapshot of the tab's latched keys (modifier toggles and anything
     /// latched by holding) — owned by the tab so Send's hint stays honest.
     let latchedKeys: Set<UInt16>
     /// Latch a key on or off. Explicit rather than a toggle: the hold stages
@@ -71,26 +81,31 @@ struct VirtualKeyPad: UIViewRepresentable {
         configure(view)
     }
 
+    /// Fill whatever the tab gives us. Without this the representable is sized
+    /// from `intrinsicContentSize` and *centred* inside the frame instead —
+    /// which is why a landscape pad ended up a fixed-height strip floating in
+    /// the middle of the screen rather than the full-bleed pad the tab asks
+    /// for. Zones are aimed at by feel, so every point counts.
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: KeyPadUIView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, let height = proposal.height,
+              width > 0, height > 0, width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
     private func configure(_ view: KeyPadUIView) {
-        var bands: [PadBand] = [
-            PadBand(title: "Modifiers", keys: VirtualKeys.modifiers, isModifierBand: true)
-        ]
-        bands += VirtualKeys.categories.map {
-            PadBand(title: $0.title, keys: $0.keys, isModifierBand: false)
-        }
-        if settings.virtualPadExtendedFKeys {
-            bands.append(PadBand(
-                title: "Extended function keys",
-                keys: VirtualKeys.extendedFunctionKeys,
-                isModifierBand: false
-            ))
-        }
-        view.setBands(bands)
+        view.layoutPreference = settings.virtualPadLayout
+        view.pcLayout = settings.pcKeyboardLayout
+        view.extendedFKeys = settings.virtualPadExtendedFKeys
         view.sliderMode = settings.virtualPadSliderMode
         view.holdEnabled = settings.virtualPadHoldEnabled
         view.latchDelay = settings.virtualPadLatchDelay
         view.holdDelay = settings.virtualPadHoldDelay
         view.speaksHoldStages = settings.virtualPadHoldSpeech
+        view.richHaptics = settings.virtualPadRichHaptics
         view.latchedKeys = latchedKeys
         view.onSetLatched = onSetLatched
         view.onClearLatched = onClearLatched
@@ -100,16 +115,45 @@ struct VirtualKeyPad: UIViewRepresentable {
     }
 }
 
-/// One horizontal band of pad zones.
-struct PadBand: Equatable {
+/// One key on the pad, with the width it takes in its row.
+///
+/// Widths are in grid units, not points: every row of a layout sums to the
+/// same number of units, so a 2-unit Backspace stays twice a letter's width at
+/// any screen size and keys line up between rows.
+struct PadKey: Equatable {
+    let key: VirtualKey
+    let units: Double
+
+    init(key: VirtualKey, units: Double = 1) {
+        self.key = key
+        self.units = units
+    }
+
+    /// Lifting on it toggles instead of sending. A property of the key, not of
+    /// the row: the keyboard layout scatters Shift/Ctrl/Alt/Win/Caps across
+    /// three different rows.
+    var isModifier: Bool { VirtualKeys.modifierVKs.contains(key.vk) }
+}
+
+/// One horizontal row of pad zones.
+struct PadRow: Equatable {
     let title: String
-    let keys: [VirtualKey]
-    let isModifierBand: Bool
+    let keys: [PadKey]
+    /// Every key in the row is a modifier — true only for the bands layout's
+    /// modifier band. Slider mode reads it to decide whether the row needs a
+    /// leading "None" slot (a row of toggles has no single selection).
+    let isModifierRow: Bool
+
+    init(title: String, keys: [PadKey], isModifierRow: Bool = false) {
+        self.title = title
+        self.keys = keys
+        self.isModifierRow = isModifierRow
+    }
 }
 
 /// A zone address on the pad.
 private struct PadZone: Equatable {
-    let band: Int
+    let row: Int
     let key: Int
 }
 
@@ -119,6 +163,18 @@ final class KeyPadUIView: UIView {
     var onSend: ((VirtualKey) -> Void)?
     var onHoldBegin: ((VirtualKey) -> Bool)?
     var onHoldEnd: ((VirtualKey) -> Void)?
+
+    var layoutPreference: VirtualPadLayout = .keyboardInLandscape {
+        didSet { rowsInvalidated(oldValue != layoutPreference) }
+    }
+
+    var pcLayout: PCKeyboardLayout = .us {
+        didSet { rowsInvalidated(oldValue != pcLayout) }
+    }
+
+    var extendedFKeys = false {
+        didSet { rowsInvalidated(oldValue != extendedFKeys) }
+    }
 
     var sliderMode = false {
         didSet {
@@ -140,6 +196,7 @@ final class KeyPadUIView: UIView {
     var latchDelay: TimeInterval = 0.6
     var holdDelay: TimeInterval = 0.6
     var speaksHoldStages = true
+    var richHaptics = true
 
     var latchedKeys: Set<UInt16> = [] {
         didSet {
@@ -148,26 +205,36 @@ final class KeyPadUIView: UIView {
         }
     }
 
-    private var bands: [PadBand] = []
+    private var rows: [PadRow] = []
     private var labels: [[UILabel]] = []
+    /// Whether `rows` currently holds the keyboard arrangement, so a rotation
+    /// that flips the answer is noticed in `layoutSubviews`.
+    private var rowsAreKeyboard: Bool?
+    private var rowsNeedRebuild = true
+    /// The size the zones were last computed for: a change means the finger is
+    /// no longer over what it thought it was.
+    private var lastLaidOutSize: CGSize?
+
     private let selectionTick = UISelectionFeedbackGenerator()
     private let sendThump = UIImpactFeedbackGenerator(style: .light)
     /// Noticeably harder than the selection tick: felt when a swipe tries to
-    /// step past the first/last position — the non-visual "end of the row".
+    /// step past the first/last position — the non-visual "end of the row" —
+    /// and when a key goes down on the PC.
     private let edgeThump = UIImpactFeedbackGenerator(style: .rigid)
-    /// The hold stages, felt apart without looking: a soft swell when the key
-    /// latches, the hard `edgeThump` when it actually goes down on the PC, and
-    /// the light `sendThump` when it comes back up.
+    /// The soft swell: the key latching on, and (with rich haptics) crossing
+    /// into a different row.
     private let latchThump = UIImpactFeedbackGenerator(style: .soft)
+    /// Fires the second half of the "this key is on" double tick.
+    private var stateTickWork: DispatchWorkItem?
 
     // Grid mode: the single tracked finger and the zone it is over.
     private var trackedTouch: UITouch?
     private var trackedZone: PadZone?
 
-    // Slider mode: which band is current, and each band's position
-    // (key bands: 0 = "None", i = keys[i - 1]; modifier band: browse index).
-    private var currentBand = 0
-    private var bandPositions: [Int] = []
+    // Slider mode: which row is current, and each row's position
+    // (key rows: 0 = "None", i = keys[i - 1]; modifier row: browse index).
+    private var currentRow = 0
+    private var rowPositions: [Int] = []
     /// Where the slider-mode finger landed, so a swipe (rather than a hold)
     /// can be told apart and call the countdown off.
     private var sliderTouchOrigin: CGPoint = .zero
@@ -186,8 +253,7 @@ final class KeyPadUIView: UIView {
     }
 
     private var pressStage: PressStage = .spent
-    private var pressKey: VirtualKey?
-    private var pressIsModifierBand = false
+    private var pressKey: PadKey?
     private var latchTimer: Timer?
     private var holdTimer: Timer?
     /// The key currently down on the PC, for the label highlight.
@@ -226,6 +292,13 @@ final class KeyPadUIView: UIView {
         accessibilityDirectTouchOptions = [.silentOnTouch]
         updateAccessibilityHint()
 
+        // Key borders are CGColors, which are resolved once and don't follow
+        // light/dark mode on their own — without this the outlines stay the
+        // old mode's colour until the pad is rebuilt.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: KeyPadUIView, _) in
+            view.updateBorderColors()
+        }
+
         // Both modes: two-finger tap clears the whole selection.
         let clearTap = UITapGestureRecognizer(target: self, action: #selector(handleClearTap))
         clearTap.numberOfTouchesRequired = 2
@@ -234,7 +307,7 @@ final class KeyPadUIView: UIView {
         // Slider mode only; disabled while the grid handles raw touches.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleSliderTap))
         tap.numberOfTouchesRequired = 1
-        let resetSwipe = UISwipeGestureRecognizer(target: self, action: #selector(handleBandReset))
+        let resetSwipe = UISwipeGestureRecognizer(target: self, action: #selector(handleRowReset))
         resetSwipe.direction = .left
         resetSwipe.numberOfTouchesRequired = 2
         var swipes: [UIGestureRecognizer] = [tap, resetSwipe]
@@ -279,93 +352,188 @@ final class KeyPadUIView: UIView {
         if newWindow == nil { abortPress() }
     }
 
-    // MARK: Bands & visible labels (touch-user convenience; VoiceOver only
+    // MARK: Rows & visible labels (touch-user convenience; VoiceOver only
     // ever sees the pad as one element)
 
-    func setBands(_ newBands: [PadBand]) {
-        guard newBands != bands else { return }
+    private func rowsInvalidated(_ changed: Bool) {
+        guard changed else { return }
+        rowsNeedRebuild = true
+        setNeedsLayout()
+    }
+
+    /// Which arrangement this rectangle can hold. The pad's own aspect ratio
+    /// decides it, not the size class: an iPad in landscape and an iPad in a
+    /// wide Split View slot are both "regular" but only one is keyboard
+    /// shaped, and the shape is what actually determines whether a 15-unit row
+    /// gives keys a usable width.
+    private var wantsKeyboardLayout: Bool {
+        switch layoutPreference {
+        case .bands: return false
+        case .keyboardAlways: return true
+        case .keyboardInLandscape: return bounds.width > bounds.height * 1.2
+        }
+    }
+
+    /// The bands arrangement: one row per group, equal cells throughout.
+    private func bandRows() -> [PadRow] {
+        var result = [PadRow(
+            title: "Modifiers",
+            keys: VirtualKeys.modifiers.map { PadKey(key: $0) },
+            isModifierRow: true
+        )]
+        result += VirtualKeys.categories.map { category in
+            PadRow(title: category.title, keys: category.keys.map { PadKey(key: $0) })
+        }
+        if extendedFKeys {
+            result.append(PadRow(
+                title: "Extended function keys",
+                keys: VirtualKeys.extendedFunctionKeys.map { PadKey(key: $0) }
+            ))
+        }
+        return result
+    }
+
+    /// Rebuild the rows when the settings or the pad's shape call for a
+    /// different arrangement. Called from `layoutSubviews`, so it must not ask
+    /// for another layout pass — the caller positions the new labels itself.
+    private func applyRowsIfNeeded() {
+        let wantsKeyboard = wantsKeyboardLayout
+        guard rowsNeedRebuild || wantsKeyboard != rowsAreKeyboard else { return }
+        rowsNeedRebuild = false
+        rowsAreKeyboard = wantsKeyboard
+        setRows(wantsKeyboard
+            ? VirtualKeys.keyboardRows(layout: pcLayout, includeExtendedFKeys: extendedFKeys)
+            : bandRows())
+    }
+
+    private func setRows(_ newRows: [PadRow]) {
+        guard newRows != rows else { return }
         abortPress()
-        bands = newBands
-        currentBand = 0
-        bandPositions = Array(repeating: 0, count: bands.count)
+        rows = newRows
+        currentRow = 0
+        rowPositions = Array(repeating: 0, count: rows.count)
 
         for label in labels.flatMap({ $0 }) { label.removeFromSuperview() }
-        labels = bands.map { band in
-            band.keys.map { key in
+        labels = rows.map { row in
+            row.keys.map { padKey in
                 let label = UILabel()
-                label.text = key.name
-                label.font = .preferredFont(forTextStyle: .caption2)
+                label.text = padKey.key.name
                 label.adjustsFontSizeToFitWidth = true
                 label.minimumScaleFactor = 0.5
                 label.textAlignment = .center
-                label.layer.borderWidth = 0.5
-                label.layer.borderColor = UIColor.separator.cgColor
+                label.layer.cornerRadius = 6
+                label.layer.borderWidth = 1
+                label.layer.borderColor = UIColor.separator
+                    .resolvedColor(with: traitCollection).cgColor
+                label.layer.masksToBounds = true
                 label.isAccessibilityElement = false
                 addSubview(label)
                 return label
             }
         }
-        refreshLabels()
         invalidateIntrinsicContentSize()
-        setNeedsLayout()
     }
 
-    /// Three visibly distinct key states, in *every* band now — holding can
-    /// turn an F-key on just as well as a modifier. A **filled background** is
-    /// the primary cue (field-requested 2026-08-10): tinted text alone was too
-    /// quiet to find at a glance on a pad this dense. Off is untinted, on is a
-    /// light wash, down-on-the-PC is the same hue at full strength, so the two
-    /// live states can't be mistaken for each other either.
+    /// Three visibly distinct key states, in *every* row — holding can turn an
+    /// F-key on just as well as a modifier. A **filled background** is the
+    /// primary cue (field-requested 2026-08-10): tinted text alone was too
+    /// quiet to find at a glance on a pad this dense. Off is a plain key fill,
+    /// on is a light tint wash, down-on-the-PC is the same hue at full
+    /// strength, so the two live states can't be mistaken for each other.
     private func refreshLabels() {
-        for (bandIndex, band) in bands.enumerated() {
-            for (keyIndex, key) in band.keys.enumerated() {
-                let label = labels[bandIndex][keyIndex]
-                let down = key.vk == heldVK
-                let on = latchedKeys.contains(key.vk)
+        for (rowIndex, row) in rows.enumerated() {
+            for (keyIndex, padKey) in row.keys.enumerated() {
+                guard rowIndex < labels.count, keyIndex < labels[rowIndex].count else { continue }
+                let label = labels[rowIndex][keyIndex]
+                let down = padKey.key.vk == heldVK
+                let on = latchedKeys.contains(padKey.key.vk)
                 label.backgroundColor = down
                     ? tintColor.withAlphaComponent(0.45)
-                    : (on ? tintColor.withAlphaComponent(0.2) : .clear)
+                    : (on ? tintColor.withAlphaComponent(0.2) : .tertiarySystemFill)
                 // Dark text on the strong fill, tinted text on the light one:
                 // tint-on-tint at 45% would be the one unreadable combination.
                 label.textColor = on && !down ? tintColor : .label
-                label.font = on || down
-                    ? .preferredFont(forTextStyle: .caption1)
-                    : .preferredFont(forTextStyle: .caption2)
-            }
-        }
-    }
-
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: CGFloat(bands.count) * 56)
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        guard !bands.isEmpty, bounds.width > 0 else { return }
-        let bandHeight = bounds.height / CGFloat(bands.count)
-        for (bandIndex, band) in bands.enumerated() {
-            let keyWidth = bounds.width / CGFloat(band.keys.count)
-            for keyIndex in band.keys.indices {
-                labels[bandIndex][keyIndex].frame = CGRect(
-                    x: CGFloat(keyIndex) * keyWidth,
-                    y: CGFloat(bandIndex) * bandHeight,
-                    width: keyWidth,
-                    height: bandHeight
+                label.font = .systemFont(
+                    ofSize: labelPointSize,
+                    weight: on || down ? .semibold : .regular
                 )
             }
         }
     }
 
+    private func updateBorderColors() {
+        let border = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+        for label in labels.flatMap({ $0 }) { label.layer.borderColor = border }
+    }
+
+    /// Text sized from the zones themselves. The keyboard layout's rows are a
+    /// third the height of a band, and a fixed caption size looked either lost
+    /// or clipped depending on the arrangement.
+    private var labelPointSize: CGFloat {
+        guard !rows.isEmpty, bounds.height > 0 else { return 11 }
+        let rowHeight = bounds.height / CGFloat(rows.count)
+        return min(max(rowHeight * 0.36, 9), 20)
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: CGFloat(max(rows.count, 1)) * 56)
+    }
+
+    /// Gap between key rectangles, so the pad reads as keys rather than as a
+    /// wireframe grid. Purely cosmetic — hit testing uses the full cell, so
+    /// no touch can land "between" two keys.
+    private static let keyGap: CGFloat = 2
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A resize (rotation, the on-screen keyboard, an iPad window drag)
+        // moves every zone out from under the finger: end the press, which
+        // also releases anything this pad is holding down on the PC.
+        if let lastLaidOutSize, lastLaidOutSize != bounds.size { abortPress() }
+        lastLaidOutSize = bounds.size
+
+        applyRowsIfNeeded()
+        guard !rows.isEmpty, bounds.width > 0, bounds.height > 0 else { return }
+
+        let rowHeight = bounds.height / CGFloat(rows.count)
+        let gap = Self.keyGap
+        for (rowIndex, row) in rows.enumerated() {
+            let totalUnits = row.keys.reduce(0) { $0 + $1.units }
+            guard totalUnits > 0 else { continue }
+            var x: CGFloat = 0
+            for (keyIndex, padKey) in row.keys.enumerated() {
+                let width = bounds.width * CGFloat(padKey.units / totalUnits)
+                labels[rowIndex][keyIndex].frame = CGRect(
+                    x: x + gap / 2,
+                    y: CGFloat(rowIndex) * rowHeight + gap / 2,
+                    width: max(width - gap, 1),
+                    height: max(rowHeight - gap, 1)
+                )
+                x += width
+            }
+        }
+        refreshLabels()
+    }
+
     // MARK: Shared helpers
 
     private func zone(at point: CGPoint) -> PadZone? {
-        guard !bands.isEmpty, bounds.contains(point) else { return nil }
-        let bandHeight = bounds.height / CGFloat(bands.count)
-        let bandIndex = min(max(Int(point.y / bandHeight), 0), bands.count - 1)
-        let keys = bands[bandIndex].keys
-        let keyWidth = bounds.width / CGFloat(keys.count)
-        let keyIndex = min(max(Int(point.x / keyWidth), 0), keys.count - 1)
-        return PadZone(band: bandIndex, key: keyIndex)
+        guard !rows.isEmpty, bounds.contains(point) else { return nil }
+        let rowHeight = bounds.height / CGFloat(rows.count)
+        let rowIndex = min(max(Int(point.y / rowHeight), 0), rows.count - 1)
+        let keys = rows[rowIndex].keys
+        guard !keys.isEmpty else { return nil }
+        // Walk the row's cumulative widths: unlike the bands layout, keys in a
+        // keyboard row are not all the same width.
+        let totalUnits = keys.reduce(0) { $0 + $1.units }
+        guard totalUnits > 0 else { return nil }
+        let unitsAcross = Double(point.x / bounds.width) * totalUnits
+        var consumed = 0.0
+        for (index, padKey) in keys.enumerated() {
+            consumed += padKey.units
+            if unitsAcross < consumed { return PadZone(row: rowIndex, key: index) }
+        }
+        return PadZone(row: rowIndex, key: keys.count - 1)
     }
 
     /// Interrupting on purpose: while dragging, the newest key name must win
@@ -381,9 +549,36 @@ final class KeyPadUIView: UIView {
         announce(message)
     }
 
-    private func description(of key: VirtualKey, inModifierBand: Bool) -> String {
-        if latchedKeys.contains(key.vk) { return "\(key.name), on" }
-        return inModifierBand ? "\(key.name), off" : key.name
+    private func description(of padKey: PadKey) -> String {
+        let name = padKey.key.spokenName
+        if latchedKeys.contains(padKey.key.vk) { return "\(name), on" }
+        return padKey.isModifier ? "\(name), off" : name
+    }
+
+    /// The vibration for arriving on a new key. With rich haptics on it also
+    /// carries the key's **state**, which is the whole point on a keyboard
+    /// layout: passing over 60 keys, the finger learns which ones are already
+    /// turned on without waiting for a word to be spoken.
+    ///
+    /// - crossing into a different row: a soft swell first
+    /// - key off: one tick
+    /// - key on: two ticks (the second follows shortly after)
+    /// - key down on the PC: a tick and a firm thump
+    private func feedbackEntering(_ padKey: PadKey, rowChanged: Bool) {
+        stateTickWork?.cancel()
+        stateTickWork = nil
+        if richHaptics, rowChanged { latchThump.impactOccurred(intensity: 0.6) }
+        selectionTick.selectionChanged()
+        guard richHaptics else { return }
+        if padKey.key.vk == heldVK {
+            edgeThump.impactOccurred()
+        } else if latchedKeys.contains(padKey.key.vk) {
+            let work = DispatchWorkItem { [weak self] in
+                self?.selectionTick.selectionChanged()
+            }
+            stateTickWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+        }
     }
 
     /// Latch a key on/off through the parent. The local set is updated
@@ -409,74 +604,74 @@ final class KeyPadUIView: UIView {
 
     // MARK: Press & hold state machine
 
-    /// Start (or restart) the countdown for `key`. Any key still down on the
-    /// PC from the previous zone is released first — sliding off a held key
-    /// ends its hold exactly like lifting does.
-    private func startPress(on key: VirtualKey, inModifierBand: Bool) {
+    /// Start (or restart) the countdown for `padKey`. Any key still down on
+    /// the PC from the previous zone is released first — sliding off a held
+    /// key ends its hold exactly like lifting does.
+    private func startPress(on padKey: PadKey) {
         endHoldIfNeeded()
         cancelStageTimers()
-        pressKey = key
-        pressIsModifierBand = inModifierBand
+        pressKey = padKey
         pressStage = .pressing
         guard holdEnabled else { return }
         latchTimer = scheduleStage(after: latchDelay) { [weak self] in self?.latchStageFired() }
     }
 
     private func latchStageFired() {
-        guard pressStage == .pressing, let key = pressKey else { return }
+        guard pressStage == .pressing, let padKey = pressKey else { return }
         pressStage = .latched
         suppressSliderTap = true
-        setLatched(key, true)
+        setLatched(padKey.key, true)
         latchThump.impactOccurred()
-        announceStage("\(key.name) on")
+        announceStage("\(padKey.key.spokenName) on")
         holdTimer = scheduleStage(after: holdDelay) { [weak self] in self?.holdStageFired() }
     }
 
     private func holdStageFired() {
-        guard pressStage == .latched, let key = pressKey else { return }
+        guard pressStage == .latched, let padKey = pressKey else { return }
         pressStage = .held
         // Passing this stage ends the "on" state there and then — being down
         // on the PC replaces it, it doesn't come on top of it. That has to
         // happen even when the press is refused below (forwarding off, not
         // connected): a key that announced itself as held must never still be
         // sitting there turned on afterwards (field-reported 2026-08-10).
-        setLatched(key, false)
-        holdIsLive = onHoldBegin?(key) == true
-        if holdIsLive { heldVK = key.vk }
+        setLatched(padKey.key, false)
+        holdIsLive = onHoldBegin?(padKey.key) == true
+        if holdIsLive { heldVK = padKey.key.vk }
         refreshLabels()
         edgeThump.impactOccurred()
         // A refused hold said why through the tab; don't claim it went down.
-        if holdIsLive { announceStage("\(key.name) held down") }
+        if holdIsLive { announceStage("\(padKey.key.spokenName) held down") }
     }
 
     /// Release a key this press put down on the PC. The latch is already gone
     /// (dropped when the hold stage was reached), so a hold is momentary from
     /// end to end and leaves nothing selected.
     private func endHoldIfNeeded() {
-        guard pressStage == .held, let key = pressKey else { return }
+        guard pressStage == .held, let padKey = pressKey else { return }
         pressStage = .spent
         let wasLive = holdIsLive
         holdIsLive = false
         heldVK = nil
-        if wasLive { onHoldEnd?(key) }
-        setLatched(key, false)
+        if wasLive { onHoldEnd?(padKey.key) }
+        setLatched(padKey.key, false)
         refreshLabels()
         sendThump.impactOccurred()
-        if wasLive { announceStage("\(key.name) released") }
+        if wasLive { announceStage("\(padKey.key.spokenName) released") }
     }
 
     /// A press that ended before the latch stage: the pad's original grammar —
     /// modifiers toggle, other keys send. Pressing an already-latched key is
-    /// how you let it go again, in either kind of band.
-    private func shortPress(_ key: VirtualKey, inModifierBand: Bool) {
+    /// how you let it go again, wherever it sits.
+    private func shortPress(_ padKey: PadKey) {
+        let key = padKey.key
         if latchedKeys.contains(key.vk) {
             setLatched(key, false)
             selectionTick.selectionChanged()
-            announce("\(key.name) off")
-        } else if inModifierBand {
+            announce("\(key.spokenName) off")
+        } else if padKey.isModifier {
             setLatched(key, true)
             selectionTick.selectionChanged()
-            announce("\(key.name) on")
+            announce("\(key.spokenName) on")
         } else {
             send(key)
         }
@@ -498,6 +693,8 @@ final class KeyPadUIView: UIView {
         latchTimer = nil
         holdTimer?.invalidate()
         holdTimer = nil
+        stateTickWork?.cancel()
+        stateTickWork = nil
     }
 
     /// `.common` mode so the countdown keeps running through anything that
@@ -520,6 +717,12 @@ final class KeyPadUIView: UIView {
             abortPress()
             return
         }
+        // Warming the Taptic Engine here is what keeps the first tick of a
+        // drag as prompt as the rest — on a keyboard layout a drag crosses
+        // zones immediately, so a cold first boundary is very noticeable.
+        selectionTick.prepare()
+        latchThump.prepare()
+        edgeThump.prepare()
         trackedTouch = touch
         suppressSliderTap = false
         if sliderMode {
@@ -561,8 +764,8 @@ final class KeyPadUIView: UIView {
         case .pressing:
             // In slider mode the tap recognizer owns the short press, so the
             // send doesn't happen twice.
-            if !sliderMode, let key = pressKey {
-                shortPress(key, inModifierBand: pressIsModifierBand)
+            if !sliderMode, let padKey = pressKey {
+                shortPress(padKey)
             }
         case .latched, .spent:
             // Latched: the stage itself already did the work and said so.
@@ -584,6 +787,7 @@ final class KeyPadUIView: UIView {
     private func updateTrackedZone(with touch: UITouch) {
         let newZone = zone(at: touch.location(in: self))
         guard newZone != trackedZone else { return }
+        let previousRow = trackedZone?.row
         trackedZone = newZone
         guard let newZone else {
             // The finger left the pad: end any hold and stop the countdown, so
@@ -594,11 +798,10 @@ final class KeyPadUIView: UIView {
             pressKey = nil
             return
         }
-        let band = bands[newZone.band]
-        let key = band.keys[newZone.key]
-        selectionTick.selectionChanged()
-        announce(description(of: key, inModifierBand: band.isModifierBand))
-        startPress(on: key, inModifierBand: band.isModifierBand)
+        let padKey = rows[newZone.row].keys[newZone.key]
+        feedbackEntering(padKey, rowChanged: previousRow != nil && previousRow != newZone.row)
+        announce(description(of: padKey))
+        startPress(on: padKey)
     }
 
     /// How far a slider-mode finger may drift and still count as a hold.
@@ -606,63 +809,63 @@ final class KeyPadUIView: UIView {
 
     // MARK: Slider mode — recognizer driven
 
-    /// The key the current row points at, or nil on a key band's "None".
-    private var sliderKey: VirtualKey? {
-        guard !bands.isEmpty else { return nil }
-        let band = bands[currentBand]
-        let position = bandPositions[currentBand]
-        if band.isModifierBand { return band.keys[position] }
-        return position == 0 ? nil : band.keys[position - 1]
+    /// The key the current row points at, or nil on a key row's "None".
+    private var sliderKey: PadKey? {
+        guard !rows.isEmpty else { return nil }
+        let row = rows[currentRow]
+        let position = rowPositions[currentRow]
+        if row.isModifierRow { return row.keys[position] }
+        return position == 0 ? nil : row.keys[position - 1]
     }
 
     private func beginSliderPress() {
-        guard let key = sliderKey else {
+        guard let padKey = sliderKey else {
             pressStage = .spent
             pressKey = nil
             return
         }
-        startPress(on: key, inModifierBand: bands[currentBand].isModifierBand)
+        startPress(on: padKey)
     }
 
-    private func moveBand(by delta: Int) {
-        let target = min(max(currentBand + delta, 0), bands.count - 1)
-        guard target != currentBand else {
+    private func moveRow(by delta: Int) {
+        guard !rows.isEmpty else { return }
+        let target = min(max(currentRow + delta, 0), rows.count - 1)
+        guard target != currentRow else {
             edgeThump.impactOccurred()
             return
         }
-        currentBand = target
+        currentRow = target
         selectionTick.selectionChanged()
-        let band = bands[currentBand]
-        announce("\(band.title): \(currentPositionDescription())")
+        announce("\(rows[currentRow].title): \(currentPositionDescription())")
     }
 
     private func currentPositionDescription() -> String {
-        let band = bands[currentBand]
-        let position = bandPositions[currentBand]
-        if band.isModifierBand {
-            return description(of: band.keys[position], inModifierBand: true)
-        }
-        return position == 0 ? "None" : description(of: band.keys[position - 1], inModifierBand: false)
+        guard !rows.isEmpty else { return "None" }
+        let row = rows[currentRow]
+        let position = rowPositions[currentRow]
+        if row.isModifierRow { return description(of: row.keys[position]) }
+        return position == 0 ? "None" : description(of: row.keys[position - 1])
     }
 
     private func stepPosition(by delta: Int) {
-        let band = bands[currentBand]
-        // Key bands have a leading "None" slot; the modifier band browses
+        guard !rows.isEmpty else { return }
+        let row = rows[currentRow]
+        // Key rows have a leading "None" slot; an all-modifier row browses
         // its keys directly (several can be on, so position can't be the
         // selection there).
-        let count = band.isModifierBand ? band.keys.count : band.keys.count + 1
-        let target = min(max(bandPositions[currentBand] + delta, 0), count - 1)
-        guard target != bandPositions[currentBand] else {
+        let count = row.isModifierRow ? row.keys.count : row.keys.count + 1
+        let target = min(max(rowPositions[currentRow] + delta, 0), count - 1)
+        guard target != rowPositions[currentRow] else {
             edgeThump.impactOccurred()
             return
         }
-        bandPositions[currentBand] = target
+        rowPositions[currentRow] = target
         selectionTick.selectionChanged()
         announce(currentPositionDescription())
     }
 
-    @objc private func handleSwipeRight() { moveBand(by: 1) }
-    @objc private func handleSwipeLeft() { moveBand(by: -1) }
+    @objc private func handleSwipeRight() { moveRow(by: 1) }
+    @objc private func handleSwipeLeft() { moveRow(by: -1) }
     // Swipe up = forward, down = back — the VoiceOver-adjustable convention.
     // (Flipped to down-forward on request 2026-07-19 and reverted the same
     // day; the user confirmed the request was a mistake. Keep the
@@ -674,22 +877,21 @@ final class KeyPadUIView: UIView {
         // A press that latched (or went further) has already acted; the tap
         // recognizer must not send the same key on top of it.
         guard !suppressSliderTap else { return }
-        let band = bands[currentBand]
-        guard let key = sliderKey else {
+        guard let padKey = sliderKey else {
             announce("No key selected")
             return
         }
-        shortPress(key, inModifierBand: band.isModifierBand)
+        shortPress(padKey)
     }
 
-    @objc private func handleBandReset() {
-        let band = bands[currentBand]
-        if band.isModifierBand {
+    @objc private func handleRowReset() {
+        guard !rows.isEmpty else { return }
+        if rows[currentRow].isModifierRow {
             handleClearTap()
         } else {
-            bandPositions[currentBand] = 0
+            rowPositions[currentRow] = 0
             selectionTick.selectionChanged()
-            announce("\(band.title) reset")
+            announce("\(rows[currentRow].title) reset")
         }
     }
 }

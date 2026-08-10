@@ -77,13 +77,27 @@ struct SettingsView: View {
             Section("Modifier mapping") {
                 Text("There is no single correct way to map Apple modifiers to Windows ones, so Option and Command each map per physical side. Multi-OS keyboards often present their Win-labeled key as Command — press a key and check Last key seen in the Start tab's info sheet to find out what it reports as. Shift and Control always map straight across. AltGr matters on layouts like German, where it is the only way to type characters such as @ and the braces.")
             }
-            Section("Virtual input") {
+            Section("Key pad") {
+                switch settings.virtualPadLayout {
+                case .bands:
+                    Text("The pad shows key bands — modifiers, editing, navigation and the function keys — in both orientations. Choose one of the keyboard options to get letters, digits and punctuation as well, arranged as they are on a real PC keyboard.")
+                case .keyboardInLandscape:
+                    Text("The pad shows key bands while the device is upright and a whole PC keyboard once it is turned sideways. Sideways is where that fits: the screen is then close to a keyboard's proportions, and the keys come out about the size of the ones on the on-screen keyboard. Upright there is no room, so the bands stay.")
+                case .keyboardAlways:
+                    Text("The pad always shows a whole PC keyboard. Upright its keys are narrow — dragging still finds them, but sideways is where they reach a comfortable size.")
+                }
+                if settings.virtualPadLayout != .bands {
+                    Text("The keyboard is named for a \(settings.pcKeyboardLayout.displayName) PC. Keys travel by position and the PC's own layout decides the character, so this setting only changes what you see and hear — set it to match the PC and the letter you hear is the letter that arrives.")
+                }
                 Text(settings.virtualPadSliderMode
                      ? "The key pad currently uses slider gestures: swipe between rows and through keys, tap to send. Turn the toggle off for the grid, where dragging explores the keys and lifting sends."
                      : "The key pad currently uses the grid: dragging explores the keys and lifting sends. Turn the slider toggle on for row-based swiping instead — an alternative if the grid zones feel too small.")
                 Text(settings.virtualPadExtendedFKeys
-                     ? "F13 to F24 are shown as a fifth band, which makes every zone a bit smaller."
-                     : "F13 to F24 are hidden; enable them to add a fifth band at the cost of smaller zones.")
+                     ? "F13 to F24 are shown as an extra row, which makes every other row a bit shorter."
+                     : "F13 to F24 are hidden; enable them to add a row at the cost of shorter ones elsewhere.")
+                Text(settings.virtualPadRichHaptics
+                     ? "Vibrations report state: one pulse for a key that is off, two for one that is turned on, a firm one for a key held down on the PC, and a soft swell when you cross into another row."
+                     : "Vibrations are plain: one tick per key, whatever its state.")
             }
             Section("Hold a key on the pad") {
                 Text(settings.virtualPadHoldEnabled
@@ -139,6 +153,30 @@ struct SettingsView: View {
 
     private var virtualInputSection: some View {
         Section {
+            Picker("Key pad layout", selection: Binding(
+                get: { settings.virtualPadLayout },
+                set: { settings.virtualPadLayout = $0 }
+            )) {
+                ForEach(VirtualPadLayout.allCases) { layout in
+                    Text(layout.displayName).tag(layout)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityHint("Key bands are the modifier, editing, navigation and function-key rows. The keyboard is a whole PC key block including letters and digits, which only has room for usable keys when the device is sideways.")
+
+            if settings.virtualPadLayout != .bands {
+                Picker("PC keyboard layout", selection: Binding(
+                    get: { settings.pcKeyboardLayout },
+                    set: { settings.pcKeyboardLayout = $0 }
+                )) {
+                    ForEach(PCKeyboardLayout.allCases) { layout in
+                        Text(layout.displayName).tag(layout)
+                    }
+                }
+                .pickerStyle(.menu)
+                .accessibilityHint("Names the keys on the keyboard layout after the layout your PC is set to. It never changes what is sent — keys always travel by position, and the PC decides the character.")
+            }
+
             Toggle("Key pad uses slider gestures", isOn: Binding(
                 get: { settings.virtualPadSliderMode },
                 set: { settings.virtualPadSliderMode = $0 }
@@ -148,9 +186,14 @@ struct SettingsView: View {
                 get: { settings.virtualPadExtendedFKeys },
                 set: { settings.virtualPadExtendedFKeys = $0 }
             ))
-            .accessibilityHint("Adds a fifth band to the key pad. The other bands get less room.")
+            .accessibilityHint("Adds a row of F13 to F24 to the key pad. Every other row gets less room.")
+            Toggle("Vibrations report key state", isOn: Binding(
+                get: { settings.virtualPadRichHaptics },
+                set: { settings.virtualPadRichHaptics = $0 }
+            ))
+            .accessibilityHint("On: a key that is turned on answers with two pulses instead of one, a key held down on the PC with a firm one, and moving between rows adds a soft swell. Off: one plain tick per key.")
         } header: {
-            Text("Virtual input")
+            Text("Key pad")
         } footer: {
             Text("Keys sent from the key pad are always wrapped in the keys currently turned on.")
         }

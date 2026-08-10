@@ -20,6 +20,42 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(reloaded.virtualInputKeepText)
     }
 
+    /// The pad's arrangement: the keyboard layout is the landscape default, so
+    /// an existing install that never touched the setting gets it by turning
+    /// the device — and a user who picks plain bands has to keep them, which
+    /// only works if the stored non-default value survives a reload.
+    func testPadLayoutDefaultsToKeyboardInLandscapeAndPersists() {
+        let defaults = UserDefaults(suiteName: "AppSettingsPadLayoutTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsPadLayoutTests")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.virtualPadLayout, .keyboardInLandscape)
+        XCTAssertEqual(settings.pcKeyboardLayout, .us)
+        XCTAssertTrue(settings.virtualPadRichHaptics)
+
+        settings.virtualPadLayout = .bands
+        settings.pcKeyboardLayout = .german
+        settings.virtualPadRichHaptics = false
+
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.virtualPadLayout, .bands)
+        XCTAssertEqual(reloaded.pcKeyboardLayout, .german)
+        XCTAssertFalse(reloaded.virtualPadRichHaptics)
+    }
+
+    /// A raw value that no longer exists (or never did) must fall back to the
+    /// default rather than leave the pad with no arrangement at all.
+    func testUnknownStoredLayoutFallsBackToDefault() {
+        let defaults = UserDefaults(suiteName: "AppSettingsPadLayoutJunkTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsPadLayoutJunkTests")
+        defaults.set("someFutureLayout", forKey: "virtualPadLayout")
+        defaults.set("dvorak", forKey: "pcKeyboardLayout")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.virtualPadLayout, .keyboardInLandscape)
+        XCTAssertEqual(settings.pcKeyboardLayout, .us)
+    }
+
     /// This one defaults to *true*, which `bool(forKey:)` can't express — so a
     /// stored `false` has to survive a reload rather than falling back to the
     /// default.

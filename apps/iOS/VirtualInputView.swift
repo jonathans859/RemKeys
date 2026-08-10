@@ -53,10 +53,13 @@ struct VirtualInputView: View {
     @State private var text = ""
     @State private var showInfo = false
     @FocusState private var textFieldFocused: Bool
+    /// Compact height is a phone held sideways: there the on-screen keyboard
+    /// takes almost the whole screen, and what is left cannot hold a pad.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     var body: some View {
         NavigationStack {
-            pad
+            padOrTypingRoom
                 // Tighter than the standard margin on purpose: every point of
                 // width widens the zones, and the pad is aimed at by feel.
                 .padding(.horizontal, 8)
@@ -165,7 +168,32 @@ struct VirtualInputView: View {
         }
     }
 
-    /// The pad drives the latched keys (its modifier band's toggles, plus
+    /// Sideways on a phone, the on-screen keyboard leaves ~70 points between
+    /// the title and the control row. Split over the pad's rows that is a
+    /// handful of points each: unreadable, unhittable, and the shape people
+    /// describe as the pad being broken. So while text is being typed in that
+    /// situation the pad steps aside entirely and the field gets the screen;
+    /// dismissing the keyboard brings it straight back. (Taking the pad out of
+    /// the window releases anything it was holding down on the PC — see
+    /// `KeyPadUIView.willMove(toWindow:)`.)
+    @ViewBuilder
+    private var padOrTypingRoom: some View {
+        if verticalSizeClass == .compact && textFieldFocused {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .top) {
+                    Text("Key pad hidden while typing")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+                .accessibilityHidden(true)
+        } else {
+            pad
+        }
+    }
+
+    /// The pad drives the latched keys (the modifiers it toggles, plus
     /// anything latched by holding) and tints the ones that are on; Send reads
     /// the same state for its hint. Pad sends always wrap in them.
     private var pad: some View {
@@ -197,15 +225,35 @@ struct VirtualInputView: View {
         InfoSheet(title: "Virtual Input") {
             Section("Key pad") {
                 if settings.virtualPadSliderMode {
-                    Text("The pad works as virtual sliders, one row per key group\(bandListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Swipe left or right to choose a row, swipe up to move forward through its keys, down to move back. Tap once to send the current key. A harder vibration means you reached the end of a row. Two-finger swipe left resets the row.")
+                    Text("The pad works as virtual sliders, one row at a time\(rowListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Swipe left or right to choose a row, swipe up to move forward through its keys, down to move back. Tap once to send the current key. A harder vibration means you reached the end of a row. Two-finger swipe left resets the row.")
                 } else {
-                    Text("The pad is a fixed grid of key zones\(bandListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Drag a finger to hear the key under it, with a small tick at each boundary, and lift to send that key at once. Lift on a modifier to turn it on or off. Landing a second finger cancels the drag, so nothing is sent.")
+                    Text("The pad is a fixed grid of key zones\(rowListSuffix). Touches on it act immediately — VoiceOver gestures are bypassed. Drag a finger to hear the key under it, with a small tick at each boundary, and lift to send that key at once. Lift on a modifier to turn it on or off. Landing a second finger cancels the drag, so nothing is sent.")
                 }
                 Text("Two-finger tap on the pad clears everything that is turned on. Sending is silent when it works; you only hear a message when something failed.")
             }
+            Section("Layout") {
+                switch settings.virtualPadLayout {
+                case .bands:
+                    Text("The pad shows key bands in both orientations. To get a full keyboard — letters, digits and punctuation included — change Key pad layout in Settings.")
+                case .keyboardInLandscape:
+                    Text("Held upright the pad shows key bands. Turn the device sideways and it becomes a whole PC keyboard instead, laid out as a real one: the bottom row is Ctrl, Windows, Alt, Space and the arrows, and going up the left edge you pass Shift, Caps Lock, Tab and Escape. A tall narrow screen has no room for that, which is why it appears only sideways.")
+                case .keyboardAlways:
+                    Text("The pad always shows a whole PC keyboard, laid out as a real one. Upright the keys are narrow — turn the device sideways and they get roughly the size of the keys on the on-screen keyboard.")
+                }
+                if settings.virtualPadLayout != .bands {
+                    Text("The keyboard is named for a \(settings.pcKeyboardLayout.displayName) PC. Keys are always sent by position, so the PC's own layout decides the character — change PC keyboard layout in Settings if the letters you hear are not the ones that arrive.")
+                    Text("Above the function keys sits a row for Insert, Home, Page Up, Delete, End, Page Down and Print Screen — the cluster that lives to the right of a real keyboard, unrolled so it fits.")
+                }
+            }
             Section("Modifiers") {
                 Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
-                Text("Caps Lock sits in the modifiers row because that is what it is on the PC when a screen reader is running — NVDA's desktop layout uses it as the screen-reader key. Turn it on, then send a key, and the PC gets Caps Lock plus that key. To flip the lock itself instead, hold the Caps Lock zone until it is pressed down, then lift.")
+                Text("Caps Lock counts as a modifier here because that is what it is on the PC when a screen reader is running — NVDA's desktop layout uses it as the screen-reader key. Turn it on, then send a key, and the PC gets Caps Lock plus that key. To flip the lock itself instead, hold the Caps Lock zone until it is pressed down, then lift.")
+            }
+            if settings.virtualPadRichHaptics {
+                Section("What the vibrations tell you") {
+                    Text("Moving onto a key vibrates once. If that key is already turned on you feel two quick pulses instead, and if it is being held down on the PC, a firm one — so you can tell what is on without waiting for it to be spoken. Crossing into a different row adds a soft swell before the tick, which is how you count rows with your finger.")
+                    Text("This can be turned off under Key pad in Settings, leaving a single tick per key. The vibrations that mark holding a key down are separate and always on.")
+                }
             }
             if settings.virtualPadHoldEnabled {
                 Section("Holding a key") {
@@ -228,12 +276,19 @@ struct VirtualInputView: View {
         }
     }
 
-    /// ", from modifiers at the top to function keys at the bottom" — with
-    /// the extended band mentioned only when it is actually shown.
-    private var bandListSuffix: String {
-        settings.virtualPadExtendedFKeys
-            ? ": modifiers, editing, navigation, F1 to F12, and F13 to F24"
-            : ": modifiers, editing, navigation, and F1 to F12"
+    /// Names the rows the pad *can* be showing. It can't know the orientation
+    /// from here — the pad picks the arrangement from its own shape — so with
+    /// the landscape setting both are named rather than guessed at.
+    private var rowListSuffix: String {
+        let extended = settings.virtualPadExtendedFKeys ? ", plus F13 to F24" : ""
+        switch settings.virtualPadLayout {
+        case .bands:
+            return ": modifiers, editing, navigation, and F1 to F12\(extended)"
+        case .keyboardAlways:
+            return ", following a PC keyboard\(extended)"
+        case .keyboardInLandscape:
+            return ": upright, modifiers, editing, navigation, and F1 to F12; sideways, the rows of a PC keyboard\(extended)"
+        }
     }
 
     // MARK: Combination state
@@ -258,7 +313,7 @@ struct VirtualInputView: View {
     /// Human-readable spelling of exactly what Send will do, e.g.
     /// "Control + Shift + Escape" or "Control + “c”" or "“hello”".
     private var comboDescription: String {
-        var parts = wrapKeys.map(\.name)
+        var parts = wrapKeys.map(\.spokenName)
         if !text.isEmpty { parts.append("“\(text)”") }
         return parts.isEmpty ? "Nothing selected" : parts.joined(separator: " + ")
     }
@@ -272,11 +327,11 @@ struct VirtualInputView: View {
     /// just says the key was not sent.
     private func sendImmediate(_ key: VirtualKey) {
         guard bridge.forwardingEnabled else {
-            announce("\(key.name) not sent. Forwarding is off.")
+            announce("\(key.spokenName) not sent. Forwarding is off.")
             return
         }
         guard bridge.status.isConnected else {
-            announce("\(key.name) not sent. \(bridge.status.announcement)")
+            announce("\(key.spokenName) not sent. \(bridge.status.announcement)")
             return
         }
         let wrap = wrapKeys.map(\.vk)
@@ -293,11 +348,11 @@ struct VirtualInputView: View {
     /// so the pad doesn't claim a key is down that never went out.
     private func beginHold(_ key: VirtualKey) -> Bool {
         guard bridge.forwardingEnabled else {
-            announce("\(key.name) not held down. Forwarding is off.")
+            announce("\(key.spokenName) not held down. Forwarding is off.")
             return false
         }
         guard bridge.status.isConnected else {
-            announce("\(key.name) not held down. \(bridge.status.announcement)")
+            announce("\(key.spokenName) not held down. \(bridge.status.announcement)")
             return false
         }
         let wrap = wrapKeys.filter { $0.vk != key.vk }

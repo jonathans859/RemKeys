@@ -34,6 +34,54 @@ public enum ModifierMapping: String, CaseIterable, Codable, Sendable, Identifiab
     }
 }
 
+/// How the Virtual Input key pad arranges its keys.
+///
+/// The bands layout (modifiers / editing / navigation / F-keys, each band a
+/// row of equal cells) is the only one that fits a portrait phone. The
+/// keyboard layout is a real PC key block — letters, digits, punctuation, the
+/// lot — and needs a landscape-shaped rectangle to give its keys usable size,
+/// which is exactly what portrait can never provide. So the default is
+/// per-orientation rather than one layout everywhere.
+public enum VirtualPadLayout: String, CaseIterable, Codable, Sendable, Identifiable {
+    /// The original key bands, in both orientations.
+    case bands
+    /// Bands in portrait, the full keyboard once the pad is wider than tall.
+    case keyboardInLandscape
+    /// The full keyboard in both orientations (cramped in portrait).
+    case keyboardAlways
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .bands: return "Key bands"
+        case .keyboardInLandscape: return "Keyboard when sideways"
+        case .keyboardAlways: return "Keyboard always"
+        }
+    }
+}
+
+/// The keyboard layout active **on the Windows PC**.
+///
+/// It never changes which virtual-key code is sent — the pad always sends
+/// US-position VKs and the agent injects them by scancode, so the PC's own
+/// layout decides the character, exactly like the physical-capture path. What
+/// it changes is what the pad **shows and says**, so the key announced as "Z"
+/// is the key that types a z on the machine at the other end.
+public enum PCKeyboardLayout: String, CaseIterable, Codable, Sendable, Identifiable {
+    case us
+    case german
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .us: return "US (QWERTY)"
+        case .german: return "German (QWERTZ)"
+        }
+    }
+}
+
 /// Shared, observable configuration persisted to `UserDefaults`. One instance
 /// is created per app and injected into the capture layer and UI. Not actor
 /// isolated — it's plain value-like state over the thread-safe `UserDefaults`,
@@ -95,6 +143,30 @@ public final class AppSettings {
     /// extra band shrinks every other zone, and F13+ is rarely needed.
     public var virtualPadExtendedFKeys: Bool {
         didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
+    }
+
+    /// Which arrangement the key pad uses. Defaults to the keyboard layout in
+    /// landscape only: portrait keeps the bands it was designed around, and
+    /// turning the device sideways becomes the deliberate switch to the full
+    /// key block, in the one orientation whose proportions can hold it.
+    public var virtualPadLayout: VirtualPadLayout {
+        didSet { defaults.set(virtualPadLayout.rawValue, forKey: Keys.virtualPadLayout) }
+    }
+
+    /// The layout the *PC* is set to. Labels and announcements only — the VKs
+    /// sent never change (see `PCKeyboardLayout`).
+    public var pcKeyboardLayout: PCKeyboardLayout {
+        didSet { defaults.set(pcKeyboardLayout.rawValue, forKey: Keys.pcKeyboardLayout) }
+    }
+
+    /// Whether the pad's vibrations carry more than "you crossed a boundary":
+    /// a key that is already turned on answers with a double tick and one
+    /// held down on the PC with a firm one, and moving between rows gets its
+    /// own soft swell. On by default — with a dense keyboard layout under the
+    /// finger this is the channel that reports state without waiting for
+    /// speech, and it works with the phone in a pocket.
+    public var virtualPadRichHaptics: Bool {
+        didSet { defaults.set(virtualPadRichHaptics, forKey: Keys.virtualPadRichHaptics) }
     }
 
     /// Whether pressing and holding a key-pad zone runs the two-stage hold:
@@ -211,6 +283,11 @@ public final class AppSettings {
         self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
+        self.virtualPadLayout = VirtualPadLayout(rawValue: defaults.string(forKey: Keys.virtualPadLayout) ?? "")
+            ?? .keyboardInLandscape
+        self.pcKeyboardLayout = PCKeyboardLayout(rawValue: defaults.string(forKey: Keys.pcKeyboardLayout) ?? "")
+            ?? .us
+        self.virtualPadRichHaptics = defaults.object(forKey: Keys.virtualPadRichHaptics) as? Bool ?? true
         // Hold defaults are all "on" / non-zero, which `bool(forKey:)` and
         // `double(forKey:)` can't express — read the raw object and fall back
         // only when nothing was ever stored.
@@ -264,6 +341,9 @@ public final class AppSettings {
         static let virtualPadLatchDelay = "virtualPadLatchDelay"
         static let virtualPadHoldDelay = "virtualPadHoldDelay"
         static let virtualPadHoldSpeech = "virtualPadHoldSpeech"
+        static let virtualPadLayout = "virtualPadLayout"
+        static let pcKeyboardLayout = "pcKeyboardLayout"
+        static let virtualPadRichHaptics = "virtualPadRichHaptics"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
     }
 }
