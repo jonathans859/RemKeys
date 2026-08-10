@@ -52,7 +52,15 @@ struct RootTabView: View {
         .statusBarHidden(curtainActive)
         .persistentSystemOverlays(curtainActive ? .hidden : .automatic)
         .accessibilityAction(.magicTap) { handleMagicTap() }
-        .onAppear { wireUpBridge() }
+        .onAppear {
+            wireUpBridge()
+            // Re-assert on launch: the lock is a stored preference, and UIKit
+            // starts every session allowing whatever the Info.plist lists.
+            OrientationLock.apply(settings.interfaceOrientationLock)
+        }
+        .onChange(of: settings.interfaceOrientationLock) { _, lock in
+            OrientationLock.apply(lock)
+        }
         .onChange(of: scenePhase) { _, phase in
             // Leaving the foreground means we can't capture anyway; stop
             // forwarding so the remote never sits with a half-held chord.

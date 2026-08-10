@@ -43,6 +43,23 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(reloaded.virtualPadRichHaptics)
     }
 
+    /// The orientation pin has to survive a relaunch or it is useless: UIKit
+    /// starts every session allowing whatever the Info.plist lists, so the app
+    /// re-applies this value at launch.
+    func testOrientationLockDefaultsToDeviceAndPersists() {
+        let defaults = UserDefaults(suiteName: "AppSettingsOrientationTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsOrientationTests")
+
+        XCTAssertEqual(AppSettings(defaults: defaults).interfaceOrientationLock, .device)
+
+        let settings = AppSettings(defaults: defaults)
+        settings.interfaceOrientationLock = .landscape
+        XCTAssertEqual(AppSettings(defaults: defaults).interfaceOrientationLock, .landscape)
+
+        defaults.set("sideways-ish", forKey: "interfaceOrientationLock")
+        XCTAssertEqual(AppSettings(defaults: defaults).interfaceOrientationLock, .device)
+    }
+
     /// A raw value that no longer exists (or never did) must fall back to the
     /// default rather than leave the pad with no arrangement at all.
     func testUnknownStoredLayoutFallsBackToDefault() {

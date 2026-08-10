@@ -74,11 +74,18 @@ struct VirtualInputView: View {
                 // keep text and dismiss — field-reported 2026-08-05). The pad
                 // gives up the height, so every band stays reachable while
                 // typing, and gets it back when the keyboard goes away.
-                .safeAreaInset(edge: .bottom, spacing: 8) {
-                    controlRow
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .background(.bar)
+                // The whole bar is gone while the keyboard layout is up
+                // (field-requested 2026-08-10): that pad can type anything the
+                // field could, so the row is pure overhead there and the pad
+                // takes its height. `safeAreaInset` with no content at all
+                // rather than an empty row, so not a point is reserved.
+                .safeAreaInset(edge: .bottom, spacing: showingKeyboardLayout ? 0 : 8) {
+                    if !showingKeyboardLayout {
+                        controlRow
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                            .background(.bar)
+                    }
                 }
                 .navigationTitle("Virtual Input")
                 // Inline, not the default large title: the large one sits low,
@@ -89,7 +96,7 @@ struct VirtualInputView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        layoutButton
+                        padOptionsMenu
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         InfoButton { showInfo = true }
@@ -108,23 +115,43 @@ struct VirtualInputView: View {
         }
     }
 
-    /// Switches the pad between the two arrangements without a trip to
-    /// Settings. It **pins** the choice — Settings keeps the third option,
-    /// "Keyboard when sideways", which picks per orientation.
+    /// The pad's two shape decisions in one place (field-requested
+    /// 2026-08-10): which arrangement it draws, and which way up the app is.
+    /// They belong together because they are the same question asked twice —
+    /// the keyboard arrangement wants a wide screen, and on a device with
+    /// **iOS rotation lock on** (usual for a VoiceOver user) pinning the app
+    /// sideways is the only way to get one.
     ///
-    /// Deliberately silent: the button's own accessibility value changes, and
-    /// VoiceOver speaks that. A confirmation announcement posted alongside a
-    /// value change on the focused element clips the speech (field-tested
-    /// twice on this app).
-    private var layoutButton: some View {
-        Button {
-            settings.virtualPadLayout = showingKeyboardLayout ? .bands : .keyboardAlways
+    /// Inline `Picker`s inside a `Menu` rather than buttons: that is what
+    /// gives each option a checkmark and the "selected" trait, so VoiceOver
+    /// reads back which one is active instead of only offering the choices.
+    private var padOptionsMenu: some View {
+        Menu {
+            Picker("Pad layout", selection: Binding(
+                get: { settings.virtualPadLayout },
+                set: { settings.virtualPadLayout = $0 }
+            )) {
+                ForEach(VirtualPadLayout.allCases) { layout in
+                    Text(layout.displayName).tag(layout)
+                }
+            }
+            .pickerStyle(.inline)
+
+            Picker("Screen orientation", selection: Binding(
+                get: { settings.interfaceOrientationLock },
+                set: { settings.interfaceOrientationLock = $0 }
+            )) {
+                ForEach(InterfaceOrientationLock.allCases) { lock in
+                    Text(lock.displayName).tag(lock)
+                }
+            }
+            .pickerStyle(.inline)
         } label: {
             Image(systemName: showingKeyboardLayout ? "keyboard" : "rectangle.grid.1x2")
         }
-        .accessibilityLabel("Pad layout")
-        .accessibilityValue(showingKeyboardLayout ? "Keyboard" : "Key bands")
-        .accessibilityHint("Switches the pad between the full PC keyboard and the key bands, and keeps that choice in both orientations. Settings can instead pick the keyboard automatically whenever the device is sideways.")
+        .accessibilityLabel("Pad options")
+        .accessibilityValue(showingKeyboardLayout ? "Keyboard layout" : "Key bands layout")
+        .accessibilityHint("Chooses the pad's layout and whether the app follows the device's rotation or stays upright or sideways. Staying sideways is how to get the full-size keyboard when the device's own rotation lock is on.")
     }
 
     // MARK: Layout
@@ -134,14 +161,16 @@ struct VirtualInputView: View {
     /// the field keeps usable width on a phone, and the row sits right above
     /// the on-screen keyboard when it comes up.
     ///
-    /// **Sideways on a phone the typing controls are gone and only Send
-    /// remains** (field-requested 2026-08-10). The pad there is a whole
-    /// keyboard, so the text field earns nothing — and it was actively
-    /// expensive, because focusing it raised the on-screen keyboard, which in
-    /// that orientation covers everything but a strip. Removing the field is
-    /// what makes it impossible to raise, so the pad keeps the full screen.
-    /// Text typed upright survives and Send still delivers it (its hint spells
-    /// out what it will send).
+    /// Shown only while the **bands** are up — the keyboard layout drops the
+    /// bar entirely (see `body`). Of the two situations left:
+    ///
+    /// - Bands upright: the full row.
+    /// - Bands sideways on a phone: **the typing controls are gone and only
+    ///   Send remains** (field-requested 2026-08-10). Focusing the field there
+    ///   raises the on-screen keyboard, which in that orientation covers
+    ///   everything but a strip; removing the field is what makes it
+    ///   impossible to raise, so the pad keeps the screen. Text typed upright
+    ///   survives and Send still delivers it (its hint spells out what).
     private var controlRow: some View {
         HStack(spacing: 8) {
             if verticalSizeClass != .compact {
@@ -270,12 +299,12 @@ struct VirtualInputView: View {
                 case .keyboardAlways:
                     Text("The pad always shows a whole PC keyboard, laid out as a real one. Upright the keys are narrow — turn the device sideways and they get roughly the size of the keys on the on-screen keyboard.")
                 }
-                Text("The Pad layout button at the top left switches between the two straight away and keeps that choice in both orientations; its value tells you which one is on screen right now.")
+                Text("Pad options, at the top left, holds both shape choices: which layout the pad draws, and whether the app follows the device's rotation or stays upright or sideways. Each option is ticked when it is the active one. If your device's own rotation lock is on, the app is never handed a sideways screen — set Stay sideways there and it will turn anyway, which is how to reach the full-size keyboard.")
                 if settings.virtualPadLayout != .bands {
                     Text("The keyboard is named for a \(settings.pcKeyboardLayout.displayName) PC. Keys are always sent by position, so the PC's own layout decides the character — change PC keyboard layout in Settings if the letters you hear are not the ones that arrive.")
                     Text("Above the function keys sits a row for Insert, Home, Page Up, Delete, End, Page Down and Print Screen — the cluster that lives to the right of a real keyboard, unrolled so it fits.")
                 }
-                Text("Sideways on a phone the text field, the keep-text button and the dismiss-keyboard button are not shown, and only Send remains: the pad can type everything there, and keeping the field would mean the on-screen keyboard could cover the pad. Text you typed upright is kept and still goes out with Send.")
+                Text("While the keyboard layout is up there is no bottom bar at all — no text field, no Send — because the pad itself types everything, and the bar's height is better spent on keys. A two-finger double tap still sends any text left in the field. With the key bands up the bar comes back, and sideways it carries Send alone, so the on-screen keyboard can never cover the pad.")
             }
             Section("Modifiers") {
                 Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")

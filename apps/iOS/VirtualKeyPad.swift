@@ -375,16 +375,27 @@ final class KeyPadUIView: UIView {
         setNeedsLayout()
     }
 
-    /// Which arrangement this rectangle can hold. The pad's own aspect ratio
-    /// decides it, not the size class: an iPad in landscape and an iPad in a
-    /// wide Split View slot are both "regular" but only one is keyboard
-    /// shaped, and the shape is what actually determines whether a 15-unit row
-    /// gives keys a usable width.
+    /// Which arrangement this screen can hold. An aspect ratio decides it, not
+    /// the size class: an iPad in landscape and an iPad in a narrow Split View
+    /// slot are both "regular" but only one is keyboard shaped, and the shape
+    /// is what actually determines whether a 15-unit row gives keys a usable
+    /// width.
+    ///
+    /// It measures the **window**, not the pad's own bounds, and that is load
+    /// bearing: the tab hides its bottom bar while the keyboard layout is up,
+    /// which changes the pad's height, which would feed straight back into
+    /// this decision. Near the threshold that is a loop — keyboard, bar goes,
+    /// pad grows taller, bands, bar returns, pad shrinks, keyboard. The window
+    /// is unaffected by anything we lay out inside it, so the question stays
+    /// the one actually being asked: is the screen sideways?
     private var wantsKeyboardLayout: Bool {
         switch layoutPreference {
         case .bands: return false
         case .keyboardAlways: return true
-        case .keyboardInLandscape: return bounds.width > bounds.height * 1.2
+        case .keyboardInLandscape:
+            let frame = window?.bounds ?? bounds
+            guard frame.height > 0 else { return false }
+            return frame.width > frame.height * 1.2
         }
     }
 

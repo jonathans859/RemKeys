@@ -82,6 +82,32 @@ public enum PCKeyboardLayout: String, CaseIterable, Codable, Sendable, Identifia
     }
 }
 
+/// Whether the app follows the device's own rotation or is pinned to one
+/// orientation.
+///
+/// It exists because the pad's two arrangements want different screen shapes
+/// and the device isn't always free to supply one: iOS **rotation lock** is
+/// commonly on for a VoiceOver user, and with it on the app is never handed
+/// a landscape frame at all — which would leave the keyboard layout stuck at
+/// portrait's cramped key widths with no way to fix it from inside the app.
+/// Pinning is the way out, and it works the other way too (staying upright
+/// while the device is being held at an angle in a lap or a bag).
+public enum InterfaceOrientationLock: String, CaseIterable, Codable, Sendable, Identifiable {
+    case device
+    case portrait
+    case landscape
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .device: return "Follow the device"
+        case .portrait: return "Stay upright"
+        case .landscape: return "Stay sideways"
+        }
+    }
+}
+
 /// Shared, observable configuration persisted to `UserDefaults`. One instance
 /// is created per app and injected into the capture layer and UI. Not actor
 /// isolated — it's plain value-like state over the thread-safe `UserDefaults`,
@@ -157,6 +183,12 @@ public final class AppSettings {
     /// sent never change (see `PCKeyboardLayout`).
     public var pcKeyboardLayout: PCKeyboardLayout {
         didSet { defaults.set(pcKeyboardLayout.rawValue, forKey: Keys.pcKeyboardLayout) }
+    }
+
+    /// Pins the app to one orientation, or lets it follow the device.
+    /// iOS-only in effect; stored for both so the type stays shared.
+    public var interfaceOrientationLock: InterfaceOrientationLock {
+        didSet { defaults.set(interfaceOrientationLock.rawValue, forKey: Keys.interfaceOrientationLock) }
     }
 
     /// Whether the pad's vibrations carry more than "you crossed a boundary":
@@ -288,6 +320,9 @@ public final class AppSettings {
         self.pcKeyboardLayout = PCKeyboardLayout(rawValue: defaults.string(forKey: Keys.pcKeyboardLayout) ?? "")
             ?? .us
         self.virtualPadRichHaptics = defaults.object(forKey: Keys.virtualPadRichHaptics) as? Bool ?? true
+        self.interfaceOrientationLock = InterfaceOrientationLock(
+            rawValue: defaults.string(forKey: Keys.interfaceOrientationLock) ?? ""
+        ) ?? .device
         // Hold defaults are all "on" / non-zero, which `bool(forKey:)` and
         // `double(forKey:)` can't express — read the raw object and fall back
         // only when nothing was ever stored.
@@ -344,6 +379,7 @@ public final class AppSettings {
         static let virtualPadLayout = "virtualPadLayout"
         static let pcKeyboardLayout = "pcKeyboardLayout"
         static let virtualPadRichHaptics = "virtualPadRichHaptics"
+        static let interfaceOrientationLock = "interfaceOrientationLock"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
     }
 }

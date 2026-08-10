@@ -188,24 +188,42 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   re-speaks them only — QWERTZ swaps the Y/Z *labels* and gives left Shift a
   unit back for the ISO 102nd key, while the VK sent is unchanged. Hearing
   "Y" while the PC types z is the failure this setting exists to prevent.
-  A **Pad layout button** (top-left toolbar, requested 2026-08-10) switches
-  the two without a trip to Settings; it *pins* the choice
-  (`.bands`/`.keyboardAlways`), leaving `keyboardInLandscape` as the automatic
-  option Settings still offers. It is silent on purpose — its own
-  `accessibilityValue` changes and VoiceOver speaks that; an announcement
-  alongside would clip it. The pad decides the arrangement from its own
-  bounds, so it is the only thing that knows which one is live: it reports
-  back via `onLayoutChange` (dispatched off the layout pass, since it ends in
-  a SwiftUI `@State` write).
-- **Sideways on a phone, the typing controls are gone and only Send remains**
-  (field-requested 2026-08-10). With a whole keyboard on the pad the text
-  field earns nothing there, and it was actively expensive: focusing it raised
-  the on-screen keyboard, which in that orientation leaves ~70 pt for the pad.
-  Removing the field is what makes the keyboard *impossible* to raise, so the
-  pad keeps the full screen. Text typed upright survives and Send still sends
-  it. This replaced an earlier "hide the pad while typing" branch — that
-  branch only ever fired in the same orientation and solved it the wrong way
-  round.
+  A **Pad options menu** (top-left toolbar, requested 2026-08-10) carries both
+  shape decisions: the 3-way layout picker and the orientation pin below.
+  Inline `Picker`s inside a `Menu`, not buttons — that is what gives each
+  option a checkmark and the "selected" trait, so VoiceOver reads back which
+  one is active. The menu label is silent about changes on purpose: its own
+  `accessibilityValue` changes and VoiceOver speaks that. The pad decides its
+  arrangement itself, so it is the only thing that knows which one is live: it
+  reports back via `onLayoutChange` (dispatched off the layout pass, since it
+  ends in a SwiftUI `@State` write).
+- **The orientation pin** (`interfaceOrientationLock`, `OrientationLock.swift`,
+  requested 2026-08-10) exists because **iOS rotation lock is usually on for a
+  VoiceOver user**, and with it on the app is never handed a landscape frame
+  at all — leaving the keyboard layout stuck at portrait's cramped widths with
+  nothing the app could do. Requesting the orientation ourselves outranks that
+  lock. Two halves, neither sufficient alone: `AppDelegate
+  .application(_:supportedInterfaceOrientationsFor:)` answers from
+  `OrientationLock.mask`, and `requestGeometryUpdate` actually moves the
+  screen — change the mask without asking and nothing turns until the user
+  rotates the device physically. `setNeedsUpdateOfSupportedInterfaceOrientations()`
+  first or UIKit keeps its cached answer. Re-applied at launch from
+  `RootTabView.onAppear` (UIKit starts each session on the Info.plist list).
+  iPad multitasking/Stage Manager refuse geometry requests; that's expected,
+  the mask still holds.
+- **The bottom bar disappears entirely while the keyboard layout is up**
+  (field-requested 2026-08-10) — that pad types everything the field could, so
+  the row is pure overhead and the pad takes its height. Magic tap still sends
+  leftover text. With the bands up the bar returns, and **bands sideways on a
+  phone keep Send alone**: focusing the field there raises the on-screen
+  keyboard, which leaves ~70 pt for the pad, so removing the field is what
+  makes it *impossible* to raise. (That replaced an earlier "hide the pad
+  while typing" branch, which solved the same problem the wrong way round.)
+  Consequence worth remembering: **`wantsKeyboardLayout` measures the
+  *window*, not the pad's bounds.** Hiding the bar changes the pad's height,
+  which would feed back into the decision — near the threshold that is a loop
+  (keyboard → bar goes → pad taller → bands → bar returns → keyboard). The
+  window is unaffected by anything we lay out inside it.
 - **Direct-touch key pad** (`VirtualKeyPad.swift`): ONE accessibility
   element (never per-band regions — that would break explore-by-touch
   around it) with `.allowsDirectInteraction` + `[.silentOnTouch]` —

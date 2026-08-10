@@ -86,6 +86,11 @@ struct SettingsView: View {
                 case .keyboardAlways:
                     Text("The pad always shows a whole PC keyboard. Upright its keys are narrow — dragging still finds them, but sideways is where they reach a comfortable size.")
                 }
+                if settings.interfaceOrientationLock != .device {
+                    Text("The app is pinned: \(settings.interfaceOrientationLock.displayName.lowercased()). This outranks the device's own rotation lock, which is the point — with that lock on, the app is otherwise never handed a sideways screen and the keyboard layout can't reach full size. Set it back to Follow the device to rotate normally again.")
+                } else {
+                    Text("The app follows the device's rotation. If your device's rotation lock is on it will never turn sideways, and the keyboard layout stays at its cramped upright width — pin the app to Stay sideways to get around that.")
+                }
                 if settings.virtualPadLayout != .bands {
                     Text("The keyboard is named for a \(settings.pcKeyboardLayout.displayName) PC. Keys travel by position and the PC's own layout decides the character, so this setting only changes what you see and hear — set it to match the PC and the letter you hear is the letter that arrives.")
                 }
@@ -162,7 +167,18 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.menu)
-            .accessibilityHint("Key bands are the modifier, editing, navigation and function-key rows. The keyboard is a whole PC key block including letters and digits, which only has room for usable keys when the device is sideways.")
+            .accessibilityHint("Key bands are the modifier, editing, navigation and function-key rows. The keyboard is a whole PC key block including letters and digits, which only has room for usable keys when the device is sideways. Also reachable from Pad options on the Virtual Input screen.")
+
+            Picker("Screen orientation", selection: Binding(
+                get: { settings.interfaceOrientationLock },
+                set: { settings.interfaceOrientationLock = $0 }
+            )) {
+                ForEach(InterfaceOrientationLock.allCases) { lock in
+                    Text(lock.displayName).tag(lock)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityHint("Pins the app to one orientation instead of following the device. Stay sideways turns the app even when the device's own rotation lock is on, which is how to reach the full-size keyboard layout.")
 
             if settings.virtualPadLayout != .bands {
                 Picker("PC keyboard layout", selection: Binding(

@@ -36,6 +36,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
+    /// UIKit asks this every time it re-evaluates rotation. `OrientationLock`
+    /// owns the answer so the Virtual Input tab can pin the app sideways —
+    /// the only way to get a landscape-shaped key pad on a device whose
+    /// rotation lock is on, which for a VoiceOver user it usually is.
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
+    }
+
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
         guard builder.system == .main else { return }
