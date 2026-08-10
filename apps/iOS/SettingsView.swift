@@ -96,8 +96,8 @@ struct SettingsView: View {
                      ? "F13 to F24 are shown as an extra row, which makes every other row a bit shorter."
                      : "F13 to F24 are hidden; enable them to add a row at the cost of shorter ones elsewhere.")
                 Text(settings.virtualPadRichHaptics
-                     ? "Vibrations report state: one pulse for a key that is off, two for one that is turned on, a firm one for a key held down on the PC, and a soft swell when you cross into another row."
-                     : "Vibrations are plain: one tick per key, whatever its state.")
+                     ? "Vibrations report state by how hard they are: the usual light tick for a key that is off, a firmer knock for one that is turned on, and a hard knock for a key held down on the PC. Always one vibration per key."
+                     : "Vibrations are plain: the same light tick for every key, whatever its state.")
             }
             Section("Hold a key on the pad") {
                 Text(settings.virtualPadHoldEnabled
@@ -191,7 +191,7 @@ struct SettingsView: View {
                 get: { settings.virtualPadRichHaptics },
                 set: { settings.virtualPadRichHaptics = $0 }
             ))
-            .accessibilityHint("On: a key that is turned on answers with two pulses instead of one, a key held down on the PC with a firm one, and moving between rows adds a soft swell. Off: one plain tick per key.")
+            .accessibilityHint("On: exploring the pad vibrates harder over a key that is turned on, and harder still over one held down on the PC. Off: the same light tick for every key.")
         } header: {
             Text("Key pad")
         } footer: {

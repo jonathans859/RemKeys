@@ -244,23 +244,23 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   optional speech (`virtualPadHoldSpeech`) — the haptics are never optional,
   because they are the channel that works with the phone in a pocket.
   **Haptics also carry key state while dragging** (`virtualPadRichHaptics`,
-  on by default; requested 2026-08-10). Four cues, each its own *waveform*
-  rather than a different intensity of the same one — that was the first
-  version's mistake: crisp selection tick = arrived on a key, diffuse `.soft`
-  swell *before* the tick = crossed into another row (how you count rows
-  without looking), firm `.medium` nudge 0.12 s *after* the tick = that key is
-  turned on, hard `.rigid` = it is down on the PC. On a 60-key layout speech
-  is the slow channel — the finger passes far more zones than announcements
-  can keep up with. Two traps, both hit: a second *selection* tick that close
-  together is merged by the Taptic Engine into one indistinguishable buzz
-  (hence a different style for the nudge), and the nudge's cancellable
-  `DispatchWorkItem` must NOT be cancelled by `cancelStageTimers()` — arriving
-  on a key schedules the nudge and then immediately starts that key's hold
-  countdown, so folding the two together killed the nudge a moment after
-  scheduling it and it never fired once (field-reported 2026-08-10). It
-  belongs to the drag, not the press: only moving on or `abortPress` may
-  cancel it. Generators are `prepare()`d in `touchesBegan` so a drag's first
-  boundary isn't the sluggish one.
+  on by default; requested 2026-08-10). **One zone, one vibration** — its
+  *strength* is the state: selection tick = off, `.medium` knock = turned on,
+  `.rigid` = down on the PC. On a 60-key layout speech is the slow channel,
+  the finger passes far more zones than announcements can keep up with.
+  Getting here took two field rounds, and both dead ends are worth not
+  repeating: (1) the state as a **second, delayed pulse** — its
+  `DispatchWorkItem` was cancelled by `cancelStageTimers()`, because arriving
+  on a key schedules the pulse and then immediately starts that key's hold
+  countdown, so it was destroyed a moment after being scheduled and never
+  fired once; and a second *selection* tick ~0.08 s after the first is merged
+  by the Taptic Engine into one indistinguishable buzz anyway. (2) With that
+  fixed — a distinct `.medium` waveform at 0.12 s, plus a `.soft` swell for
+  crossing into a new row — the **multi-pulse vocabulary itself was rejected**
+  as unintuitive: pulses have to be counted and told apart mid-drag, while one
+  pulse that is simply harder is read instantly. So there is no row cue at
+  all. Don't reintroduce either. Generators are `prepare()`d in `touchesBegan`
+  so a drag's first boundary isn't the sluggish one.
   Consequences that shaped the code: latching is no longer a modifier-band
   privilege, so the tab tracks an ordered **`latched: [VirtualKey]`** (modifier
   toggles *and* held keys) that wraps every send, and the pad tints latched

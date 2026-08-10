@@ -54,6 +54,12 @@ import BridgeCore
 /// Both modes: two-finger tap clears the whole selection. Success is
 /// silent (plus a light haptic); failures speak via the shared send path.
 /// Keys always send wrapped in whatever is latched.
+///
+/// **One zone, one vibration** — and with `virtualPadRichHaptics` on, how
+/// hard it is *is* the key's state: light tick = off, firmer knock = turned
+/// on, hard knock = down on the PC. Encoding state as extra pulses was tried
+/// first and field-rejected (2026-08-10): pulses have to be counted and told
+/// apart, a single harder one is read instantly.
 struct VirtualKeyPad: UIViewRepresentable {
     let settings: AppSettings
     /// Snapshot of the tab's latched keys (modifier toggles and anything
@@ -228,17 +234,12 @@ final class KeyPadUIView: UIView {
     /// step past the first/last position — the non-visual "end of the row" —
     /// and when a key goes down on the PC.
     private let edgeThump = UIImpactFeedbackGenerator(style: .rigid)
-    /// The soft swell: the key latching on, and (with rich haptics) crossing
-    /// into a different row.
+    /// The soft swell that marks a held key latching on.
     private let latchThump = UIImpactFeedbackGenerator(style: .soft)
-    /// The "this key is already on" nudge that follows the arrival tick. Its
-    /// own style on purpose — four cues share this pad, so each needs a
-    /// waveform of its own rather than a different intensity of someone
-    /// else's: crisp tick (arrived), diffuse swell (new row), this firm nudge
-    /// (on), hard thump (down on the PC).
+    /// The arrival knock for a key that is turned on: it *replaces* the
+    /// selection tick rather than following it, so the ladder a dragging
+    /// finger feels is one pulse getting harder — tick, knock, hard knock.
     private let stateThump = UIImpactFeedbackGenerator(style: .medium)
-    /// Fires the second half of the "this key is on" double tick.
-    private var stateTickWork: DispatchWorkItem?
 
     // Grid mode: the single tracked finger and the zone it is over.
     private var trackedTouch: UITouch?
@@ -574,41 +575,32 @@ final class KeyPadUIView: UIView {
         return padKey.isModifier ? "\(name), off" : name
     }
 
-    /// The vibration for arriving on a new key. With rich haptics on it also
-    /// carries the key's **state**, which is the whole point on a keyboard
-    /// layout: passing over 60 keys, the finger learns which ones are already
-    /// turned on without waiting for a word to be spoken.
+    /// The vibration for arriving on a key — **always exactly one**, and with
+    /// rich haptics on, its *strength* is the key's state. Dragging over 60
+    /// keys, the finger learns which ones are on without waiting for a word.
     ///
-    /// - crossing into a different row: a soft swell first
-    /// - key off: one tick
-    /// - key on: two ticks (the second follows shortly after)
-    /// - key down on the PC: a tick and a firm thump
-    private func feedbackEntering(_ padKey: PadKey, rowChanged: Bool) {
-        cancelStateTick()
-        if richHaptics, rowChanged { latchThump.impactOccurred(intensity: 0.6) }
-        selectionTick.selectionChanged()
-        guard richHaptics else { return }
+    /// - key off: the ordinary selection tick
+    /// - key on: a firmer single knock
+    /// - key down on the PC: a hard single knock
+    ///
+    /// Earlier versions added a *second* pulse for the state and a third for
+    /// crossing into another row. Field-rejected as unintuitive (2026-08-10):
+    /// several pulses per key have to be counted and told apart, while one
+    /// pulse that is simply harder is read instantly and needs no learning.
+    /// So there is no row cue at all now — one zone, one vibration.
+    private func feedbackEntering(_ padKey: PadKey) {
+        guard richHaptics else {
+            selectionTick.selectionChanged()
+            return
+        }
         if padKey.key.vk == heldVK {
             edgeThump.impactOccurred()
         } else if latchedKeys.contains(padKey.key.vk) {
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                // A second *selection* tick this close together gets merged by
-                // the Taptic Engine into something indistinguishable from one.
-                // A medium impact is a different waveform, so the pair reads
-                // as "tick, then a nudge" rather than as a longer tick — and
-                // it is not the soft swell the row cue uses, so the two cues
-                // can't be mistaken for each other when they land together.
-                self.stateThump.impactOccurred()
-            }
-            stateTickWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.stateTickDelay, execute: work)
+            stateThump.impactOccurred()
+        } else {
+            selectionTick.selectionChanged()
         }
     }
-
-    /// Long enough that the two pulses are felt apart, short enough that they
-    /// still read as one event about the key the finger just arrived on.
-    private static let stateTickDelay: TimeInterval = 0.12
 
     /// Latch a key on/off through the parent. The local set is updated
     /// optimistically so a continuing drag reads the right state before
@@ -711,7 +703,6 @@ final class KeyPadUIView: UIView {
     private func abortPress() {
         endHoldIfNeeded()
         cancelStageTimers()
-        cancelStateTick()
         pressStage = .spent
         pressKey = nil
         trackedTouch = nil
@@ -725,17 +716,6 @@ final class KeyPadUIView: UIView {
         holdTimer = nil
     }
 
-    /// Deliberately NOT part of `cancelStageTimers`: arriving on a key
-    /// schedules the state tick and then immediately starts that key's hold
-    /// countdown, so folding this into the stage timers cancelled the second
-    /// tick a moment after scheduling it and the "this key is on" pulse could
-    /// never be felt at all (field-reported 2026-08-10). It belongs to the
-    /// drag, not to the press: only moving on, or the press being called off
-    /// outright, may cancel it.
-    private func cancelStateTick() {
-        stateTickWork?.cancel()
-        stateTickWork = nil
-    }
 
     /// `.common` mode so the countdown keeps running through anything that
     /// puts the run loop into a tracking mode while the finger is down.
@@ -828,7 +808,6 @@ final class KeyPadUIView: UIView {
     private func updateTrackedZone(with touch: UITouch) {
         let newZone = zone(at: touch.location(in: self))
         guard newZone != trackedZone else { return }
-        let previousRow = trackedZone?.row
         trackedZone = newZone
         guard let newZone else {
             // The finger left the pad: end any hold and stop the countdown, so
@@ -840,7 +819,7 @@ final class KeyPadUIView: UIView {
             return
         }
         let padKey = rows[newZone.row].keys[newZone.key]
-        feedbackEntering(padKey, rowChanged: previousRow != nil && previousRow != newZone.row)
+        feedbackEntering(padKey)
         announce(description(of: padKey))
         startPress(on: padKey)
     }

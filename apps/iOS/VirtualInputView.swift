@@ -283,8 +283,8 @@ struct VirtualInputView: View {
             }
             if settings.virtualPadRichHaptics {
                 Section("What the vibrations tell you") {
-                    Text("Moving onto a key vibrates once. If that key is already turned on you feel two quick pulses instead, and if it is being held down on the PC, a firm one — so you can tell what is on without waiting for it to be spoken. Crossing into a different row adds a soft swell before the tick, which is how you count rows with your finger.")
-                    Text("This can be turned off under Key pad in Settings, leaving a single tick per key. The vibrations that mark holding a key down are separate and always on.")
+                    Text("Moving onto a key always vibrates exactly once, and how hard it vibrates tells you the key's state: the usual light tick if it is off, a firmer knock if it is turned on, a hard knock if it is being held down on the PC. So you can feel what is already on while exploring, without waiting for it to be spoken.")
+                    Text("This can be turned off under Key pad in Settings, leaving the same light tick for every key. The vibrations that mark holding a key down are separate and always on.")
                 }
             }
             if settings.virtualPadHoldEnabled {
