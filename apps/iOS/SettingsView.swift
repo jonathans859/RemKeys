@@ -202,13 +202,17 @@ struct SettingsView: View {
 
     /// One timing row: a caption line carrying the current value for sighted
     /// users (SwiftUI never draws a Slider's own label on iOS) over the
-    /// slider itself, which is the single adjustable element VoiceOver sees —
-    /// with the value spoken in real units.
+    /// slider they can drag.
     ///
-    /// The caption is a plain `Text`, not a `LabeledContent`: as a
-    /// `LabeledContent` it stayed visible to VoiceOver despite
-    /// `.accessibilityHidden(true)`, so every row was read twice — once as
-    /// text, once as the slider (field-reported 2026-08-10).
+    /// The whole row is collapsed into **one** accessibility element with an
+    /// adjustable action, rather than letting the `Slider` carry its own.
+    /// Both softer attempts still announced the row twice ("Then presses down
+    /// after, Then presses down after 0.5 seconds") — hiding the caption
+    /// wasn't enough, because the label ends up on a wrapper element as well
+    /// as on the slider inside it (field-reported twice, 2026-08-10).
+    /// `children: .ignore` is the only version that is deterministic: nothing
+    /// inside the row is exposed, so what VoiceOver reads is exactly the
+    /// label/value/hint set here, and swipe up/down steps the value.
     private func delaySlider(
         title: String,
         value: Binding<Double>,
@@ -219,15 +223,28 @@ struct SettingsView: View {
             Text("\(title): \(secondsLabel(value.wrappedValue))")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Slider(value: value, in: range, step: 0.1) {
-                Text(title)
-            }
-            .labelsHidden()
-            .accessibilityLabel(title)
-            .accessibilityValue(secondsLabel(value.wrappedValue))
-            .accessibilityHint(hint)
+            Slider(value: value, in: range, step: 0.1)
+                .labelsHidden()
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(secondsLabel(value.wrappedValue))
+        .accessibilityHint(hint)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: step(value, by: 0.1, in: range)
+            case .decrement: step(value, by: -0.1, in: range)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Step a delay by one notch, rounded back to a tenth: repeated
+    /// increments of 0.1 in binary drift to 0.7000000000000001, and the
+    /// spoken value has to stay the value that is stored.
+    private func step(_ value: Binding<Double>, by delta: Double, in range: ClosedRange<Double>) {
+        let stepped = ((value.wrappedValue + delta) * 10).rounded() / 10
+        value.wrappedValue = min(max(stepped, range.lowerBound), range.upperBound)
     }
 
     private func secondsLabel(_ seconds: Double) -> String {
