@@ -56,10 +56,14 @@ struct VirtualInputView: View {
     /// Compact height is a phone held sideways: there the on-screen keyboard
     /// takes almost the whole screen, and what is left cannot hold a pad.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// Which arrangement the pad is actually showing, reported by the pad
+    /// itself (it decides from its own bounds). Drives the layout button's
+    /// value, so the button always names what is under the finger.
+    @State private var showingKeyboardLayout = false
 
     var body: some View {
         NavigationStack {
-            padOrTypingRoom
+            pad
                 // Tighter than the standard margin on purpose: every point of
                 // width widens the zones, and the pad is aimed at by feel.
                 .padding(.horizontal, 8)
@@ -84,6 +88,9 @@ struct VirtualInputView: View {
                 // layout (field-reported 2026-08-06).
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        layoutButton
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         InfoButton { showInfo = true }
                     }
@@ -93,6 +100,31 @@ struct VirtualInputView: View {
         .onReceive(NotificationCenter.default.publisher(for: Self.sendRequested)) { _ in
             send()
         }
+        // Turning the phone sideways takes the text field away with the rest
+        // of the typing controls; the focus state has to follow, or the field
+        // comes back focused (and the keyboard with it) on the way back.
+        .onChange(of: verticalSizeClass) { _, newValue in
+            if newValue == .compact { textFieldFocused = false }
+        }
+    }
+
+    /// Switches the pad between the two arrangements without a trip to
+    /// Settings. It **pins** the choice — Settings keeps the third option,
+    /// "Keyboard when sideways", which picks per orientation.
+    ///
+    /// Deliberately silent: the button's own accessibility value changes, and
+    /// VoiceOver speaks that. A confirmation announcement posted alongside a
+    /// value change on the focused element clips the speech (field-tested
+    /// twice on this app).
+    private var layoutButton: some View {
+        Button {
+            settings.virtualPadLayout = showingKeyboardLayout ? .bands : .keyboardAlways
+        } label: {
+            Image(systemName: showingKeyboardLayout ? "keyboard" : "rectangle.grid.1x2")
+        }
+        .accessibilityLabel("Pad layout")
+        .accessibilityValue(showingKeyboardLayout ? "Keyboard" : "Key bands")
+        .accessibilityHint("Switches the pad between the full PC keyboard and the key bands, and keeps that choice in both orientations. Settings can instead pick the keyboard automatically whenever the device is sideways.")
     }
 
     // MARK: Layout
@@ -101,8 +133,28 @@ struct VirtualInputView: View {
     /// keyboard, keep text, Send. Everything but the field is icon-sized so
     /// the field keeps usable width on a phone, and the row sits right above
     /// the on-screen keyboard when it comes up.
+    ///
+    /// **Sideways on a phone the typing controls are gone and only Send
+    /// remains** (field-requested 2026-08-10). The pad there is a whole
+    /// keyboard, so the text field earns nothing — and it was actively
+    /// expensive, because focusing it raised the on-screen keyboard, which in
+    /// that orientation covers everything but a strip. Removing the field is
+    /// what makes it impossible to raise, so the pad keeps the full screen.
+    /// Text typed upright survives and Send still delivers it (its hint spells
+    /// out what it will send).
     private var controlRow: some View {
         HStack(spacing: 8) {
+            if verticalSizeClass != .compact {
+                typingControls
+            }
+            sendButton
+                .frame(maxWidth: verticalSizeClass == .compact ? .infinity : nil)
+        }
+    }
+
+    @ViewBuilder
+    private var typingControls: some View {
+        Group {
             TextField("Text to type", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .focused($textFieldFocused)
@@ -147,50 +199,27 @@ struct VirtualInputView: View {
             .accessibilityLabel("Keep text after sending")
             .accessibilityValue(settings.virtualInputKeepText ? "On" : "Off")
             .accessibilityHint("On: Send leaves the text in the field, so pressing Send again repeats it. Off: the field is cleared after each send.")
-
-            Button {
-                send()
-            } label: {
-                Text("Send")
-                    .fontWeight(.semibold)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!hasSomethingToSend)
-            // Replaces the old "Will send" readout: the combination is spoken
-            // as the hint, so focusing Send tells you what it delivers without
-            // a row of its own. Recomputed on every focus, so it never goes
-            // stale as modifiers are toggled on the pad.
-            .accessibilityHint(hasSomethingToSend
-                ? "Sends \(comboDescription) to the Windows PC"
-                : "Nothing selected to send")
         }
     }
 
-    /// Sideways on a phone, the on-screen keyboard leaves ~70 points between
-    /// the title and the control row. Split over the pad's rows that is a
-    /// handful of points each: unreadable, unhittable, and the shape people
-    /// describe as the pad being broken. So while text is being typed in that
-    /// situation the pad steps aside entirely and the field gets the screen;
-    /// dismissing the keyboard brings it straight back. (Taking the pad out of
-    /// the window releases anything it was holding down on the PC — see
-    /// `KeyPadUIView.willMove(toWindow:)`.)
-    @ViewBuilder
-    private var padOrTypingRoom: some View {
-        if verticalSizeClass == .compact && textFieldFocused {
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .top) {
-                    Text("Key pad hidden while typing")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                }
-                .accessibilityHidden(true)
-        } else {
-            pad
+    private var sendButton: some View {
+        Button {
+            send()
+        } label: {
+            Text("Send")
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .fixedSize()
         }
+        .buttonStyle(.borderedProminent)
+        .disabled(!hasSomethingToSend)
+        // Replaces the old "Will send" readout: the combination is spoken
+        // as the hint, so focusing Send tells you what it delivers without
+        // a row of its own. Recomputed on every focus, so it never goes
+        // stale as modifiers are toggled on the pad.
+        .accessibilityHint(hasSomethingToSend
+            ? "Sends \(comboDescription) to the Windows PC"
+            : "Nothing selected to send")
     }
 
     /// The pad drives the latched keys (the modifiers it toggles, plus
@@ -211,7 +240,8 @@ struct VirtualInputView: View {
             onClearLatched: { latched.removeAll() },
             onSend: { key in sendImmediate(key) },
             onHoldBegin: { key in beginHold(key) },
-            onHoldEnd: { key in endHold(key) }
+            onHoldEnd: { key in endHold(key) },
+            onLayoutChange: { showingKeyboardLayout = $0 }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -240,10 +270,12 @@ struct VirtualInputView: View {
                 case .keyboardAlways:
                     Text("The pad always shows a whole PC keyboard, laid out as a real one. Upright the keys are narrow — turn the device sideways and they get roughly the size of the keys on the on-screen keyboard.")
                 }
+                Text("The Pad layout button at the top left switches between the two straight away and keeps that choice in both orientations; its value tells you which one is on screen right now.")
                 if settings.virtualPadLayout != .bands {
                     Text("The keyboard is named for a \(settings.pcKeyboardLayout.displayName) PC. Keys are always sent by position, so the PC's own layout decides the character — change PC keyboard layout in Settings if the letters you hear are not the ones that arrive.")
                     Text("Above the function keys sits a row for Insert, Home, Page Up, Delete, End, Page Down and Print Screen — the cluster that lives to the right of a real keyboard, unrolled so it fits.")
                 }
+                Text("Sideways on a phone the text field, the keep-text button and the dismiss-keyboard button are not shown, and only Send remains: the pad can type everything there, and keeping the field would mean the on-screen keyboard could cover the pad. Text you typed upright is kept and still goes out with Send.")
             }
             Section("Modifiers") {
                 Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")

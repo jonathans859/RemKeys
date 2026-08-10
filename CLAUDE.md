@@ -188,6 +188,24 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   re-speaks them only — QWERTZ swaps the Y/Z *labels* and gives left Shift a
   unit back for the ISO 102nd key, while the VK sent is unchanged. Hearing
   "Y" while the PC types z is the failure this setting exists to prevent.
+  A **Pad layout button** (top-left toolbar, requested 2026-08-10) switches
+  the two without a trip to Settings; it *pins* the choice
+  (`.bands`/`.keyboardAlways`), leaving `keyboardInLandscape` as the automatic
+  option Settings still offers. It is silent on purpose — its own
+  `accessibilityValue` changes and VoiceOver speaks that; an announcement
+  alongside would clip it. The pad decides the arrangement from its own
+  bounds, so it is the only thing that knows which one is live: it reports
+  back via `onLayoutChange` (dispatched off the layout pass, since it ends in
+  a SwiftUI `@State` write).
+- **Sideways on a phone, the typing controls are gone and only Send remains**
+  (field-requested 2026-08-10). With a whole keyboard on the pad the text
+  field earns nothing there, and it was actively expensive: focusing it raised
+  the on-screen keyboard, which in that orientation leaves ~70 pt for the pad.
+  Removing the field is what makes the keyboard *impossible* to raise, so the
+  pad keeps the full screen. Text typed upright survives and Send still sends
+  it. This replaced an earlier "hide the pad while typing" branch — that
+  branch only ever fired in the same orientation and solved it the wrong way
+  round.
 - **Direct-touch key pad** (`VirtualKeyPad.swift`): ONE accessibility
   element (never per-band regions — that would break explore-by-touch
   around it) with `.allowsDirectInteraction` + `[.silentOnTouch]` —
@@ -226,14 +244,23 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   optional speech (`virtualPadHoldSpeech`) — the haptics are never optional,
   because they are the channel that works with the phone in a pocket.
   **Haptics also carry key state while dragging** (`virtualPadRichHaptics`,
-  on by default; requested 2026-08-10): one tick = off, **two quick ticks =
-  turned on**, a firm `.rigid` = down on the PC, and a soft swell *before*
-  the tick when the finger crosses into another row (how you count rows
-  without looking). On a 60-key layout speech is the slow channel — the finger
-  passes far more zones than announcements can keep up with. The second tick
-  is a cancellable `DispatchWorkItem` (~0.08 s) killed the moment the finger
-  moves on, or a fast drag queues stale pulses; generators are `prepare()`d in
-  `touchesBegan` so a drag's first boundary isn't the sluggish one.
+  on by default; requested 2026-08-10). Four cues, each its own *waveform*
+  rather than a different intensity of the same one — that was the first
+  version's mistake: crisp selection tick = arrived on a key, diffuse `.soft`
+  swell *before* the tick = crossed into another row (how you count rows
+  without looking), firm `.medium` nudge 0.12 s *after* the tick = that key is
+  turned on, hard `.rigid` = it is down on the PC. On a 60-key layout speech
+  is the slow channel — the finger passes far more zones than announcements
+  can keep up with. Two traps, both hit: a second *selection* tick that close
+  together is merged by the Taptic Engine into one indistinguishable buzz
+  (hence a different style for the nudge), and the nudge's cancellable
+  `DispatchWorkItem` must NOT be cancelled by `cancelStageTimers()` — arriving
+  on a key schedules the nudge and then immediately starts that key's hold
+  countdown, so folding the two together killed the nudge a moment after
+  scheduling it and it never fired once (field-reported 2026-08-10). It
+  belongs to the drag, not the press: only moving on or `abortPress` may
+  cancel it. Generators are `prepare()`d in `touchesBegan` so a drag's first
+  boundary isn't the sluggish one.
   Consequences that shaped the code: latching is no longer a modifier-band
   privilege, so the tab tracks an ordered **`latched: [VirtualKey]`** (modifier
   toggles *and* held keys) that wraps every send, and the pad tints latched
@@ -256,10 +283,8 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   it, worst in landscape. Two companions: any **resize aborts the press**
   (`layoutSubviews` compares against the last laid-out size), because
   rotation moves every zone out from under a finger that is already down and
-  a held key must be released; and in **compact height with the text field
-  focused the pad is removed entirely** rather than squeezed — sideways with
-  the keyboard up there is ~70 pt left, which is a few points per row.
-  Unmounting it releases anything held via `willMove(toWindow:)`.
+  a held key must be released. (The on-screen keyboard can no longer squeeze
+  the pad at all in that orientation — see the control-row note above.)
 - **Tab layout (field-specified 2026-07-19, revised 2026-08-06):** pad
   filling everything from the title down, over a **single control row** at
   the bottom: text field, dismiss keyboard, keep text, Send. No Form on this

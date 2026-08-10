@@ -70,6 +70,11 @@ struct VirtualKeyPad: UIViewRepresentable {
     let onHoldBegin: (VirtualKey) -> Bool
     /// Release a key put down by `onHoldBegin`.
     let onHoldEnd: (VirtualKey) -> Void
+    /// Reports which arrangement is on screen (true = the keyboard), so the
+    /// tab's layout button can name the one the user is actually touching.
+    /// The pad decides this from its own bounds, so it is the only place that
+    /// knows.
+    let onLayoutChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> KeyPadUIView {
         let view = KeyPadUIView()
@@ -112,6 +117,7 @@ struct VirtualKeyPad: UIViewRepresentable {
         view.onSend = onSend
         view.onHoldBegin = onHoldBegin
         view.onHoldEnd = onHoldEnd
+        view.onEffectiveLayoutChange = onLayoutChange
     }
 }
 
@@ -163,6 +169,7 @@ final class KeyPadUIView: UIView {
     var onSend: ((VirtualKey) -> Void)?
     var onHoldBegin: ((VirtualKey) -> Bool)?
     var onHoldEnd: ((VirtualKey) -> Void)?
+    var onEffectiveLayoutChange: ((Bool) -> Void)?
 
     var layoutPreference: VirtualPadLayout = .keyboardInLandscape {
         didSet { rowsInvalidated(oldValue != layoutPreference) }
@@ -224,6 +231,12 @@ final class KeyPadUIView: UIView {
     /// The soft swell: the key latching on, and (with rich haptics) crossing
     /// into a different row.
     private let latchThump = UIImpactFeedbackGenerator(style: .soft)
+    /// The "this key is already on" nudge that follows the arrival tick. Its
+    /// own style on purpose — four cues share this pad, so each needs a
+    /// waveform of its own rather than a different intensity of someone
+    /// else's: crisp tick (arrived), diffuse swell (new row), this firm nudge
+    /// (on), hard thump (down on the PC).
+    private let stateThump = UIImpactFeedbackGenerator(style: .medium)
     /// Fires the second half of the "this key is on" double tick.
     private var stateTickWork: DispatchWorkItem?
 
@@ -399,11 +412,17 @@ final class KeyPadUIView: UIView {
     private func applyRowsIfNeeded() {
         let wantsKeyboard = wantsKeyboardLayout
         guard rowsNeedRebuild || wantsKeyboard != rowsAreKeyboard else { return }
+        let wasKeyboard = rowsAreKeyboard
         rowsNeedRebuild = false
         rowsAreKeyboard = wantsKeyboard
         setRows(wantsKeyboard
             ? VirtualKeys.keyboardRows(layout: pcLayout, includeExtendedFKeys: extendedFKeys)
             : bandRows())
+        guard wasKeyboard != wantsKeyboard else { return }
+        // Hopped out of the layout pass: this ends in a SwiftUI @State write,
+        // which must not happen while the view tree is being laid out.
+        let report = onEffectiveLayoutChange
+        DispatchQueue.main.async { report?(wantsKeyboard) }
     }
 
     private func setRows(_ newRows: [PadRow]) {
@@ -565,8 +584,7 @@ final class KeyPadUIView: UIView {
     /// - key on: two ticks (the second follows shortly after)
     /// - key down on the PC: a tick and a firm thump
     private func feedbackEntering(_ padKey: PadKey, rowChanged: Bool) {
-        stateTickWork?.cancel()
-        stateTickWork = nil
+        cancelStateTick()
         if richHaptics, rowChanged { latchThump.impactOccurred(intensity: 0.6) }
         selectionTick.selectionChanged()
         guard richHaptics else { return }
@@ -574,12 +592,23 @@ final class KeyPadUIView: UIView {
             edgeThump.impactOccurred()
         } else if latchedKeys.contains(padKey.key.vk) {
             let work = DispatchWorkItem { [weak self] in
-                self?.selectionTick.selectionChanged()
+                guard let self else { return }
+                // A second *selection* tick this close together gets merged by
+                // the Taptic Engine into something indistinguishable from one.
+                // A medium impact is a different waveform, so the pair reads
+                // as "tick, then a nudge" rather than as a longer tick — and
+                // it is not the soft swell the row cue uses, so the two cues
+                // can't be mistaken for each other when they land together.
+                self.stateThump.impactOccurred()
             }
             stateTickWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.stateTickDelay, execute: work)
         }
     }
+
+    /// Long enough that the two pulses are felt apart, short enough that they
+    /// still read as one event about the key the finger just arrived on.
+    private static let stateTickDelay: TimeInterval = 0.12
 
     /// Latch a key on/off through the parent. The local set is updated
     /// optimistically so a continuing drag reads the right state before
@@ -682,6 +711,7 @@ final class KeyPadUIView: UIView {
     private func abortPress() {
         endHoldIfNeeded()
         cancelStageTimers()
+        cancelStateTick()
         pressStage = .spent
         pressKey = nil
         trackedTouch = nil
@@ -693,6 +723,16 @@ final class KeyPadUIView: UIView {
         latchTimer = nil
         holdTimer?.invalidate()
         holdTimer = nil
+    }
+
+    /// Deliberately NOT part of `cancelStageTimers`: arriving on a key
+    /// schedules the state tick and then immediately starts that key's hold
+    /// countdown, so folding this into the stage timers cancelled the second
+    /// tick a moment after scheduling it and the "this key is on" pulse could
+    /// never be felt at all (field-reported 2026-08-10). It belongs to the
+    /// drag, not to the press: only moving on, or the press being called off
+    /// outright, may cancel it.
+    private func cancelStateTick() {
         stateTickWork?.cancel()
         stateTickWork = nil
     }
@@ -723,6 +763,7 @@ final class KeyPadUIView: UIView {
         selectionTick.prepare()
         latchThump.prepare()
         edgeThump.prepare()
+        stateThump.prepare()
         trackedTouch = touch
         suppressSliderTap = false
         if sliderMode {
