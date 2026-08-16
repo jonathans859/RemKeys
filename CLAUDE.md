@@ -68,6 +68,25 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   relay, no app-level crypto — Tailscale already encrypts and authenticates.
   The apps have a text field for the target Tailscale IP and connect directly
   (`BridgeClient`, `Network.framework` TCP, Nagle off for low latency).
+- **Both ends assume the link can die without saying so** (fixed 2026-08-16,
+  after a vacation where every border crossing needed the agent reinstalled).
+  A phone that loses cellular mid-session — tower handover, a dead spot, a
+  border — sends no FIN and no RST, so nothing about the socket looks wrong
+  at either end. That produced the worst possible failure: the agent stayed
+  parked in the dead session's read, the OS completed the phone's *new*
+  handshake into the listen backlog by itself so the phone showed
+  "Connected", and not one keystroke arrived until the agent process was
+  restarted. Three rules now, and none of them is redundant:
+  **the newest peer wins** (the agent accepts continuously and drops the older
+  session — this is the one that makes recovery instant), **TCP keepalive on
+  every socket** at both ends (~15s/5s×3 on Windows, 10s/5s×3 plus a 10s
+  `connectionDropTime` on Apple — the OS default is *off*, and two hours when
+  on), and **the client rebuilds rather than waits** (`viabilityUpdateHandler`
+  and a prolonged `.waiting` both schedule a reconnect; a stale `NWConnection`
+  is never nursed). Note a working Tailscale link hides interface changes from
+  `NWConnection` — the socket sits on the tunnel interface — which is why
+  Wi-Fi↔cellular switching always worked and why keepalive, not path
+  monitoring, is the client's real detector.
 
 ## Platform capture specifics
 
@@ -562,7 +581,20 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   key can still be down when forwarding stops — so if the socket dies in that
   window the release line never arrives and Windows repeats that key forever.
   Only this end can clean it up; the sender is already gone. (The desktop
-  helpers do the same for their own desktop-switch case.)
+  helpers do the same for their own desktop-switch case.) Keepalive is what
+  makes this fire at all for a peer that vanished silently — without it the
+  session never ends and the key repeats forever.
+- **The accept loop never blocks on a session** (`Worker.cs`). It accepts
+  continuously; a new allowed peer closes the previous socket, waits for that
+  session to finish (which releases its held keys and resets the status), then
+  starts. Sessions therefore still run strictly one at a time, which is what
+  keeps `_held` and the status writes lock-free. Two details that are easy to
+  undo by accident: the peer policy is checked **before** the old session is
+  dropped, or anyone who can reach the port could cut off the real keyboard
+  just by connecting once; and superseding **closes the socket** instead of
+  cancelling the read, because a pending socket read is not reliably
+  interruptible by a `CancellationToken` while closing the handle always
+  throws it out.
 - **Never crashes on bad config**: invalid port or busy socket → logs and
   retries; malformed line → logged and skipped, not fatal. Logs to a per-day
   file (`FileLogger.cs`).

@@ -12,6 +12,18 @@ namespace KeyBridgeAgent;
 /// event to an <see cref="IKeystrokeSink"/>. One peer at a time (there is only
 /// ever one keyboard); a new connection supersedes the old one.
 ///
+/// "Supersedes" is load-bearing, not a nicety. A phone that loses its link
+/// abruptly — cellular handing over between towers, a border crossing, a dead
+/// spot — never gets to send a FIN, so this end is left holding a socket that
+/// is alive as far as the kernel is concerned and silent forever. Accepting
+/// sequentially (accept, read to EOF, accept again) meant the agent stayed
+/// parked in that dead session while the phone happily reconnected: the OS
+/// completes the handshake into the listen backlog on its own, so the phone
+/// showed "Connected" and nothing was ever typed again until the agent process
+/// was restarted. So the accept loop runs continuously and the newest peer
+/// wins, and every accepted socket gets TCP keepalive so a peer that never
+/// comes back is dropped (and its held keys released) instead of lingering.
+///
 /// The sink is what differs between installs: the in-session agent injects
 /// right here, while the lock-screen service forwards to whichever desktop
 /// helper is in front. Parsing and the peer policy stay on this side either
@@ -73,12 +85,21 @@ public sealed class Worker : BackgroundService
             }
         }
 
+        // The current session runs as its own task so this loop can keep
+        // accepting. Nothing else runs concurrently: a new peer is only started
+        // after the previous session has been closed *and* awaited, which is
+        // what lets _held stay lock-free and keeps the old session's
+        // "released N keys" and status reset ahead of the new peer's log line.
+        TcpClient? currentClient = null;
+        var currentRemote = string.Empty;
+        var currentSession = Task.CompletedTask;
+
         while (!stoppingToken.IsCancellationRequested)
         {
+            TcpClient client;
             try
             {
-                using var client = await listener.AcceptTcpClientAsync(stoppingToken);
-                await HandleClientAsync(client, stoppingToken);
+                client = await listener.AcceptTcpClientAsync(stoppingToken);
             }
             catch (OperationCanceledException)
             {
@@ -86,24 +107,79 @@ public sealed class Worker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error accepting or handling a connection.");
+                // Never let a bad accept spin the loop hot.
+                _logger.LogError(ex, "Error accepting a connection; retrying in 1s.");
+                await SafeDelay(TimeSpan.FromSeconds(1), stoppingToken);
+                continue;
             }
+
+            var address = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
+            var remote = address?.ToString() ?? "unknown";
+
+            // Check the peer policy BEFORE dropping the live session, or any
+            // stranger who can reach the port could cut off the real keyboard
+            // just by connecting once.
+            if (!IsAllowed(address, remote, out var rejection))
+            {
+                _logger.LogWarning("Rejected connection from {Remote}: {Reason}", remote, rejection);
+                CloseQuietly(client);
+                continue;
+            }
+
+            if (!currentSession.IsCompleted)
+            {
+                _logger.LogInformation(
+                    "Peer {Remote} connected while {Previous} was still connected; dropping the older connection.",
+                    remote, currentRemote);
+                // Close the socket rather than cancelling the read: a pending
+                // socket read is not reliably interruptible by a token, but
+                // closing the handle always makes it throw.
+                CloseQuietly(currentClient);
+            }
+
+            await currentSession;
+
+            currentClient = client;
+            currentRemote = remote;
+            currentSession = RunSessionAsync(client, remote, stoppingToken);
         }
 
+        CloseQuietly(currentClient);
+        await currentSession;
         listener.Stop();
         _logger.LogInformation("KeyBridge agent stopped.");
     }
 
-    private async Task HandleClientAsync(TcpClient client, CancellationToken token)
+    /// <summary>
+    /// Owns one peer session end to end, so the accept loop can move on and a
+    /// failure here can never take the listener down with it.
+    /// </summary>
+    private async Task RunSessionAsync(TcpClient client, string remote, CancellationToken token)
     {
-        var address = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
-        var remote = address?.ToString() ?? "unknown";
-
-        if (!IsAllowed(address, remote, out var rejection))
+        try
         {
-            _logger.LogWarning("Rejected connection from {Remote}: {Reason}", remote, rejection);
-            return;
+            using (client)
+            {
+                await HandleClientAsync(client, remote, token);
+            }
         }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error handling the connection from {Remote}.", remote);
+        }
+    }
+
+    private void CloseQuietly(TcpClient? client)
+    {
+        if (client is null) return;
+        try { client.Close(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Ignoring error while closing a connection."); }
+    }
+
+    private async Task HandleClientAsync(TcpClient client, string remote, CancellationToken token)
+    {
+        ConfigureKeepAlive(client.Client, remote);
 
         _logger.LogInformation("Peer connected from {Remote}.", remote);
         _status.Set(AgentState.Connected, $"Connected to {remote}");
@@ -128,12 +204,51 @@ public sealed class Worker : BackgroundService
         {
             _logger.LogInformation("Peer {Remote} disconnected: {Message}", remote, ex.Message);
         }
+        catch (ObjectDisposedException)
+        {
+            // The socket was closed under us — this session was superseded by a
+            // newer peer, or the host is shutting down. Not an error.
+            _logger.LogInformation("Peer {Remote} session was closed.", remote);
+        }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
             ReleaseHeldKeys(remote);
             _logger.LogInformation("Peer {Remote} session ended.", remote);
             _status.Set(AgentState.Listening, $"Waiting for a connection on port {_port}");
+        }
+    }
+
+    /// <summary>
+    /// Turn on TCP keepalive for an accepted peer, aggressively.
+    ///
+    /// Windows leaves keepalive off unless a socket asks for it, and its
+    /// default idle time is two hours even then — so a peer that vanishes
+    /// without closing its socket (a phone whose cellular link drops mid-
+    /// session, which is the common case on the move) would otherwise leave
+    /// this session readable-forever-but-silent, holding down whatever keys it
+    /// left pressed. Roughly 15s idle plus three probes 5s apart puts the
+    /// detection at about half a minute, cheap on a link that carries
+    /// keystrokes anyway.
+    ///
+    /// Never fatal: on a Windows build that refuses one of these the session
+    /// still runs, it just falls back to being superseded by the next peer.
+    /// </summary>
+    private void ConfigureKeepAlive(Socket socket, string remote)
+    {
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 15);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);
+            // Windows 10 1703+; set last so the three above still apply if it throws.
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not fully configure TCP keepalive for {Remote}; a silently dropped peer may take " +
+                "longer to notice.", remote);
         }
     }
 
