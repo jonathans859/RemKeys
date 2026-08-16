@@ -63,6 +63,15 @@ public final class BridgeClient {
     private var heldKeys: Set<UInt16> = []
     /// Guards against overlapping reconnect timers.
     private var reconnectScheduled = false
+    /// Bumped by every `connect()` / `disconnect()`, so a recovery scheduled
+    /// for one connection can tell it no longer concerns the current one and
+    /// bow out instead of tearing down a healthy successor.
+    private var connectionGeneration = 0
+    /// Last viability the path reported. `false` means the connection object is
+    /// still `.ready` but its route is gone — the state that a moving phone
+    /// (tower handover, border crossing) ends up in, and the one where sending
+    /// keystrokes is pointless.
+    private var pathIsViable = true
 
     public init(settings: AppSettings) {
         self.settings = settings
@@ -122,14 +131,45 @@ public final class BridgeClient {
         }
 
         setStatus(.connecting)
+        connectionGeneration &+= 1
+        pathIsViable = true
+        // The agent starts every session holding nothing, so whatever we
+        // thought was down on the old connection is not down on the new one.
+        heldKeys.removeAll()
+
         let params = NWParameters.tcp
-        // Keep latency low: disable Nagle so single keystrokes aren't buffered.
         if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            // Keep latency low: disable Nagle so single keystrokes aren't buffered.
             tcp.noDelay = true
+            // Notice a link that died without closing. When the phone moves
+            // between towers or countries the old path just stops carrying
+            // packets — no FIN, no RST — and without keepalive this connection
+            // stays `.ready` forever while every keystroke vanishes. Probe
+            // after 10s idle, three times, 5s apart: dead in about 25s.
+            tcp.enableKeepalive = true
+            tcp.keepaliveIdle = 10
+            tcp.keepaliveCount = 3
+            tcp.keepaliveInterval = 5
+            // And when we *are* typing, don't retransmit into the void for the
+            // system default (minutes). Unacknowledged for 10s means gone.
+            tcp.connectionDropTime = 10
         }
+
         let conn = NWConnection(host: NWEndpoint.Host(host), port: port, using: params)
         conn.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in self?.handleState(state) }
+        }
+        // A `.ready` connection whose path is no longer viable is the failure
+        // mode keepalive takes ~25s to catch; this catches it in one hop.
+        conn.viabilityUpdateHandler = { [weak self] viable in
+            Task { @MainActor in self?.handleViability(viable) }
+        }
+        // Wi-Fi came back, or a better interface appeared: retry a connection
+        // that is currently stuck waiting, right away, instead of sitting out
+        // the recovery delay. A healthy connection is left alone — see
+        // handleBetterPath.
+        conn.betterPathUpdateHandler = { [weak self] available in
+            Task { @MainActor in self?.handleBetterPath(available) }
         }
         connection = conn
         conn.start(queue: .main)
@@ -138,6 +178,7 @@ public final class BridgeClient {
     /// Tear down the connection. Keeps `status` unless asked to reset it, so an
     /// internal reconnect doesn't flicker the UI to `.idle`.
     public func disconnect(resetStatus: Bool = true) {
+        connectionGeneration &+= 1
         connection?.cancel()
         connection = nil
         if resetStatus {
@@ -152,11 +193,14 @@ public final class BridgeClient {
             setStatus(.connected)
         case .waiting(let error):
             // Reachability problem (host down, no route). Network.framework
-            // keeps the connection and retries on its own, but surface it.
+            // keeps the connection and retries on its own — but a connection
+            // that started on a network the device has since left can wait
+            // forever, so rebuild it if it hasn't recovered shortly.
             setStatus(.failed(Self.describe(error)))
+            scheduleRecovery(after: 10)
         case .failed(let error):
             setStatus(.failed(Self.describe(error)))
-            scheduleReconnectIfEnabled()
+            scheduleRecovery(after: 2)
         case .cancelled:
             break
         default:
@@ -164,13 +208,46 @@ public final class BridgeClient {
         }
     }
 
-    private func scheduleReconnectIfEnabled() {
+    private func handleViability(_ viable: Bool) {
+        pathIsViable = viable
+        guard forwardingEnabled else { return }
+        guard viable else {
+            setStatus(.failed("Network connection lost"))
+            // Give the path a moment to come back on its own (a brief cellular
+            // gap) before spending a reconnect on it.
+            scheduleRecovery(after: 3)
+            return
+        }
+        // Came back on the same path before the recovery fired.
+        if let connection, case .ready = connection.state {
+            setStatus(.connected)
+        }
+    }
+
+    /// `scheduleRecovery` bows out if the connection is healthy, so this only
+    /// ever rescues a stuck one. That is deliberate: hopping a *working*
+    /// connection onto a new interface would drop keystrokes for no gain —
+    /// and over Tailscale the socket lives on the tunnel interface anyway, so
+    /// the interface underneath it changing is not our business.
+    private func handleBetterPath(_ available: Bool) {
+        guard available, forwardingEnabled else { return }
+        scheduleRecovery(after: 1)
+    }
+
+    /// Rebuild the connection after `seconds`, unless it has recovered on its
+    /// own by then or has been superseded in the meantime. One timer at a time:
+    /// the triggers overlap (a dead path usually reports non-viable *and*
+    /// fails), and reconnecting twice would just interrupt itself.
+    private func scheduleRecovery(after seconds: Int) {
         guard forwardingEnabled, !reconnectScheduled else { return }
         reconnectScheduled = true
+        let generation = connectionGeneration
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(seconds))
             self.reconnectScheduled = false
-            if self.forwardingEnabled { self.connect() }
+            guard self.forwardingEnabled, self.connectionGeneration == generation else { return }
+            guard !(self.status.isConnected && self.pathIsViable) else { return }
+            self.connect()
         }
     }
 
