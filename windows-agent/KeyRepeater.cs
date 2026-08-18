@@ -1,5 +1,11 @@
 using System.Runtime.InteropServices;
 
+// The tray icon pulls in WinForms, and its implicit using makes a bare "Timer"
+// ambiguous with System.Windows.Forms.Timer — a UI-thread timer, which is not
+// what this is: repeats have to keep coming with no message loop in sight
+// (there is none at all in the lock-screen service).
+using ThreadingTimer = System.Threading.Timer;
+
 namespace KeyBridgeAgent;
 
 /// <summary>
@@ -67,7 +73,7 @@ public sealed class KeyRepeater : IDisposable
     private readonly ILogger _logger;
 
     private readonly object _gate = new();
-    private readonly Timer _timer;
+    private readonly ThreadingTimer _timer;
 
     /// <summary>The key currently repeating, or null when nothing is.</summary>
     private ushort? _key;
@@ -83,7 +89,7 @@ public sealed class KeyRepeater : IDisposable
         _sink = sink;
         _options = options;
         _logger = logger;
-        _timer = new Timer(OnTick, null, Timeout.Infinite, Timeout.Infinite);
+        _timer = new ThreadingTimer(OnTick, null, Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>A new peer: nothing is held, and its repeat behaviour is unknown again.</summary>
