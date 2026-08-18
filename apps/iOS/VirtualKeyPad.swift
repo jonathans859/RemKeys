@@ -45,8 +45,9 @@ import BridgeCore
 ///    wraps everything sent, exactly like a modifier does, until it is pressed
 ///    again or the selection is cleared. Soft haptic, optional speech.
 /// 3. After `virtualPadHoldDelay` more it is **pressed down on the PC** and
-///    stays down while the finger stays down, so the PC's own key repeat runs
-///    (hold Backspace to eat a word, hold Down to scroll). Firm haptic.
+///    stays down while the finger stays down, so it repeats there (hold
+///    Backspace to eat a word, hold Down to scroll) — the Windows agent is
+///    what generates that repeat. Firm haptic.
 /// 4. Lifting from that state releases the key on the PC *and* drops the latch
 ///    (field decision 2026-08-10): a hold is momentary all the way through, so
 ///    it never leaves state behind. Lifting at stage 2 leaves the key latched.

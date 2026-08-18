@@ -25,6 +25,31 @@ public sealed class KeyBridgeOptions
     public string LogDirectory { get; set; } = string.Empty;
 
     /// <summary>
+    /// Repeat a key the peer holds down, like a locally attached keyboard.
+    ///
+    /// On by default because Windows does not do it for injected input at all
+    /// (see <see cref="KeyRepeater"/>): without this, holding Down Arrow moves
+    /// one line and stops. Turn it off if a peer already sends its own repeats
+    /// and the automatic detection somehow misses it.
+    /// </summary>
+    public bool KeyRepeat { get; set; } = true;
+
+    /// <summary>
+    /// How long a key must be held before it starts repeating, in milliseconds.
+    /// 0 follows this PC's own "Repeat delay" setting, which is what you want
+    /// unless lock-screen mode is on — that listener runs as LocalSystem and so
+    /// reads Windows' defaults instead of your sliders.
+    /// </summary>
+    public int KeyRepeatDelayMs { get; set; }
+
+    /// <summary>
+    /// Milliseconds between repeats once one starts. 0 follows this PC's own
+    /// "Repeat rate" setting; see <see cref="KeyRepeatDelayMs"/> for the case
+    /// where pinning a value is worth it.
+    /// </summary>
+    public int KeyRepeatIntervalMs { get; set; }
+
+    /// <summary>
     /// Lock-screen mode only: accept connections from outside Tailscale's
     /// address ranges (100.64.0.0/10 and fd7a:115c:a1e0::/48).
     ///

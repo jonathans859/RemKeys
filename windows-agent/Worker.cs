@@ -38,6 +38,8 @@ public sealed class Worker : BackgroundService
     private readonly AgentMode _mode;
     /// <summary>Keys the current peer has pressed and not released yet.</summary>
     private readonly HashSet<ushort> _held = new();
+    /// <summary>Types a held key over and over; Windows will not do it for injected input.</summary>
+    private readonly KeyRepeater _repeater;
     private int _port;
 
     public Worker(
@@ -52,6 +54,13 @@ public sealed class Worker : BackgroundService
         _status = status;
         _sink = sink;
         _mode = mode;
+        _repeater = new KeyRepeater(sink, _options, logger);
+    }
+
+    public override void Dispose()
+    {
+        _repeater.Dispose();
+        base.Dispose();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -181,6 +190,7 @@ public sealed class Worker : BackgroundService
     {
         ConfigureKeepAlive(client.Client, remote);
 
+        _repeater.BeginSession();
         _logger.LogInformation("Peer connected from {Remote}.", remote);
         _status.Set(AgentState.Connected, $"Connected to {remote}");
         client.NoDelay = true;
@@ -213,6 +223,8 @@ public sealed class Worker : BackgroundService
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            // Before the releases below, so nothing re-presses a key on its way out.
+            _repeater.Stop();
             ReleaseHeldKeys(remote);
             _logger.LogInformation("Peer {Remote} session ended.", remote);
             _status.Set(AgentState.Listening, $"Waiting for a connection on port {_port}");
@@ -282,7 +294,18 @@ public sealed class Worker : BackgroundService
         // helpers, so nothing a helper injects has skipped this check.
         if (WireProtocol.TryParse(line, out var vk, out var pressed))
         {
-            if (pressed) _held.Add(vk); else _held.Remove(vk);
+            if (pressed)
+            {
+                // A second press for a key already held is the peer forwarding
+                // its own OS's key repeat (macOS does); the repeater then leaves
+                // that key alone instead of repeating it a second time.
+                if (_held.Add(vk)) _repeater.Pressed(vk); else _repeater.NotePeerRepeat(vk);
+            }
+            else
+            {
+                _held.Remove(vk);
+                _repeater.Released(vk);
+            }
             _sink.Key(vk, pressed);
         }
         else if (WireProtocol.TryParseChar(line, out var codepoint))
