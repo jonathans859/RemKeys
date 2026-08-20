@@ -159,6 +159,22 @@ public final class AppSettings {
         didSet { defaults.set(virtualInputKeepText, forKey: Keys.virtualInputKeepText) }
     }
 
+    /// Whether the Virtual Input text field is a **direct line to the PC**:
+    /// every character typed into it goes out the moment it is typed, every
+    /// deletion sends a Backspace, and Return sends Enter — no Send press
+    /// anywhere. Off by default.
+    ///
+    /// This is the other half of "the iPhone's keyboard carries the letters".
+    /// Composing a string and firing it is right for a shortcut; *typing* at
+    /// the PC — a filename, a search box, a password field — wants every
+    /// keystroke to land as it is made, and pressing Send between letters is
+    /// the whole cost. Modifiers that are on keep wrapping each character and
+    /// do **not** reset, which is what makes Caps Lock plus a letter repeatable
+    /// for screen-reader navigation.
+    public var virtualInputLiveTyping: Bool {
+        didSet { defaults.set(virtualInputLiveTyping, forKey: Keys.virtualInputLiveTyping) }
+    }
+
     // MARK: Function-key row (macOS)
 
     /// Whether the Mac's fn-key row is remapped to send plain F1–F12 while
@@ -205,6 +221,7 @@ public final class AppSettings {
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
+        self.virtualInputLiveTyping = defaults.bool(forKey: Keys.virtualInputLiveTyping)
         self.virtualPadRichHaptics = defaults.object(forKey: Keys.virtualPadRichHaptics) as? Bool ?? true
         // Hold defaults are all "on" / non-zero, which `bool(forKey:)` and
         // `double(forKey:)` can't express — read the raw object and fall back
@@ -253,6 +270,7 @@ public final class AppSettings {
         // belonged to arrangements the 2026-08-20 rebuild removed.
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
         static let virtualInputKeepText = "virtualInputKeepText"
+        static let virtualInputLiveTyping = "virtualInputLiveTyping"
         static let virtualPadHoldEnabled = "virtualPadHoldEnabled"
         // Deliberately not the old "virtualPadHoldDelay": that number was
         // counted from the moment a key latched, not from the touch, so an

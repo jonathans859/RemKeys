@@ -32,6 +32,13 @@ import BridgeCore
 ///   when modifiers are held it switches to US-position keys, because
 ///   shortcuts match keys, not characters. The field normally clears after
 ///   Send; `virtualInputKeepText` pins it instead.
+/// - **Live typing** (`virtualInputLiveTyping`) turns that field into a direct
+///   line: each character goes out as it is typed, each deletion sends a
+///   Backspace, Return sends Enter, and Send disappears because there is
+///   nothing left for it to do. That is the mode for *typing at* the PC — a
+///   filename, a search box — where pressing Send between letters was the
+///   whole cost. Modifiers keep wrapping every character and do not reset, so
+///   Caps Lock plus a letter repeats for as long as it is on.
 /// - A two-finger double tap (magic tap) sends from anywhere on this tab, and
 ///   the top-right info button explains the screen as it is configured.
 ///
@@ -60,6 +67,13 @@ struct VirtualInputView: View {
     @State private var holdWrap: [VirtualKey] = []
     @State private var pageIndex = 0
     @State private var text = ""
+    /// What live typing has already put on the PC. Every change to `text` is
+    /// diffed against this, so a programmatic edit can be made invisible to
+    /// the PC simply by moving both together (`setTextSilently`).
+    @State private var liveMirror = ""
+    /// One warning per outage, not one per keystroke: typing a word into a
+    /// disconnected field would otherwise say "not sent" five times.
+    @State private var liveWarned = false
     @State private var showInfo = false
     @FocusState private var textFieldFocused: Bool
     /// Compact height is a phone held sideways: there the on-screen keyboard
@@ -69,6 +83,8 @@ struct VirtualInputView: View {
     private var pages: [PadPage] {
         VirtualKeys.pages(includeExtendedFKeys: settings.virtualPadExtendedFKeys)
     }
+
+    private var liveTypingOn: Bool { settings.virtualInputLiveTyping }
 
     private var currentPage: PadPage {
         let all = pages
@@ -175,32 +191,60 @@ struct VirtualInputView: View {
     /// the field keeps usable width on a phone, and the row sits right above
     /// the on-screen keyboard when it comes up.
     ///
-    /// **Sideways on a phone it is Send alone** (field-requested 2026-08-10).
-    /// Focusing the field in that orientation raises the on-screen keyboard,
-    /// which leaves a strip of screen; removing the field is what makes it
-    /// impossible to raise, so the pad keeps its height. Text typed upright
-    /// survives and Send still delivers it (its hint spells out what).
+    /// **Sideways on a phone the typing controls are gone** (field-requested
+    /// 2026-08-10). Focusing the field in that orientation raises the
+    /// on-screen keyboard, which leaves a strip of screen; removing the field
+    /// is what makes it impossible to raise, so the pad keeps its height. Text
+    /// typed upright survives and Send still delivers it (its hint spells out
+    /// what). The live-typing button stays even there, so the mode can be left
+    /// without turning the phone back.
+    ///
+    /// With live typing on, **Send and the keep-text pin are hidden**: the
+    /// text is already gone by the time you could press either, and the field
+    /// gets their width.
     private var controlRow: some View {
         HStack(spacing: 8) {
             if verticalSizeClass != .compact {
                 typingControls
+            } else {
+                liveTypingToggle
             }
-            sendButton
-                .frame(maxWidth: verticalSizeClass == .compact ? .infinity : nil)
+            if !settings.virtualInputLiveTyping {
+                sendButton
+                    .frame(maxWidth: verticalSizeClass == .compact ? .infinity : nil)
+            }
         }
     }
 
     @ViewBuilder
     private var typingControls: some View {
         Group {
-            TextField("Text to type", text: $text)
+            TextField(settings.virtualInputLiveTyping ? "Type to the PC" : "Text to type", text: $text)
                 .textFieldStyle(.roundedBorder)
                 .focused($textFieldFocused)
                 .textInputAutocapitalization(.never)
+                // Autocorrect would rewrite a word *behind* the diff and send
+                // the correction as a burst of backspaces and retypes. It was
+                // already off; with live typing on it is load-bearing.
                 .autocorrectionDisabled()
-                .accessibilityHint(settings.virtualInputKeepText
-                    ? "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts. It is kept after sending, so Send repeats it."
-                    : "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts.")
+                // The diff runs here rather than in the binding's setter: this
+                // hands over both the old and the new value, which is exactly
+                // what "what changed" needs.
+                .onChange(of: text) { _, newValue in
+                    liveSend(to: newValue)
+                }
+                .onSubmit {
+                    guard settings.virtualInputLiveTyping else { return }
+                    sendImmediate(VirtualKey(name: "Enter", vk: VK.return))
+                    // Return dismisses the keyboard by default, which would
+                    // end the typing session after one line.
+                    textFieldFocused = true
+                }
+                .accessibilityHint(liveTypingOn
+                    ? "Every character you type goes to the PC as you type it. Deleting sends Backspace, Return sends Enter."
+                    : (settings.virtualInputKeepText
+                       ? "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts. It is kept after sending, so Send repeats it."
+                       : "Typed on the PC as part of the combination. With no modifiers it is sent as literal text, including umlauts."))
                 // Emptying the field otherwise means holding Backspace on the
                 // on-screen keyboard, character by character — and with "keep
                 // text" on, the field is *meant* to stay filled, so clearing it
@@ -210,7 +254,12 @@ struct VirtualInputView: View {
                 // focused element, and an announcement alongside it clips.
                 .accessibilityActions {
                     if !text.isEmpty {
-                        Button("Clear text") { text = "" }
+                        // Silent even with live typing on: this empties the
+                        // local buffer, it does not un-type what the PC has
+                        // already received. Backspacing it away is what does
+                        // that, and that is the user's call, not a side effect
+                        // of tidying the field.
+                        Button("Clear text") { setTextSilently("") }
                     }
                 }
 
@@ -224,20 +273,49 @@ struct VirtualInputView: View {
             .accessibilityLabel("Dismiss keyboard")
             .accessibilityHint("Closes the on-screen keyboard")
 
-            Toggle(isOn: Binding(
-                get: { settings.virtualInputKeepText },
-                set: { settings.virtualInputKeepText = $0 }
-            )) {
-                Image(systemName: settings.virtualInputKeepText ? "pin.fill" : "pin")
+            liveTypingToggle
+
+            // Meaningless while live typing is on — there is no send for the
+            // text to survive.
+            if !liveTypingOn {
+                Toggle(isOn: Binding(
+                    get: { settings.virtualInputKeepText },
+                    set: { settings.virtualInputKeepText = $0 }
+                )) {
+                    Image(systemName: settings.virtualInputKeepText ? "pin.fill" : "pin")
+                }
+                .toggleStyle(.button)
+                // The button style carries the state visually (tinted) and as
+                // the "selected" trait; the explicit value guarantees VoiceOver
+                // speaks it either way, since nothing else on screen shows it.
+                .accessibilityLabel("Keep text after sending")
+                .accessibilityValue(settings.virtualInputKeepText ? "On" : "Off")
+                .accessibilityHint("On: Send leaves the text in the field, so pressing Send again repeats it. Off: the field is cleared after each send.")
             }
-            .toggleStyle(.button)
-            // The button style carries the state visually (tinted) and as the
-            // "selected" trait; the explicit value guarantees VoiceOver speaks
-            // it either way, since nothing else on screen shows it.
-            .accessibilityLabel("Keep text after sending")
-            .accessibilityValue(settings.virtualInputKeepText ? "On" : "Off")
-            .accessibilityHint("On: Send leaves the text in the field, so pressing Send again repeats it. Off: the field is cleared after each send.")
         }
+    }
+
+    /// The mode switch, in the text row rather than in Settings for the same
+    /// reason the keep-text pin is: it is flipped several times a session,
+    /// unlike the set-and-forget pad settings.
+    private var liveTypingToggle: some View {
+        Toggle(isOn: Binding(
+            get: { settings.virtualInputLiveTyping },
+            set: { on in
+                settings.virtualInputLiveTyping = on
+                // Whatever is already in the field belongs to the old mode:
+                // turning live typing on must not flush it to the PC, and
+                // turning it off must not leave the mirror stale.
+                liveMirror = text
+                liveWarned = false
+            }
+        )) {
+            Image(systemName: settings.virtualInputLiveTyping ? "bolt.fill" : "bolt")
+        }
+        .toggleStyle(.button)
+        .accessibilityLabel("Send as you type")
+        .accessibilityValue(settings.virtualInputLiveTyping ? "On" : "Off")
+        .accessibilityHint("On: every character you type in the field goes to the PC immediately, deleting sends Backspace, and Return sends Enter — there is no Send button. Off: type a whole string and press Send.")
     }
 
     private var sendButton: some View {
@@ -301,6 +379,12 @@ struct VirtualInputView: View {
             }
             Section("Letters and text") {
                 Text("Letters, digits and punctuation are not on the pad. They go in the text field instead, typed with the iPhone's own keyboard — which is faster than any keyboard we could draw on glass, and which Braille Screen Input and dictation already work with.")
+                if liveTypingOn {
+                    Text("Send as you type is on, so the field is a direct line to the PC: every character arrives the moment you type it, deleting a character sends Backspace, and Return sends Enter. There is no Send button — nothing is waiting to be sent. Modifiers that are on wrap every character and stay on, so with Caps Lock on you can type h, h, h and move heading to heading.")
+                    Text("Clear text empties the field only; it does not take back what the PC already received. Backspace on the keyboard is what does that.")
+                } else {
+                    Text("Turn on Send as you type — the lightning button in the text row — to make the field a direct line instead: characters go to the PC as you type them, without a Send press. That is the mode for typing into something on the PC; leave it off to build one string and fire it in one go.")
+                }
                 Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers turned on, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
                 Text("For screen-reader navigation on the PC — Caps Lock plus H for headings, say — turn Caps Lock on at the pad, type the letter once, and turn on Keep text after sending: every further heading is then a single Send.")
                 Text("To empty the field in one step, focus it with VoiceOver and use its Clear text action — swipe up or down to find it, then double tap.")
@@ -322,7 +406,9 @@ struct VirtualInputView: View {
                 }
             }
             Section("Sending") {
-                if settings.virtualInputKeepText {
+                if liveTypingOn {
+                    Text("Send as you type is on, so there is no Send button for text. Keys sent from the pad still go straight out, wrapped in whatever modifiers are on, and a two-finger double tap with the field empty sends the modifiers by themselves.")
+                } else if settings.virtualInputKeepText {
                     Text("Send — or a two-finger double tap anywhere on this tab — delivers the modifiers that are on plus the typed text. Keep text after sending is on, so the modifiers reset but the text stays in the field: pressing Send again repeats it. Clear the field yourself, or turn the button off, when you are done with that text.")
                 } else {
                     Text("Send — or a two-finger double tap anywhere on this tab — delivers the modifiers that are on plus the typed text, then resets both. To repeat the same text, turn on Keep text after sending, the button just left of Send.")
@@ -418,7 +504,94 @@ struct VirtualInputView: View {
         holdWrap = []
     }
 
+    /// Type a run of characters on the PC, inside whatever modifier wrap is
+    /// already pressed. Returns how many characters had no US-position key and
+    /// were skipped — only possible while modifiers are on, since the plain
+    /// path is unicode and can carry anything.
+    ///
+    /// Shared by Send and live typing so the two can never disagree about what
+    /// a character means.
+    private func typeCharacters<S: StringProtocol>(_ characters: S, wrapped: Bool) -> Int {
+        guard wrapped else {
+            // Layout-proof: the agent injects the codepoint itself, so umlauts
+            // arrive whatever the PC's layout is.
+            for scalar in characters.unicodeScalars { bridge.sendCharacter(scalar) }
+            return 0
+        }
+        // Shortcut semantics: US-position keys, like physical capture.
+        var skipped = 0
+        for character in characters {
+            guard let key = USCharVK.key(for: character) else {
+                skipped += 1
+                continue
+            }
+            let wrapInShift = key.shift && !latchedVKs.contains(VK.shift)
+            if wrapInShift { bridge.sendKey(vk: VK.shift, pressed: true) }
+            tap(key.vk)
+            if wrapInShift { bridge.sendKey(vk: VK.shift, pressed: false) }
+        }
+        return skipped
+    }
+
+    /// Move the field without live typing noticing. Used for edits the PC must
+    /// not see — clearing the buffer, and Send's own reset — by advancing the
+    /// mirror in the same breath, so the diff comes out empty.
+    private func setTextSilently(_ value: String) {
+        text = value
+        liveMirror = value
+    }
+
+    /// Live typing: send exactly what changed in the field.
+    ///
+    /// The diff is a common prefix, which covers the two things that actually
+    /// happen — characters appended, and characters backspaced off the end —
+    /// and degrades sanely on the rare third (an edit in the middle re-types
+    /// the tail). Deletions go as **plain Backspace, never wrapped**: deleting
+    /// is an edit, not a shortcut, and Caps Lock plus Backspace is not what
+    /// anybody meant.
+    private func liveSend(to newValue: String) {
+        guard liveTypingOn, liveMirror != newValue else { return }
+        // Always advance the mirror, success or not: replaying a keystroke the
+        // next time round would be worse than dropping it.
+        defer { liveMirror = newValue }
+        guard bridge.forwardingEnabled else {
+            warnLiveOnce("Not typed on the PC. Forwarding is off.")
+            return
+        }
+        guard bridge.status.isConnected else {
+            warnLiveOnce("Not typed on the PC. \(bridge.status.announcement)")
+            return
+        }
+        liveWarned = false
+
+        let shared = liveMirror.commonPrefix(with: newValue)
+        let removed = liveMirror.count - shared.count
+        let added = newValue.dropFirst(shared.count)
+
+        for _ in 0..<removed { tap(VK.back) }
+
+        if !added.isEmpty {
+            let wrap = wrapKeys.map(\.vk)
+            for vk in wrap { bridge.sendKey(vk: vk, pressed: true) }
+            let skipped = typeCharacters(added, wrapped: !wrap.isEmpty)
+            for vk in wrap.reversed() { bridge.sendKey(vk: vk, pressed: false) }
+            if skipped > 0 {
+                announce("\(skipped) characters have no US key in a shortcut and were skipped")
+            }
+        }
+    }
+
+    private func warnLiveOnce(_ message: String) {
+        guard !liveWarned else { return }
+        liveWarned = true
+        announce(message)
+    }
+
     private func send() {
+        if liveTypingOn, !text.isEmpty {
+            announce("Live typing is on. The text is sent as you type it.")
+            return
+        }
         guard hasSomethingToSend else {
             announce("Nothing selected to send")
             return
@@ -442,24 +615,7 @@ struct VirtualInputView: View {
 
         var skippedCharacters = 0
         if !text.isEmpty {
-            if wrap.isEmpty {
-                // Plain text: unicode path, layout-proof, types verbatim.
-                for scalar in text.unicodeScalars {
-                    bridge.sendCharacter(scalar)
-                }
-            } else {
-                // Shortcut semantics: US-position keys, like physical capture.
-                for character in text {
-                    guard let key = USCharVK.key(for: character) else {
-                        skippedCharacters += 1
-                        continue
-                    }
-                    let wrapInShift = key.shift && !latchedVKs.contains(VK.shift)
-                    if wrapInShift { bridge.sendKey(vk: VK.shift, pressed: true) }
-                    tap(key.vk)
-                    if wrapInShift { bridge.sendKey(vk: VK.shift, pressed: false) }
-                }
-            }
+            skippedCharacters = typeCharacters(text, wrapped: !wrap.isEmpty)
         }
 
         for vk in wrap.reversed() { bridge.sendKey(vk: vk, pressed: false) }
@@ -468,7 +624,7 @@ struct VirtualInputView: View {
         // cleared — unless the text is pinned, in which case it stays put so
         // the same keystroke can be fired again with a single Send.
         latchedVKs.removeAll()
-        if !settings.virtualInputKeepText { text = "" }
+        if !settings.virtualInputKeepText { setTextSilently("") }
 
         var confirmation = "Sent \(sentDescription)"
         if skippedCharacters > 0 {

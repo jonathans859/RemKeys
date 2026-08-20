@@ -9,14 +9,17 @@ final class AppSettingsTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         XCTAssertFalse(settings.virtualPadExtendedFKeys)
         XCTAssertFalse(settings.virtualInputKeepText)
+        XCTAssertFalse(settings.virtualInputLiveTyping)
         XCTAssertTrue(settings.virtualPadRichHaptics)
 
         settings.virtualPadExtendedFKeys = true
         settings.virtualInputKeepText = true
+        settings.virtualInputLiveTyping = true
         settings.virtualPadRichHaptics = false
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertTrue(reloaded.virtualPadExtendedFKeys)
         XCTAssertTrue(reloaded.virtualInputKeepText)
+        XCTAssertTrue(reloaded.virtualInputLiveTyping)
         XCTAssertFalse(reloaded.virtualPadRichHaptics)
     }
 

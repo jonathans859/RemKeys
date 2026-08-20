@@ -307,9 +307,10 @@ final class KeyPadUIView: UIView {
                     label.minimumScaleFactor = 0.5
                     label.textAlignment = .center
                     label.layer.cornerRadius = 8
-                    label.layer.borderWidth = 1
-                    label.layer.borderColor = UIColor.separator
-                        .resolvedColor(with: traitCollection).cgColor
+                    // Real values are set by `refreshLabels` on the next
+                    // pass; these just keep a fresh label from flashing
+                    // borderless.
+                    label.layer.borderWidth = 1.5
                     label.layer.masksToBounds = true
                     label.isAccessibilityElement = false
                     addSubview(label)
@@ -332,8 +333,17 @@ final class KeyPadUIView: UIView {
     /// along with both, so the state survives a display that is washing the
     /// colour out and does not rest on hue alone.
     private func refreshLabels() {
-        let separator = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+        // NOT `UIColor.separator`: that is a hairline meant to divide rows of
+        // text, and against the pad's own fill it left the key outlines almost
+        // invisible (field-reported 2026-08-20). A translucent label colour
+        // adapts to light and dark the same way but lands far darker/lighter
+        // against the key.
+        let outline = UIColor.label.withAlphaComponent(0.45)
+            .resolvedColor(with: traitCollection).cgColor
         let accent = tintColor.resolvedColor(with: traitCollection)
+        // A solid accent key needs an outline that is *not* accent, or the
+        // border disappears into the fill.
+        let downOutline = UIColor.label.resolvedColor(with: traitCollection).cgColor
         for (rowIndex, row) in rows.enumerated() {
             for (columnIndex, key) in row.enumerated() {
                 guard rowIndex < labels.count, columnIndex < labels[rowIndex].count else { continue }
@@ -351,8 +361,10 @@ final class KeyPadUIView: UIView {
                     ofSize: labelPointSize,
                     weight: on || down ? .semibold : .regular
                 )
-                label.layer.borderWidth = on || down ? 2.5 : 1
-                label.layer.borderColor = on || down ? accent.cgColor : separator
+                label.layer.borderWidth = on || down ? 3 : 1.5
+                label.layer.borderColor = down
+                    ? downOutline
+                    : (on ? accent.cgColor : outline)
             }
         }
     }
@@ -376,7 +388,7 @@ final class KeyPadUIView: UIView {
     /// Gap between key rectangles, so the pad reads as keys rather than as a
     /// wireframe grid. Purely cosmetic — hit testing uses the full cell, so no
     /// touch can land "between" two keys.
-    private static let keyGap: CGFloat = 3
+    private static let keyGap: CGFloat = 4
 
     /// Share of the pad's height given to the modifier block.
     ///

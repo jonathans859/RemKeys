@@ -224,6 +224,25 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   the text field, and single-letter screen-reader navigation is Caps Lock on
   the pad + the letter typed once + sticky text (`virtualInputKeepText`), after
   which every repeat is one Send.
+- **Live typing** (`virtualInputLiveTyping`, off by default, requested
+  2026-08-20) is the other half of that bargain: with it on the field is a
+  **direct line** — each character goes out as it is typed, each deletion sends
+  a plain Backspace, Return sends Enter, and **Send and the keep-text pin are
+  hidden** because neither has anything left to do. That is the mode for
+  *typing at* the PC (a filename, a search box) where a Send press between
+  letters was the entire cost. Modifiers keep wrapping every character and
+  deliberately **do not reset**, so Caps Lock + h + h + h walks headings.
+  Mechanics worth keeping straight: the change is diffed against a
+  **`liveMirror`** of what the PC has actually received, not against
+  `onChange`'s old value, which is what lets a programmatic edit be made
+  invisible (`setTextSilently` moves both) — Clear text empties the buffer
+  without un-typing anything on the PC, and Send's own reset doesn't replay.
+  The diff is a **common prefix**: it covers append and backspace-off-the-end
+  exactly and re-types the tail on a mid-string edit. Deletions are **never
+  wrapped in modifiers** — deleting is an edit, not a shortcut.
+  `autocorrectionDisabled` stops being cosmetic here: a correction rewrites a
+  word behind the diff and would go out as a burst of backspaces and retypes.
+  Failures warn **once per outage** (`liveWarned`), not once per keystroke.
 - **Press and hold is one stage now** (`virtualPadHoldEnabled`,
   `virtualPadHoldDelay`, default 0.8 s counted from the touch): the key is
   **pressed down on the PC** and stays down until the finger lifts, so it
@@ -247,8 +266,13 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   down on the PC, both with a thicker tinted border — not by tinted text, which
   was too quiet to find at a glance (field-reported 2026-08-10). The washes
   started at 20%/45% and were raised on 2026-08-20: 20% over the pad's own grey
-  was still too quiet to spot a live modifier at a glance. **Slider mode was
-  removed** in the rebuild: it
+  was still too quiet to spot a live modifier at a glance. Key outlines use
+  **`label` at 45% alpha, not `UIColor.separator`** (raised the same day):
+  `separator` is a hairline meant to divide rows of text and left the keys
+  looking borderless, which on a pad aimed at by feel is the one place an
+  outline earns its keep. A key that is *down* takes a solid `label` border
+  instead of an accent one, or the border vanishes into its own fill.
+  **Slider mode was removed** in the rebuild: it
   existed as the fallback for zones too small to hit, which is the problem the
   three-column grid solves.
 - **Haptics carry key state while dragging** (`virtualPadRichHaptics`, on by
