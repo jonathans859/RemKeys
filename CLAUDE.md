@@ -211,6 +211,12 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   edge, Down on the bottom, Left and Right at the sides, Enter in the centre,
   Home/PgUp and End/PgDn in the corners. The position of the key *is* its
   meaning — nothing to learn, which no 60-key layout can offer.
+- **Rows divide their own width**, so they don't all have to hold three keys.
+  The Editing page ends in two half-width zones (Menu, Enter) since Print
+  Screen was dropped as unused (field decision 2026-08-20) — a short row beats
+  a dead corner, both halves are still bounded by a corner, and Enter gets the
+  biggest target on the pad. Print Screen is no longer sendable from the pad at
+  all; that is deliberate.
 - **Letters are deliberately not on the pad.** They were the argument for the
   keyboard layout and the argument was sound, but the answer is not to redraw a
   keyboard at 23 pt a key: the iOS keyboard (with Braille Screen Input and
@@ -237,9 +243,12 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   extra hop (2026-07-19). Drag announces the key under the finger
   (interrupting + haptic tick), lift sends it, lift on a modifier toggles it,
   two-finger tap clears the modifiers, an extra finger mid-drag aborts. State
-  is carried by a **filled background** — light tint = on, strong tint = down
-  on the PC — not by tinted text, which was too quiet to find at a glance
-  (field-reported 2026-08-10). **Slider mode was removed** in the rebuild: it
+  is carried by a **filled background** — half-strength tint = on, solid tint =
+  down on the PC, both with a thicker tinted border — not by tinted text, which
+  was too quiet to find at a glance (field-reported 2026-08-10). The washes
+  started at 20%/45% and were raised on 2026-08-20: 20% over the pad's own grey
+  was still too quiet to spot a live modifier at a glance. **Slider mode was
+  removed** in the rebuild: it
   existed as the fallback for zones too small to hit, which is the problem the
   three-column grid solves.
 - **Haptics carry key state while dragging** (`virtualPadRichHaptics`, on by

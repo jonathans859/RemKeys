@@ -39,6 +39,10 @@ import BridgeCore
 /// - Two-finger tap clears every modifier that is on. An extra finger landing
 ///   mid-drag aborts the drag, so nothing fires.
 ///
+/// State shows as a **filled key**: plain grey off, half-strength tint on,
+/// solid tint down on the PC, with a thicker tinted border on both live
+/// states so it never rests on hue alone.
+///
 /// **One zone, one vibration** — and with `virtualPadRichHaptics` on, how hard
 /// it is *is* the key's state: light tick = off, firmer knock = turned on,
 /// hard knock = down on the PC. Encoding state as extra pulses was tried first
@@ -319,10 +323,17 @@ final class KeyPadUIView: UIView {
 
     /// Three visibly distinct key states. A **filled background** is the
     /// primary cue (field-requested 2026-08-10): tinted text alone was too
-    /// quiet to find at a glance. Off is a plain key fill, on is a light tint
-    /// wash, down-on-the-PC is the same hue at full strength, so the two live
-    /// states can't be mistaken for each other.
+    /// quiet to find at a glance.
+    ///
+    /// The washes used to be 20% and 45% tint, and 20% was still too quiet to
+    /// spot at a glance (field-reported 2026-08-20). They are now **half
+    /// strength for on and solid for down**, which is a much wider gap from a
+    /// plain grey key and from each other. A **thicker tinted border** rides
+    /// along with both, so the state survives a display that is washing the
+    /// colour out and does not rest on hue alone.
     private func refreshLabels() {
+        let separator = UIColor.separator.resolvedColor(with: traitCollection).cgColor
+        let accent = tintColor.resolvedColor(with: traitCollection)
         for (rowIndex, row) in rows.enumerated() {
             for (columnIndex, key) in row.enumerated() {
                 guard rowIndex < labels.count, columnIndex < labels[rowIndex].count else { continue }
@@ -330,22 +341,27 @@ final class KeyPadUIView: UIView {
                 let down = key.vk == heldVK
                 let on = latchedKeys.contains(key.vk)
                 label.backgroundColor = down
-                    ? tintColor.withAlphaComponent(0.45)
-                    : (on ? tintColor.withAlphaComponent(0.2) : .tertiarySystemFill)
-                // Dark text on the strong fill, tinted text on the light one:
-                // tint-on-tint at 45% would be the one unreadable combination.
-                label.textColor = on && !down ? tintColor : .label
+                    ? accent
+                    : (on ? accent.withAlphaComponent(0.5) : .tertiarySystemFill)
+                // White on the solid fill, the ordinary label colour on the
+                // half wash — which stays readable in both light and dark
+                // mode, where a tinted label on a tinted fill would not.
+                label.textColor = down ? .white : .label
                 label.font = .systemFont(
                     ofSize: labelPointSize,
                     weight: on || down ? .semibold : .regular
                 )
+                label.layer.borderWidth = on || down ? 2.5 : 1
+                label.layer.borderColor = on || down ? accent.cgColor : separator
             }
         }
     }
 
+    /// Borders are CGColors, which don't follow light/dark mode by themselves.
+    /// `refreshLabels` already resolves them against the current traits, so
+    /// re-running it is the whole fix.
     private func updateBorderColors() {
-        let border = UIColor.separator.resolvedColor(with: traitCollection).cgColor
-        for label in labels.flatMap({ $0 }) { label.layer.borderColor = border }
+        refreshLabels()
     }
 
     private var labelPointSize: CGFloat {

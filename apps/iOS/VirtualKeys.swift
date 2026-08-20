@@ -27,8 +27,10 @@ struct VirtualKey: Identifiable, Equatable {
     var id: UInt16 { vk }
 }
 
-/// One screenful of the pad's upper block: rows of exactly
-/// `VirtualKeys.columns` keys.
+/// One screenful of the pad's upper block. Rows are normally
+/// `VirtualKeys.columns` keys wide, but each row divides its own width, so a
+/// short row simply gets wider zones — which is how the Editing page ends in
+/// two half-width keys rather than a dead corner.
 struct PadPage: Identifiable, Equatable {
     let title: String
     let rows: [[VirtualKey]]
@@ -123,6 +125,13 @@ enum VirtualKeys {
     /// a real keyboard: Backspace deletes to the left, Delete to the right.
     /// Enter repeats here rather than being missing — it is the most-sent key
     /// on the pad, and a duplicate zone costs nothing.
+    ///
+    /// The bottom row is **two half-width zones, not three**. Print Screen was
+    /// dropped as unused (field decision 2026-08-20), and rather than leave a
+    /// dead corner the row splits in half: both zones are still bounded by a
+    /// corner, so they stay describable, and Enter — the key sent most often —
+    /// gets the largest target on the pad. Rows do not have to match column
+    /// counts; each one divides its own width.
     private static let editing = PadPage(title: "Editing", rows: [
         [
             VirtualKey(name: "Escape", vk: VK.escape),
@@ -137,7 +146,6 @@ enum VirtualKeys {
         [
             VirtualKey(name: "Menu", vk: VK.apps, spoken: "Context menu"),
             VirtualKey(name: "Enter", vk: VK.return),
-            VirtualKey(name: "Print Screen", vk: VK.snapshot),
         ],
     ])
 
