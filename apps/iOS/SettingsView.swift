@@ -78,37 +78,20 @@ struct SettingsView: View {
                 Text("There is no single correct way to map Apple modifiers to Windows ones, so Option and Command each map per physical side. Multi-OS keyboards often present their Win-labeled key as Command — press a key and check Last key seen in the Start tab's info sheet to find out what it reports as. Shift and Control always map straight across. AltGr matters on layouts like German, where it is the only way to type characters such as @ and the braces.")
             }
             Section("Key pad") {
-                switch settings.virtualPadLayout {
-                case .bands:
-                    Text("The pad shows key bands — modifiers, editing, navigation and the function keys — in both orientations. Choose one of the keyboard options to get letters, digits and punctuation as well, arranged as they are on a real PC keyboard.")
-                case .keyboardInLandscape:
-                    Text("The pad shows key bands while the device is upright and a whole PC keyboard once it is turned sideways. Sideways is where that fits: the screen is then close to a keyboard's proportions, and the keys come out about the size of the ones on the on-screen keyboard. Upright there is no room, so the bands stay.")
-                case .keyboardAlways:
-                    Text("The pad always shows a whole PC keyboard. Upright its keys are narrow — dragging still finds them, but sideways is where they reach a comfortable size.")
-                }
-                if settings.interfaceOrientationLock != .device {
-                    Text("The app is pinned: \(settings.interfaceOrientationLock.displayName.lowercased()). This outranks the device's own rotation lock, which is the point — with that lock on, the app is otherwise never handed a sideways screen and the keyboard layout can't reach full size. Set it back to Follow the device to rotate normally again.")
-                } else {
-                    Text("The app follows the device's rotation. If your device's rotation lock is on it will never turn sideways, and the keyboard layout stays at its cramped upright width — pin the app to Stay sideways to get around that.")
-                }
-                if settings.virtualPadLayout != .bands {
-                    Text("The keyboard is named for a \(settings.pcKeyboardLayout.displayName) PC. Keys travel by position and the PC's own layout decides the character, so this setting only changes what you see and hear — set it to match the PC and the letter you hear is the letter that arrives.")
-                }
-                Text(settings.virtualPadSliderMode
-                     ? "The key pad currently uses slider gestures: swipe between rows and through keys, tap to send. Turn the toggle off for the grid, where dragging explores the keys and lifting sends."
-                     : "The key pad currently uses the grid: dragging explores the keys and lifting sends. Turn the slider toggle on for row-based swiping instead — an alternative if the grid zones feel too small.")
+                Text("The pad is three zones wide and two blocks tall: one page of keys on top — \(pageCountLabel) — and the six modifiers permanently across the bottom two rows, where they never move. Two-finger swipe left or right on the pad changes the page; the page control at the top left of the Virtual Input screen does the same and can be flicked up or down.")
                 Text(settings.virtualPadExtendedFKeys
-                     ? "F13 to F24 are shown as an extra row, which makes every other row a bit shorter."
-                     : "F13 to F24 are hidden; enable them to add a row at the cost of shorter ones elsewhere.")
+                     ? "F13 to F24 are available as a further page. The other pages are unaffected — an extra page costs no room."
+                     : "F13 to F24 are hidden. Adding them makes one more page and takes nothing away from the others.")
                 Text(settings.virtualPadRichHaptics
                      ? "Vibrations report state by how hard they are: the usual light tick for a key that is off, a firmer knock for one that is turned on, and a hard knock for a key held down on the PC. Always one vibration per key."
                      : "Vibrations are plain: the same light tick for every key, whatever its state.")
+                Text("Letters, digits and punctuation are deliberately not on the pad — they go in the text field, typed with the iPhone's own keyboard, which is faster than anything a three-wide pad could offer.")
             }
             Section("Hold a key on the pad") {
                 Text(settings.virtualPadHoldEnabled
-                     ? "Holding a key on the pad for \(secondsLabel(settings.virtualPadLatchDelay)) turns it on like a modifier, so it wraps everything you send afterwards — Caps Lock lives in that row too, for screen-reader keys such as NVDA's. Keep holding for another \(secondsLabel(settings.virtualPadHoldDelay)) and the key is pressed down on the PC and repeats until you lift, which also turns it off again."
-                     : "Holding is off, so the pad only acts when you lift: modifiers toggle, other keys send. Turn it on to hold a key down on the PC for key repeat, or to turn a key on without sending it.")
-                Text("Vibrations mark every stage whether or not the spoken cues are on: a gentle one when the key turns on, a firmer one when it goes down on the PC, a light one when it is released.")
+                     ? "Holding a key on the pad for \(secondsLabel(settings.virtualPadHoldDelay)) presses it down on the PC, where it stays — and repeats — until you lift your finger. That is how to delete a run of text with Backspace, or keep scrolling with Down. It works on modifiers too, which is how to send a plain Caps Lock press and flip the lock itself."
+                     : "Holding is off, so the pad only acts when you lift: modifiers toggle, other keys send. Turn it on to hold a key down on the PC for key repeat.")
+                Text("Vibrations mark the hold whether or not the spoken cues are on: a firm one when the key goes down on the PC, a light one when it is released.")
             }
         }
     }
@@ -158,51 +141,11 @@ struct SettingsView: View {
 
     private var virtualInputSection: some View {
         Section {
-            Picker("Key pad layout", selection: Binding(
-                get: { settings.virtualPadLayout },
-                set: { settings.virtualPadLayout = $0 }
-            )) {
-                ForEach(VirtualPadLayout.allCases) { layout in
-                    Text(layout.displayName).tag(layout)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityHint("Key bands are the modifier, editing, navigation and function-key rows. The keyboard is a whole PC key block including letters and digits, which only has room for usable keys when the device is sideways. Also reachable from Pad options on the Virtual Input screen.")
-
-            Picker("Screen orientation", selection: Binding(
-                get: { settings.interfaceOrientationLock },
-                set: { settings.interfaceOrientationLock = $0 }
-            )) {
-                ForEach(InterfaceOrientationLock.allCases) { lock in
-                    Text(lock.displayName).tag(lock)
-                }
-            }
-            .pickerStyle(.menu)
-            .accessibilityHint("Pins the app to one orientation instead of following the device. Stay sideways turns the app even when the device's own rotation lock is on, which is how to reach the full-size keyboard layout.")
-
-            if settings.virtualPadLayout != .bands {
-                Picker("PC keyboard layout", selection: Binding(
-                    get: { settings.pcKeyboardLayout },
-                    set: { settings.pcKeyboardLayout = $0 }
-                )) {
-                    ForEach(PCKeyboardLayout.allCases) { layout in
-                        Text(layout.displayName).tag(layout)
-                    }
-                }
-                .pickerStyle(.menu)
-                .accessibilityHint("Names the keys on the keyboard layout after the layout your PC is set to. It never changes what is sent — keys always travel by position, and the PC decides the character.")
-            }
-
-            Toggle("Key pad uses slider gestures", isOn: Binding(
-                get: { settings.virtualPadSliderMode },
-                set: { settings.virtualPadSliderMode = $0 }
-            ))
-            .accessibilityHint("Off: drag on the pad to hear keys and lift to send. On: swipe left or right to choose a row, up or down to choose its key, tap to send.")
             Toggle("Key pad includes F13 to F24", isOn: Binding(
                 get: { settings.virtualPadExtendedFKeys },
                 set: { settings.virtualPadExtendedFKeys = $0 }
             ))
-            .accessibilityHint("Adds a row of F13 to F24 to the key pad. Every other row gets less room.")
+            .accessibilityHint("Adds F13 to F24 as one more page on the key pad. The other pages keep their size.")
             Toggle("Vibrations report key state", isOn: Binding(
                 get: { settings.virtualPadRichHaptics },
                 set: { settings.virtualPadRichHaptics = $0 }
@@ -211,51 +154,42 @@ struct SettingsView: View {
         } header: {
             Text("Key pad")
         } footer: {
-            Text("Keys sent from the key pad are always wrapped in the keys currently turned on.")
+            Text("The pad is three zones wide: one page of keys on top, the six modifiers fixed across the bottom. Keys sent from it are always wrapped in the modifiers that are on.")
         }
     }
 
-    /// The hold gesture's timings. Sliders rather than steppers: one
-    /// adjustable element per value beats a dozen taps, and the value is
-    /// spoken in real units.
+    /// The hold gesture's timing. A slider rather than a stepper: one
+    /// adjustable element beats a dozen taps, and the value is spoken in real
+    /// units.
     private var holdSection: some View {
         Section {
-            Toggle("Hold a key to turn it on", isOn: Binding(
+            Toggle("Hold a key to press it down", isOn: Binding(
                 get: { settings.virtualPadHoldEnabled },
                 set: { settings.virtualPadHoldEnabled = $0 }
             ))
-            .accessibilityHint("On: holding a key on the pad turns it on like a modifier, and holding longer presses it down on the PC until you lift. Off: the pad only sends on lift.")
+            .accessibilityHint("On: holding a key on the pad presses it down on the PC until you lift, so it repeats there. Off: the pad only sends on lift.")
 
             if settings.virtualPadHoldEnabled {
                 delaySlider(
-                    title: "Turns on after",
-                    value: Binding(
-                        get: { settings.virtualPadLatchDelay },
-                        set: { settings.virtualPadLatchDelay = $0 }
-                    ),
-                    range: AppSettings.latchDelayRange,
-                    hint: "How long a key has to be held before it turns on. Default 0.6 seconds."
-                )
-                delaySlider(
-                    title: "Then presses down after",
+                    title: "Presses down after",
                     value: Binding(
                         get: { settings.virtualPadHoldDelay },
                         set: { settings.virtualPadHoldDelay = $0 }
                     ),
                     range: AppSettings.holdDelayRange,
-                    hint: "Further time, counted from the moment the key turned on, before it is pressed down on the PC. Default 0.6 seconds."
+                    hint: "How long a key has to be held, from the moment you touch it, before it is pressed down on the PC. Default 0.8 seconds."
                 )
 
-                Toggle("Speak the hold stages", isOn: Binding(
+                Toggle("Speak the hold", isOn: Binding(
                     get: { settings.virtualPadHoldSpeech },
                     set: { settings.virtualPadHoldSpeech = $0 }
                 ))
-                .accessibilityHint("On: the pad says when a key turns on, is pressed down, and is released. Off: only the vibrations mark the stages.")
+                .accessibilityHint("On: the pad says when a key is pressed down on the PC and when it is released. Off: only the vibrations mark it.")
             }
         } header: {
             Text("Hold a key on the pad")
         } footer: {
-            Text("Holding a key turns it on like a modifier; holding longer presses it down on the PC so it repeats, until you lift your finger — lifting from there turns it off again. A gentle vibration marks turning on, a firmer one the press.")
+            Text("Holding a key presses it down on the PC, where it repeats until you lift your finger. A firm vibration marks the press. Modifiers are turned on by a plain lift instead, so holding one sends the key itself — that is how to flip Caps Lock on the PC.")
         }
     }
 
@@ -304,6 +238,15 @@ struct SettingsView: View {
     private func step(_ value: Binding<Double>, by delta: Double, in range: ClosedRange<Double>) {
         let stepped = ((value.wrappedValue + delta) * 10).rounded() / 10
         value.wrappedValue = min(max(stepped, range.lowerBound), range.upperBound)
+    }
+
+    /// Names the pad's pages for the info sheet, so it never lists a page
+    /// that isn't there.
+    private var pageCountLabel: String {
+        let titles = VirtualKeys.pages(includeExtendedFKeys: settings.virtualPadExtendedFKeys)
+            .map(\.title)
+        guard let last = titles.last, titles.count > 1 else { return titles.first ?? "" }
+        return titles.dropLast().joined(separator: ", ") + " and " + last
     }
 
     private func secondsLabel(_ seconds: Double) -> String {

@@ -173,194 +173,132 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
     neither never reached the app at all.
 
 ### iOS virtual input (`apps/iOS/VirtualInputView.swift`)
-- On-screen key sender (iOS-only tab), VoiceOver-first. The UI is the
-  **direct-touch key pad** plus a text field, a "will send" readout, and
-  Send (also magic tap on that tab). The earlier **adjustable-rows UI was
-  built, refined twice, and retired 2026-07-19** once the pad worked — the
-  user chose pad-only to give the pad the screen space. Lessons that must
-  survive the rows' removal: send-on-adjust fires every intermediate value
-  (field-rejected 2026-07-18, don't reintroduce anywhere); VoiceOver
-  double-tap activation latency is system-inherent — which is exactly why
-  the pad exists.
-- **Two arrangements, picked by the pad's own aspect ratio**
-  (`virtualPadLayout`, added 2026-08-10): the original **key bands** and a
-  full **PC keyboard** (`VirtualKeys.keyboardRows`). Default
-  `keyboardInLandscape` = bands upright, keyboard once the pad is wider than
-  tall (`bounds.width > bounds.height * 1.2` — the *shape*, not the size
-  class, because an iPad in a wide Split View slot is "regular" either way).
-  Landscape gives ~718×278 pt, ≈2.6:1 against a real keyboard's ≈3:1, so keys
-  land at ~48×46 pt — bigger than iOS's own landscape keyboard keys; portrait
-  can never hold one, which is why orientation is the switch. Why bother: the
-  bands ask a blind user to memorise "third band, fifth key", a keyboard asks
-  where W is — and it finally puts letters on the pad, so single-letter NVDA
-  navigation is one drag and lift instead of the text field plus Send.
-  Shape rules that must survive edits: **every row sums to 15 grid units**
-  (rows normalise to their own total, so equal totals are what makes keys line
-  up between rows — there's a DEBUG assert), the main block keeps its real
-  shape **anchored to the bottom edge** with optional rows added at the *top*
-  (so the edges stay the landmarks a glass surface otherwise lacks), the
-  nav/edit cluster is unrolled into its own row rather than a block on the
-  right, and arrows run flat along the bottom row (an inverted T needs
-  half-height keys). Both Shifts send the generic VK, so latching one lights
-  both — what's latched is *Shift*, not a side.
-  Keys are still **positional**: `pcKeyboardLayout` (US/German) renames and
-  re-speaks them only — QWERTZ swaps the Y/Z *labels* and gives left Shift a
-  unit back for the ISO 102nd key, while the VK sent is unchanged. Hearing
-  "Y" while the PC types z is the failure this setting exists to prevent.
-  A **Pad options menu** (top-left toolbar, requested 2026-08-10) carries both
-  shape decisions: the 3-way layout picker and the orientation pin below.
-  Inline `Picker`s inside a `Menu`, not buttons — that is what gives each
-  option a checkmark and the "selected" trait, so VoiceOver reads back which
-  one is active. The menu label is silent about changes on purpose: its own
-  `accessibilityValue` changes and VoiceOver speaks that. The pad decides its
-  arrangement itself, so it is the only thing that knows which one is live: it
-  reports back via `onLayoutChange` (dispatched off the layout pass, since it
-  ends in a SwiftUI `@State` write).
-- **The orientation pin** (`interfaceOrientationLock`, `OrientationLock.swift`,
-  requested 2026-08-10) exists because **iOS rotation lock is usually on for a
-  VoiceOver user**, and with it on the app is never handed a landscape frame
-  at all — leaving the keyboard layout stuck at portrait's cramped widths with
-  nothing the app could do. Requesting the orientation ourselves outranks that
-  lock. Two halves, neither sufficient alone: `AppDelegate
-  .application(_:supportedInterfaceOrientationsFor:)` answers from
-  `OrientationLock.mask`, and `requestGeometryUpdate` actually moves the
-  screen — change the mask without asking and nothing turns until the user
-  rotates the device physically. `setNeedsUpdateOfSupportedInterfaceOrientations()`
-  first or UIKit keeps its cached answer. Re-applied at launch from
-  `RootTabView.onAppear` (UIKit starts each session on the Info.plist list).
-  iPad multitasking/Stage Manager refuse geometry requests; that's expected,
-  the mask still holds.
-- **The bottom bar disappears entirely while the keyboard layout is up**
-  (field-requested 2026-08-10) — that pad types everything the field could, so
-  the row is pure overhead and the pad takes its height. Magic tap still sends
-  leftover text. With the bands up the bar returns, and **bands sideways on a
-  phone keep Send alone**: focusing the field there raises the on-screen
-  keyboard, which leaves ~70 pt for the pad, so removing the field is what
-  makes it *impossible* to raise. (That replaced an earlier "hide the pad
-  while typing" branch, which solved the same problem the wrong way round.)
-  Consequence worth remembering: **`wantsKeyboardLayout` measures the
-  *window*, not the pad's bounds.** Hiding the bar changes the pad's height,
-  which would feed back into the decision — near the threshold that is a loop
-  (keyboard → bar goes → pad taller → bands → bar returns → keyboard). The
-  window is unaffected by anything we lay out inside it.
-- **Direct-touch key pad** (`VirtualKeyPad.swift`): ONE accessibility
-  element (never per-band regions — that would break explore-by-touch
-  around it) with `.allowsDirectInteraction` + `[.silentOnTouch]` —
-  **instant pass-through, no activation step**: `.requiresActivation` was
-  tried and field-rejected as an extra hop (2026-07-19); touching the pad
-  interacts immediately, piano-app style. Default **grid model** =
-  VoiceOver touch-typing grammar: fixed bands (modifiers / editing /
-  navigation / F1–F12 / opt-in F13–F24 via `virtualPadExtendedFKeys`), drag
-  announces the key under the finger (interrupting + haptic tick), lift
-  sends it instantly wrapped in the toggled modifiers, lift on a modifier
-  toggles it, two-finger tap clears modifiers, extra finger mid-drag
-  aborts. **Slider model** (`virtualPadSliderMode`) is the fallback: swipe
-  left/right = band, up = forward / down = back (the VoiceOver-adjustable
-  convention; a down-forward flip was requested and reverted as a mistake
-  the same day, 2026-07-19 — keep the convention), tap = send, two-finger
-  swipe left = reset band, and stepping past either end answers with a
-  harder edge haptic (`.rigid`) against the normal selection tick.
-  **Press and hold is the pad's second verb** (`virtualPadHoldEnabled`, on by
-  default; requested 2026-08-10), in *both* gesture models, and it is what
-  lets a one-finger pad express more than "tap = send". Touching a zone starts
-  a countdown (moving to another zone restarts it there): after
-  `virtualPadLatchDelay` the key **latches on** and from then on wraps
-  everything sent, exactly like a modifier; after `virtualPadHoldDelay` more
-  it is **pressed down on the PC** and stays down until the finger lifts, so
-  it repeats there (hold Backspace to eat a word) — the repeat itself is
-  generated by the Windows agent, see `KeyRepeater`. **Reaching**
-  the held stage drops the latch there and then — being down replaces "on"
-  instead of stacking on it — and it must do so **even when the hold is
-  refused** (offline/not connected), or a key that just announced itself as
-  held is still sitting there turned on (field-reported 2026-08-10). Lifting
-  then only releases it; lifting at the latch stage leaves the key on.
-  Pressing a latched key again is what turns it off, in any band. State is
-  carried by a **filled background** — light tint = on, strong tint = down on
-  the PC — not by tinted text, which was too quiet to find at a glance on a
-  pad this dense (field-reported 2026-08-10). Each stage has its own
-  haptic (soft = on, `.rigid` = down on the PC, light = released) plus
-  optional speech (`virtualPadHoldSpeech`) — the haptics are never optional,
-  because they are the channel that works with the phone in a pocket.
-  **Haptics also carry key state while dragging** (`virtualPadRichHaptics`,
-  on by default; requested 2026-08-10). **One zone, one vibration** — its
-  *strength* is the state: selection tick = off, `.medium` knock = turned on,
-  `.rigid` = down on the PC. On a 60-key layout speech is the slow channel,
-  the finger passes far more zones than announcements can keep up with.
-  Getting here took two field rounds, and both dead ends are worth not
-  repeating: (1) the state as a **second, delayed pulse** — its
-  `DispatchWorkItem` was cancelled by `cancelStageTimers()`, because arriving
-  on a key schedules the pulse and then immediately starts that key's hold
-  countdown, so it was destroyed a moment after being scheduled and never
-  fired once; and a second *selection* tick ~0.08 s after the first is merged
-  by the Taptic Engine into one indistinguishable buzz anyway. (2) With that
-  fixed — a distinct `.medium` waveform at 0.12 s, plus a `.soft` swell for
-  crossing into a new row — the **multi-pulse vocabulary itself was rejected**
-  as unintuitive: pulses have to be counted and told apart mid-drag, while one
-  pulse that is simply harder is read instantly. So there is no row cue at
-  all. Don't reintroduce either. Generators are `prepare()`d in `touchesBegan`
-  so a drag's first boundary isn't the sluggish one.
-  Consequences that shaped the code: latching is no longer a modifier-band
-  privilege, so the tab tracks an ordered **`latched: [VirtualKey]`** (modifier
-  toggles *and* held keys) that wraps every send, and the pad tints latched
-  keys in every band. A refused hold (forwarding off / not connected) must
-  leave the press at the latch stage rather than pretend a key is down —
-  hence `onHoldBegin` returning `Bool`. Every path that ends a press
-  abnormally (second finger, cancel, finger leaving the pad, mode switch, pad
-  leaving the window) releases the held key first; the Windows agent releasing
-  on peer disconnect is the backstop for the one case iOS can't cover.
-  **The pad must live OUTSIDE the Form** (pinned above it): a scroll-view
-  ancestor delays touch delivery and cancels moved touches, which kills
-  drag-to-hear/lift-to-send under direct touch — build 25 shipped it inside
-  a Form section and the pad was dead in the field (2026-07-19). Don't move
-  it back into scrollable content.
-- **Sizing (fixed 2026-08-10):** the representable implements
-  `sizeThatFits(_:uiView:context:)` returning the proposal. Without it a
-  `UIViewRepresentable` that has an `intrinsicContentSize` is sized to that
-  size and **centred** inside `.frame(maxHeight: .infinity)` rather than
-  filling it — the pad was a fixed `rows × 56` strip with dead space around
-  it, worst in landscape. Two companions: any **resize aborts the press**
-  (`layoutSubviews` compares against the last laid-out size), because
-  rotation moves every zone out from under a finger that is already down and
-  a held key must be released. (The on-screen keyboard can no longer squeeze
-  the pad at all in that orientation — see the control-row note above.)
-- **Tab layout (field-specified 2026-07-19, revised 2026-08-06):** pad
-  filling everything from the title down, over a **single control row** at
-  the bottom: text field, dismiss keyboard, keep text, Send. No Form on this
-  tab. That row must be a **bottom `safeAreaInset`** (messenger input-bar
-  pattern), not a `VStack` sibling — as a sibling the on-screen keyboard
-  covered Send/keep-text/dismiss (field-reported 2026-08-05); as an inset it
-  rides up with the keyboard and the pad gives up the height.
-  All iOS titles are **`.navigationBarTitleDisplayMode(.inline)`** (all three
-  tabs + `InfoSheet`): the default large title sits low, costs ~50 points,
-  and — with the pad being non-scrollable content it can't collapse into —
-  overlapped the pad once the keyboard squeezed the layout (field-reported
-  2026-08-06). Inline puts the heading at the top of the screen, smaller, and
-  the pad takes the reclaimed height. Don't go back to large titles.
-  The separate "Will send" readout was **removed** — it cost a whole row
-  for something only VoiceOver read; what Send will deliver is now Send's
-  **accessibility hint** (`comboDescription`, recomputed on focus), and the
-  pad already tints its toggled modifiers. Don't reintroduce the readout row.
-- **Every tab has a top-right info button** (`InfoSheet.swift`) opening a
-  sheet that explains the screen *as currently configured* (e.g. Virtual
-  Input's text follows `virtualPadSliderMode`). The Start tab's sheet also
-  hosts the tips and the live **diagnostics section** (moved off the main
-  screen to keep Start lean); its dismissal calls
-  `CaptureView.requestReclaim()`.
-- Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
-  involved; AltGr is just `VK_RMENU`. Which keys toggle instead of sending is
-  a property of the *key* (`VirtualKeys.modifierVKs`), not of the row, since
-  the keyboard layout scatters Shift/Ctrl/Alt/Win/Caps across three rows.
-  **Caps Lock counts as a modifier**,
-  not as an ordinary key (added 2026-08-10): on the PC it *is* a modifier
-  in the case that matters, since NVDA's desktop layout uses it as the
+- On-screen key sender (iOS-only tab), VoiceOver-first. **Rebuilt small on
+  2026-08-20** after the full PC-keyboard layout was field-rejected as "barely
+  functional for a blind person". The concept now states in one sentence: **the
+  pad carries the keys the iPhone's own keyboard doesn't have, the iPhone's
+  keyboard carries the letters, and nothing on the pad is smaller than a
+  thumb.**
+- **The diagnosis, so it isn't re-litigated:** the problem was never which keys
+  were on the pad, it was zone size and addressability. On an iPhone in
+  portrait a twelve-key band gives 29 pt zones and the 60-key keyboard 23 pt,
+  against Apple's 44 pt minimum — a zone narrower than a fingertip can't be
+  *aimed at*, only found by sweeping and listening, so every key cost a search
+  and adding keys made the pad slower. And "third band, fifth key" is a
+  counting task: a sheet of glass has four landmarks, its corners, and we were
+  laying 60 keys on it.
+- **Three columns, always, in both orientations** (`VirtualKeys.columns`).
+  Three is what makes every zone a corner, an edge middle or the centre — a
+  physical description rather than a count. Four columns grow interior zones
+  that can only be described by counting along. Zones come out ~116 pt wide.
+- **Two blocks.** The top is **one page at a time** (3x3, or 3x4 for the
+  function keys); the bottom two rows are the **six modifiers, permanently**
+  (Ctrl, Shift, Alt, Win, AltGr, Caps Lock — `VirtualKeys.modifierBlock`). The
+  modifier block is separate because a modifier is the one thing you need
+  *together with* something else: on a page every combination would cost two
+  page changes. It is given a **fixed fraction of the height**
+  (`modifierBlockFraction`), not an equal share of all rows — pages have three
+  rows or four, so equal rows would shift the modifiers up and down as the page
+  changed, and never moving is the entire point of them.
+- **Pages**: Navigation, Editing, Function keys, plus F13-F24 when
+  `virtualPadExtendedFKeys` is on (an extra *page* now, which costs the other
+  pages nothing — it used to be an extra band that shrank every zone on
+  screen). Two-finger swipe left/right on the pad, or the **adjustable page
+  control** in the toolbar (one element, flick up/down — not a menu, not a row
+  of buttons). The pad reports the swipe (`onPageStep`) rather than owning the
+  page, so the two can't disagree.
+- **The Navigation page is the one that justifies the shape**: Up on the top
+  edge, Down on the bottom, Left and Right at the sides, Enter in the centre,
+  Home/PgUp and End/PgDn in the corners. The position of the key *is* its
+  meaning — nothing to learn, which no 60-key layout can offer.
+- **Letters are deliberately not on the pad.** They were the argument for the
+  keyboard layout and the argument was sound, but the answer is not to redraw a
+  keyboard at 23 pt a key: the iOS keyboard (with Braille Screen Input and
+  dictation behind it) is already fast and already mastered. So letters go in
+  the text field, and single-letter screen-reader navigation is Caps Lock on
+  the pad + the letter typed once + sticky text (`virtualInputKeepText`), after
+  which every repeat is one Send.
+- **Press and hold is one stage now** (`virtualPadHoldEnabled`,
+  `virtualPadHoldDelay`, default 0.8 s counted from the touch): the key is
+  **pressed down on the PC** and stays down until the finger lifts, so it
+  repeats there (hold Backspace to eat a word) — the repeat is generated by the
+  Windows agent, see `KeyRepeater`. The earlier "latch any key on" stage went
+  with the rebuild: every modifier has a permanent zone now, so latching an
+  arbitrary key had nothing left to do. A refused hold (offline / not
+  connected) simply spends the press — there is no longer a latch left behind
+  to drop, which is what the old code kept getting wrong. Because the delay's
+  meaning changed (from touch, not from the latch), it stores under a **new
+  key** (`virtualPadHoldFromTouch`) rather than inheriting a number measured
+  differently.
+- **Direct-touch key pad** (`VirtualKeyPad.swift`): ONE accessibility element
+  (never per-zone regions — that would break explore-by-touch around it) with
+  `.allowsDirectInteraction` + `[.silentOnTouch]` — **instant pass-through, no
+  activation step**: `.requiresActivation` was tried and field-rejected as an
+  extra hop (2026-07-19). Drag announces the key under the finger
+  (interrupting + haptic tick), lift sends it, lift on a modifier toggles it,
+  two-finger tap clears the modifiers, an extra finger mid-drag aborts. State
+  is carried by a **filled background** — light tint = on, strong tint = down
+  on the PC — not by tinted text, which was too quiet to find at a glance
+  (field-reported 2026-08-10). **Slider mode was removed** in the rebuild: it
+  existed as the fallback for zones too small to hit, which is the problem the
+  three-column grid solves.
+- **Haptics carry key state while dragging** (`virtualPadRichHaptics`, on by
+  default). **One zone, one vibration** — its *strength* is the state:
+  selection tick = off, `.medium` knock = turned on, `.rigid` = down on the PC.
+  Two dead ends not to repeat (both field-rejected 2026-08-10): (1) the state
+  as a **second, delayed pulse** — its `DispatchWorkItem` was cancelled by the
+  hold countdown starting on the same arrival, so it never fired once, and two
+  ticks 0.08 s apart merge into one buzz anyway; (2) with that fixed, the
+  **multi-pulse vocabulary itself** was rejected as unintuitive — pulses have
+  to be counted and told apart mid-drag, one harder pulse is read instantly.
+  There is deliberately no row cue at all. Generators are `prepare()`d in
+  `touchesBegan` so a drag's first boundary isn't the sluggish one.
+- **Caps Lock counts as a modifier**, not an ordinary key: on the PC it *is*
+  one in the case that matters, since NVDA's desktop layout uses it as the
   screen-reader key, and that only works if it wraps the key it modifies. The
   plain press that flips the lock is still reachable — hold the zone until the
   key goes down, then lift.
+- **The pad must live OUTSIDE any scroll container** (it fills the tab above a
+  bottom bar): a scroll-view ancestor delays touch delivery and cancels moved
+  touches, which kills drag-to-hear/lift-to-send under direct touch — build 25
+  shipped it inside a Form section and the pad was dead in the field
+  (2026-07-19). Don't move it back into scrollable content.
+- **Sizing:** the representable implements `sizeThatFits(_:uiView:context:)`
+  returning the proposal. Without it a `UIViewRepresentable` that has an
+  `intrinsicContentSize` is sized to that size and **centred** inside
+  `.frame(maxHeight: .infinity)` rather than filling it. Any **resize aborts
+  the press** (`layoutSubviews` compares against the last laid-out size),
+  because rotation moves every zone out from under a finger that is already
+  down and a held key must be released.
+- **Tab layout:** pad filling everything from the title down, over a **single
+  control row** at the bottom: text field, dismiss keyboard, keep text, Send.
+  No Form on this tab. That row must be a **bottom `safeAreaInset`**
+  (messenger input-bar pattern), not a `VStack` sibling — as a sibling the
+  on-screen keyboard covered Send/keep-text/dismiss (field-reported
+  2026-08-05); as an inset it rides up with the keyboard and the pad gives up
+  the height. **Sideways on a phone the row keeps Send alone**: focusing the
+  field there raises the on-screen keyboard, which leaves ~70 pt for the pad,
+  so removing the field is what makes it *impossible* to raise.
+  All iOS titles are **`.navigationBarTitleDisplayMode(.inline)`** (all three
+  tabs + `InfoSheet`): the default large title sits low, costs ~50 points, and
+  overlapped the non-scrollable pad once the keyboard squeezed the layout
+  (field-reported 2026-08-06). Don't go back to large titles.
+  The separate "Will send" readout was **removed** — it cost a whole row for
+  something only VoiceOver read; what Send will deliver is now Send's
+  **accessibility hint** (`comboDescription`), and the pad tints its toggled
+  modifiers. Don't reintroduce the readout row.
+- **Every tab has a top-right info button** (`InfoSheet.swift`) opening a sheet
+  that explains the screen *as currently configured*. The Start tab's sheet
+  also hosts the tips and the live **diagnostics section**; its dismissal calls
+  `CaptureView.requestReclaim()`.
+- Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`
+  involved; AltGr is just `VK_RMENU`. Which keys toggle instead of sending is a
+  property of the *key* (`VirtualKeys.modifierVKs`).
 - Sending rides the same connection as forwarding (`forwardingEnabled` on +
   connected). If off, Send turns it on and asks the user to re-trigger —
   deliberately no queuing of the combo.
-- Text rules: **no modifiers → `char` unicode lines** (layout-proof, umlauts
-  work); **with modifiers → US-position VKs** via `USCharVK` (shortcut
+- Text rules: **no modifiers -> `char` unicode lines** (layout-proof, umlauts
+  work); **with modifiers -> US-position VKs** via `USCharVK` (shortcut
   semantics, Shift-wrapped as needed, unmappable characters skipped and
   announced).
 - **Sticky text** (`virtualInputKeepText`, off by default): Send normally
@@ -368,9 +306,22 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   fires again on the next Send. Requested 2026-08-05 for single-letter
   screen-reader navigation on the PC (`h` for headings), where retyping the
   letter after every send was the whole cost. Modifiers still reset on Send in
-  both modes — only the text is sticky. Its toggle lives **in the text row**
-  (between the field and Dismiss keyboard), not in Settings: it is flipped
-  several times per session, unlike the set-and-forget pad settings.
+  both modes — only the text is sticky. Its toggle lives **in the text row**,
+  not in Settings: it is flipped several times per session, unlike the
+  set-and-forget pad settings.
+- **Removed with the rebuild, and not to be reintroduced without a new
+  reason**: the full PC keyboard layout and its per-layout key names
+  (`pcKeyboardLayout`, US/QWERTZ), the bands arrangement, the
+  bands-vs-keyboard aspect-ratio rule (`virtualPadLayout`), slider gestures
+  (`virtualPadSliderMode`), the two-stage hold's latch delay
+  (`virtualPadLatchDelay`), the pad-options menu, and the **orientation pin**
+  (`interfaceOrientationLock`, `OrientationLock.swift`) — which existed *only*
+  because the keyboard layout needed a landscape frame that iOS rotation lock
+  would never hand a VoiceOver user. A three-wide grid works either way up, so
+  nothing has to be forced. Earlier lessons that still stand: send-on-adjust
+  fires every intermediate value (field-rejected 2026-07-18, don't reintroduce
+  anywhere), and VoiceOver double-tap activation latency is system-inherent,
+  which is exactly why the direct-touch pad exists.
 
 ### macOS (`apps/macOS/KeyCapture.swift`)
 - **`CGEventTap` at `.cghidEventTap`** sees every keyDown/keyUp/flagsChanged

@@ -7,70 +7,17 @@ final class AppSettingsTests: XCTestCase {
         defaults.removePersistentDomain(forName: "AppSettingsTests")
 
         let settings = AppSettings(defaults: defaults)
-        XCTAssertFalse(settings.virtualPadSliderMode)
         XCTAssertFalse(settings.virtualPadExtendedFKeys)
         XCTAssertFalse(settings.virtualInputKeepText)
-
-        settings.virtualPadSliderMode = true
-        settings.virtualPadExtendedFKeys = true
-        settings.virtualInputKeepText = true
-        let reloaded = AppSettings(defaults: defaults)
-        XCTAssertTrue(reloaded.virtualPadSliderMode)
-        XCTAssertTrue(reloaded.virtualPadExtendedFKeys)
-        XCTAssertTrue(reloaded.virtualInputKeepText)
-    }
-
-    /// The pad's arrangement: the keyboard layout is the landscape default, so
-    /// an existing install that never touched the setting gets it by turning
-    /// the device — and a user who picks plain bands has to keep them, which
-    /// only works if the stored non-default value survives a reload.
-    func testPadLayoutDefaultsToKeyboardInLandscapeAndPersists() {
-        let defaults = UserDefaults(suiteName: "AppSettingsPadLayoutTests")!
-        defaults.removePersistentDomain(forName: "AppSettingsPadLayoutTests")
-
-        let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.virtualPadLayout, .keyboardInLandscape)
-        XCTAssertEqual(settings.pcKeyboardLayout, .us)
         XCTAssertTrue(settings.virtualPadRichHaptics)
 
-        settings.virtualPadLayout = .bands
-        settings.pcKeyboardLayout = .german
+        settings.virtualPadExtendedFKeys = true
+        settings.virtualInputKeepText = true
         settings.virtualPadRichHaptics = false
-
         let reloaded = AppSettings(defaults: defaults)
-        XCTAssertEqual(reloaded.virtualPadLayout, .bands)
-        XCTAssertEqual(reloaded.pcKeyboardLayout, .german)
+        XCTAssertTrue(reloaded.virtualPadExtendedFKeys)
+        XCTAssertTrue(reloaded.virtualInputKeepText)
         XCTAssertFalse(reloaded.virtualPadRichHaptics)
-    }
-
-    /// The orientation pin has to survive a relaunch or it is useless: UIKit
-    /// starts every session allowing whatever the Info.plist lists, so the app
-    /// re-applies this value at launch.
-    func testOrientationLockDefaultsToDeviceAndPersists() {
-        let defaults = UserDefaults(suiteName: "AppSettingsOrientationTests")!
-        defaults.removePersistentDomain(forName: "AppSettingsOrientationTests")
-
-        XCTAssertEqual(AppSettings(defaults: defaults).interfaceOrientationLock, .device)
-
-        let settings = AppSettings(defaults: defaults)
-        settings.interfaceOrientationLock = .landscape
-        XCTAssertEqual(AppSettings(defaults: defaults).interfaceOrientationLock, .landscape)
-
-        defaults.set("sideways-ish", forKey: "interfaceOrientationLock")
-        XCTAssertEqual(AppSettings(defaults: defaults).interfaceOrientationLock, .device)
-    }
-
-    /// A raw value that no longer exists (or never did) must fall back to the
-    /// default rather than leave the pad with no arrangement at all.
-    func testUnknownStoredLayoutFallsBackToDefault() {
-        let defaults = UserDefaults(suiteName: "AppSettingsPadLayoutJunkTests")!
-        defaults.removePersistentDomain(forName: "AppSettingsPadLayoutJunkTests")
-        defaults.set("someFutureLayout", forKey: "virtualPadLayout")
-        defaults.set("dvorak", forKey: "pcKeyboardLayout")
-
-        let settings = AppSettings(defaults: defaults)
-        XCTAssertEqual(settings.virtualPadLayout, .keyboardInLandscape)
-        XCTAssertEqual(settings.pcKeyboardLayout, .us)
     }
 
     /// This one defaults to *true*, which `bool(forKey:)` can't express — so a
@@ -87,8 +34,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(AppSettings(defaults: defaults).forwardFunctionKeyRow)
     }
 
-    /// The key pad's hold gesture: on by default with 0.6 s stages, and a
-    /// stored `false`/custom timing has to survive a reload — same
+    /// The key pad's hold gesture: on by default at 0.8 s, and a stored
+    /// `false`/custom timing has to survive a reload — same
     /// `bool(forKey:)`/`double(forKey:)` trap as the function-key row.
     func testHoldSettingsDefaultOnAndPersist() {
         let defaults = UserDefaults(suiteName: "AppSettingsHoldTests")!
@@ -97,39 +44,53 @@ final class AppSettingsTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
         XCTAssertTrue(settings.virtualPadHoldEnabled)
         XCTAssertTrue(settings.virtualPadHoldSpeech)
-        XCTAssertEqual(settings.virtualPadLatchDelay, 0.6, accuracy: 0.0001)
-        XCTAssertEqual(settings.virtualPadHoldDelay, 0.6, accuracy: 0.0001)
+        XCTAssertEqual(settings.virtualPadHoldDelay, 0.8, accuracy: 0.0001)
 
         settings.virtualPadHoldEnabled = false
         settings.virtualPadHoldSpeech = false
-        settings.virtualPadLatchDelay = 1.2
-        settings.virtualPadHoldDelay = 0.4
+        settings.virtualPadHoldDelay = 1.2
 
         let reloaded = AppSettings(defaults: defaults)
         XCTAssertFalse(reloaded.virtualPadHoldEnabled)
         XCTAssertFalse(reloaded.virtualPadHoldSpeech)
-        XCTAssertEqual(reloaded.virtualPadLatchDelay, 1.2, accuracy: 0.0001)
-        XCTAssertEqual(reloaded.virtualPadHoldDelay, 0.4, accuracy: 0.0001)
+        XCTAssertEqual(reloaded.virtualPadHoldDelay, 1.2, accuracy: 0.0001)
     }
 
     /// A zero or wild delay would make the pad either fire instantly or never,
-    /// so both the setter and the loader clamp into the published ranges.
-    func testHoldDelaysAreClamped() {
+    /// so both the setter and the loader clamp into the published range.
+    func testHoldDelayIsClamped() {
         let defaults = UserDefaults(suiteName: "AppSettingsHoldClampTests")!
         defaults.removePersistentDomain(forName: "AppSettingsHoldClampTests")
 
         let settings = AppSettings(defaults: defaults)
-        settings.virtualPadLatchDelay = 0
+        settings.virtualPadHoldDelay = 0
+        XCTAssertEqual(settings.virtualPadHoldDelay, AppSettings.holdDelayRange.lowerBound)
         settings.virtualPadHoldDelay = 99
-        XCTAssertEqual(settings.virtualPadLatchDelay, AppSettings.latchDelayRange.lowerBound)
         XCTAssertEqual(settings.virtualPadHoldDelay, AppSettings.holdDelayRange.upperBound)
 
         // A value written straight into defaults (an older build, a synced
         // preference) is clamped on the way in, not trusted.
-        defaults.set(0.0, forKey: "virtualPadLatchDelay")
+        defaults.set(0.0, forKey: "virtualPadHoldFromTouch")
         XCTAssertEqual(
-            AppSettings(defaults: defaults).virtualPadLatchDelay,
-            AppSettings.latchDelayRange.lowerBound
+            AppSettings(defaults: defaults).virtualPadHoldDelay,
+            AppSettings.holdDelayRange.lowerBound
+        )
+    }
+
+    /// The hold delay moved to a new storage key with the 2026-08-20 rebuild,
+    /// because the old one counted from the moment a key *latched* rather than
+    /// from the touch. An install carrying the old number must get the new
+    /// default, not inherit a value that meant something else.
+    func testOldTwoStageHoldDelayIsNotInherited() {
+        let defaults = UserDefaults(suiteName: "AppSettingsHoldMigrationTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsHoldMigrationTests")
+        defaults.set(0.4, forKey: "virtualPadHoldDelay")
+        defaults.set(1.5, forKey: "virtualPadLatchDelay")
+
+        XCTAssertEqual(
+            AppSettings(defaults: defaults).virtualPadHoldDelay,
+            0.8,
+            accuracy: 0.0001
         )
     }
 }

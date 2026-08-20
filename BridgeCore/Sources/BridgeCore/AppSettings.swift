@@ -34,80 +34,6 @@ public enum ModifierMapping: String, CaseIterable, Codable, Sendable, Identifiab
     }
 }
 
-/// How the Virtual Input key pad arranges its keys.
-///
-/// The bands layout (modifiers / editing / navigation / F-keys, each band a
-/// row of equal cells) is the only one that fits a portrait phone. The
-/// keyboard layout is a real PC key block — letters, digits, punctuation, the
-/// lot — and needs a landscape-shaped rectangle to give its keys usable size,
-/// which is exactly what portrait can never provide. So the default is
-/// per-orientation rather than one layout everywhere.
-public enum VirtualPadLayout: String, CaseIterable, Codable, Sendable, Identifiable {
-    /// The original key bands, in both orientations.
-    case bands
-    /// Bands in portrait, the full keyboard once the pad is wider than tall.
-    case keyboardInLandscape
-    /// The full keyboard in both orientations (cramped in portrait).
-    case keyboardAlways
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .bands: return "Key bands"
-        case .keyboardInLandscape: return "Keyboard when sideways"
-        case .keyboardAlways: return "Keyboard always"
-        }
-    }
-}
-
-/// The keyboard layout active **on the Windows PC**.
-///
-/// It never changes which virtual-key code is sent — the pad always sends
-/// US-position VKs and the agent injects them by scancode, so the PC's own
-/// layout decides the character, exactly like the physical-capture path. What
-/// it changes is what the pad **shows and says**, so the key announced as "Z"
-/// is the key that types a z on the machine at the other end.
-public enum PCKeyboardLayout: String, CaseIterable, Codable, Sendable, Identifiable {
-    case us
-    case german
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .us: return "US (QWERTY)"
-        case .german: return "German (QWERTZ)"
-        }
-    }
-}
-
-/// Whether the app follows the device's own rotation or is pinned to one
-/// orientation.
-///
-/// It exists because the pad's two arrangements want different screen shapes
-/// and the device isn't always free to supply one: iOS **rotation lock** is
-/// commonly on for a VoiceOver user, and with it on the app is never handed
-/// a landscape frame at all — which would leave the keyboard layout stuck at
-/// portrait's cramped key widths with no way to fix it from inside the app.
-/// Pinning is the way out, and it works the other way too (staying upright
-/// while the device is being held at an angle in a lap or a bag).
-public enum InterfaceOrientationLock: String, CaseIterable, Codable, Sendable, Identifiable {
-    case device
-    case portrait
-    case landscape
-
-    public var id: String { rawValue }
-
-    public var displayName: String {
-        switch self {
-        case .device: return "Follow the device"
-        case .portrait: return "Stay upright"
-        case .landscape: return "Stay sideways"
-        }
-    }
-}
-
 /// Shared, observable configuration persisted to `UserDefaults`. One instance
 /// is created per app and injected into the capture layer and UI. Not actor
 /// isolated — it's plain value-like state over the thread-safe `UserDefaults`,
@@ -156,39 +82,10 @@ public final class AppSettings {
 
     // MARK: Virtual input (iOS)
 
-    /// Whether the Virtual Input key pad interprets gestures as virtual
-    /// sliders (swipe left/right between rows, up/down to step the value,
-    /// tap to send) instead of the default touch-typing grid (drag to hear
-    /// the key under the finger, lift to send). The slider mode exists as a
-    /// fallback in case the grid's zone density doesn't work out on device.
-    public var virtualPadSliderMode: Bool {
-        didSet { defaults.set(virtualPadSliderMode, forKey: Keys.virtualPadSliderMode) }
-    }
-
     /// Whether the key pad includes an F13–F24 band. Off by default: the
     /// extra band shrinks every other zone, and F13+ is rarely needed.
     public var virtualPadExtendedFKeys: Bool {
         didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
-    }
-
-    /// Which arrangement the key pad uses. Defaults to the keyboard layout in
-    /// landscape only: portrait keeps the bands it was designed around, and
-    /// turning the device sideways becomes the deliberate switch to the full
-    /// key block, in the one orientation whose proportions can hold it.
-    public var virtualPadLayout: VirtualPadLayout {
-        didSet { defaults.set(virtualPadLayout.rawValue, forKey: Keys.virtualPadLayout) }
-    }
-
-    /// The layout the *PC* is set to. Labels and announcements only — the VKs
-    /// sent never change (see `PCKeyboardLayout`).
-    public var pcKeyboardLayout: PCKeyboardLayout {
-        didSet { defaults.set(pcKeyboardLayout.rawValue, forKey: Keys.pcKeyboardLayout) }
-    }
-
-    /// Pins the app to one orientation, or lets it follow the device.
-    /// iOS-only in effect; stored for both so the type stays shared.
-    public var interfaceOrientationLock: InterfaceOrientationLock {
-        didSet { defaults.set(interfaceOrientationLock.rawValue, forKey: Keys.interfaceOrientationLock) }
     }
 
     /// Whether the pad's vibrations carry more than "you crossed a boundary":
@@ -201,35 +98,29 @@ public final class AppSettings {
         didSet { defaults.set(virtualPadRichHaptics, forKey: Keys.virtualPadRichHaptics) }
     }
 
-    /// Whether pressing and holding a key-pad zone runs the two-stage hold:
-    /// hold past `virtualPadLatchDelay` and the key latches on (it then wraps
-    /// everything sent afterwards, exactly like a modifier); keep holding for
-    /// `virtualPadHoldDelay` more and it is pressed *down* on the PC and stays
-    /// down until the finger lifts, so the PC's own key repeat runs. On by
-    /// default. Turning it off restores the plain "lift sends" pad, which is
-    /// what a user who rests a finger on a zone before lifting will want.
+    /// Whether pressing and holding a key-pad zone presses that key *down* on
+    /// the PC — where it stays until the finger lifts, so the agent's key
+    /// repeat runs. On by default. Turning it off restores the plain "lift
+    /// sends" pad, which is what a user who rests a finger on a zone before
+    /// lifting will want.
+    ///
+    /// There used to be an earlier "latch the key on" stage before this one.
+    /// It went with the 2026-08-20 rebuild: every modifier now has a permanent
+    /// zone of its own, so latching an arbitrary key had nothing left to do,
+    /// and one stage is one thing to learn.
     public var virtualPadHoldEnabled: Bool {
         didSet { defaults.set(virtualPadHoldEnabled, forKey: Keys.virtualPadHoldEnabled) }
     }
 
-    // The two delays clamp what they are given, which rules out a `didSet`:
+    // The delay clamps what it is given, which rules out a `didSet`:
     // under `@Observable` the stored property becomes a computed one, so
     // assigning the clamped value from inside its own observer re-enters the
     // setter forever and blows the stack (CI, signal 11, 2026-08-10). A
     // computed property over private storage clamps once, in the one place a
     // value can arrive, and the storage stays observable.
 
-    /// Seconds a key-pad zone must be held before the key latches on.
-    public var virtualPadLatchDelay: Double {
-        get { latchDelayStorage }
-        set {
-            latchDelayStorage = Self.clamp(newValue, Self.latchDelayRange)
-            defaults.set(latchDelayStorage, forKey: Keys.virtualPadLatchDelay)
-        }
-    }
-
-    /// Further seconds — counted from the moment it latched, not from the
-    /// touch — before the latched key is pressed down on the PC.
+    /// Seconds a key-pad zone must be held, counted from the touch, before
+    /// the key is pressed down on the PC.
     public var virtualPadHoldDelay: Double {
         get { holdDelayStorage }
         set {
@@ -238,20 +129,20 @@ public final class AppSettings {
         }
     }
 
-    private var latchDelayStorage: Double
     private var holdDelayStorage: Double
 
-    /// Whether the hold stages are spoken as well as felt. The haptics alone
-    /// are unambiguous once learned (soft = latched, hard = down, light =
+    /// Whether the hold is spoken as well as felt. The haptics alone are
+    /// unambiguous once learned (hard knock = down on the PC, light =
     /// released), so this is the setting that makes the pad quiet again.
     public var virtualPadHoldSpeech: Bool {
         didSet { defaults.set(virtualPadHoldSpeech, forKey: Keys.virtualPadHoldSpeech) }
     }
 
-    /// Allowed range for `virtualPadLatchDelay`, also the UI's slider bounds.
-    public static let latchDelayRange: ClosedRange<Double> = 0.2...2.0
     /// Allowed range for `virtualPadHoldDelay`, also the UI's slider bounds.
-    public static let holdDelayRange: ClosedRange<Double> = 0.2...3.0
+    /// Its floor is higher than the old two-stage latch delay's: this is now
+    /// the *only* countdown, measured from the touch, so a finger that pauses
+    /// while exploring must not trip it.
+    public static let holdDelayRange: ClosedRange<Double> = 0.3...2.0
 
     private static func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Double {
         min(max(value, range.lowerBound), range.upperBound)
@@ -312,27 +203,15 @@ public final class AppSettings {
         self.rightOptionMapping = mapping(Keys.rightOptionMapping, legacy: Keys.legacyOptionMapping, default: .alt)
         self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
-        self.virtualPadSliderMode = defaults.bool(forKey: Keys.virtualPadSliderMode)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
-        self.virtualPadLayout = VirtualPadLayout(rawValue: defaults.string(forKey: Keys.virtualPadLayout) ?? "")
-            ?? .keyboardInLandscape
-        self.pcKeyboardLayout = PCKeyboardLayout(rawValue: defaults.string(forKey: Keys.pcKeyboardLayout) ?? "")
-            ?? .us
         self.virtualPadRichHaptics = defaults.object(forKey: Keys.virtualPadRichHaptics) as? Bool ?? true
-        self.interfaceOrientationLock = InterfaceOrientationLock(
-            rawValue: defaults.string(forKey: Keys.interfaceOrientationLock) ?? ""
-        ) ?? .device
         // Hold defaults are all "on" / non-zero, which `bool(forKey:)` and
         // `double(forKey:)` can't express — read the raw object and fall back
         // only when nothing was ever stored.
         self.virtualPadHoldEnabled = defaults.object(forKey: Keys.virtualPadHoldEnabled) as? Bool ?? true
-        self.latchDelayStorage = Self.clamp(
-            defaults.object(forKey: Keys.virtualPadLatchDelay) as? Double ?? 0.6,
-            Self.latchDelayRange
-        )
         self.holdDelayStorage = Self.clamp(
-            defaults.object(forKey: Keys.virtualPadHoldDelay) as? Double ?? 0.6,
+            defaults.object(forKey: Keys.virtualPadHoldDelay) as? Double ?? 0.8,
             Self.holdDelayRange
         )
         self.virtualPadHoldSpeech = defaults.object(forKey: Keys.virtualPadHoldSpeech) as? Bool ?? true
@@ -367,19 +246,20 @@ public final class AppSettings {
         static let legacyOptionMapping = "optionMapping"
         static let legacyCommandMapping = "commandMapping"
         static let toggleShortcut = "toggleShortcut"
-        // "virtualRowSendsModifiers" was the retired adjustable-rows wrap
-        // toggle; its stored value is simply ignored now.
-        static let virtualPadSliderMode = "virtualPadSliderMode"
+        // Retired keys whose stored values are simply ignored now:
+        // "virtualRowSendsModifiers" (the adjustable-rows wrap toggle),
+        // "virtualPadSliderMode", "virtualPadLayout", "pcKeyboardLayout",
+        // "interfaceOrientationLock" and "virtualPadLatchDelay" — all of them
+        // belonged to arrangements the 2026-08-20 rebuild removed.
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
         static let virtualInputKeepText = "virtualInputKeepText"
         static let virtualPadHoldEnabled = "virtualPadHoldEnabled"
-        static let virtualPadLatchDelay = "virtualPadLatchDelay"
-        static let virtualPadHoldDelay = "virtualPadHoldDelay"
+        // Deliberately not the old "virtualPadHoldDelay": that number was
+        // counted from the moment a key latched, not from the touch, so an
+        // inherited value would mean something else.
+        static let virtualPadHoldDelay = "virtualPadHoldFromTouch"
         static let virtualPadHoldSpeech = "virtualPadHoldSpeech"
-        static let virtualPadLayout = "virtualPadLayout"
-        static let pcKeyboardLayout = "pcKeyboardLayout"
         static let virtualPadRichHaptics = "virtualPadRichHaptics"
-        static let interfaceOrientationLock = "interfaceOrientationLock"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
     }
 }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Shell for the per-tab "what does this screen do" sheet, opened from the
 /// info button every tab carries at the top right. Content is provided by
 /// the tab and adapts to the current settings (e.g. Virtual Input explains
-/// slider gestures only while slider mode is on), so the explanation always
+/// the pages that actually exist, the hold timing as set), so it always
 /// matches what the user's configuration actually does.
 struct InfoSheet<Content: View>: View {
     let title: String
