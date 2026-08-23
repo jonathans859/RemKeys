@@ -53,12 +53,35 @@ final class CaptureView: UIView {
         NotificationCenter.default.post(name: reclaimFirstResponder, object: nil)
     }
 
+    /// Posting this makes the capture view forget which keys it believes are
+    /// down. Sent when the app stops being able to observe key-ups (see
+    /// `requestForgetHeldKeys()`).
+    static let forgetHeldKeys = Notification.Name("KeyBridge.forgetHeldKeys")
+
+    /// Tell the capture view its idea of what is held is no longer trustworthy.
+    /// Call when the app leaves the active state: presses stop being delivered
+    /// there, so a key that was down at that moment never reports its release
+    /// and would otherwise be believed held forever — blocking the next press
+    /// of that key, since a down is only forwarded by the *first* holder. The
+    /// matching key-ups on the remote are `BridgeClient.releaseHeldKeys()`'s
+    /// job; this only clears the local bookkeeping.
+    @MainActor
+    static func requestForgetHeldKeys() {
+        NotificationCenter.default.post(name: forgetHeldKeys, object: nil)
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleReclaimRequest),
             name: Self.reclaimFirstResponder,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleForgetHeldKeysRequest),
+            name: Self.forgetHeldKeys,
             object: nil
         )
     }
@@ -69,6 +92,12 @@ final class CaptureView: UIView {
             self,
             selector: #selector(handleReclaimRequest),
             name: Self.reclaimFirstResponder,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleForgetHeldKeysRequest),
+            name: Self.forgetHeldKeys,
             object: nil
         )
     }
@@ -133,6 +162,14 @@ final class CaptureView: UIView {
             return
         }
         report(usage, pressed: pressed, from: .gameController)
+    }
+
+    /// Drop every key we think is down, and the pending swallows with them —
+    /// their key-ups are not coming either.
+    @objc private func handleForgetHeldKeysRequest() {
+        sourcesHoldingKey.removeAll()
+        swallowedKeyUps.removeAll()
+        swallowedGameControllerKeys.removeAll()
     }
 
     /// Reclaim first responder if we're still on screen. Guarded by `window`

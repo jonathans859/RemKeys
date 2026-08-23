@@ -163,15 +163,41 @@ Ctrl+C copies it.
 - **Foreground-only, by iOS design.** Physical keyboard input only reaches the
   app while it is foreground and the screen is on — a sandbox restriction with
   no background entitlement. The UI is built around a clear "Forwarding active"
-  state, holds the idle timer off while forwarding, and stops forwarding when
-  the app leaves the foreground (so the remote never keeps a half-held chord).
+  state and holds the idle timer off while forwarding.
+- **`.inactive` is not a reason to stop** (fixed 2026-08-23). The scene-phase
+  handler in `RootTabView` used to end the session on any `phase != .active`,
+  which made Control Center, Notification Center, the app switcher and a call
+  banner each cost a trip back to the Start button — field-rejected, because
+  none of those is the user leaving. Only `.background` stops forwarding and
+  drops the curtain now. `.inactive` instead **lets go of every held key**
+  (`BridgeClient.releaseHeldKeys()`, now public, plus
+  `CaptureView.requestForgetHeldKeys()`) and keeps forwarding on: presses do
+  stop being delivered under a system overlay, so a key that was physically
+  down right then may never report its release, and a key the capture view
+  still believes held would also block its own next press (a down is only
+  forwarded by the *first* holder). An extra key-up on the PC is harmless; a
+  stuck one is not. Returning to `.active` calls `requestReclaim()`, since
+  whatever took the screen may have taken first responder with it.
 - **Screen curtain** (Start tab button, overlay in `RootTabView`): black
   overlay + brightness 0, the battery saver for long forwarding sessions;
-  double-tap dismisses. Offered **only while VoiceOver is off** — VoiceOver
-  has its own Screen Curtain and the dismissal gesture would collide.
-  Brightness is a system-sticky setting, so it auto-restores on backgrounding
-  and if VoiceOver turns on mid-curtain. Idle timer is held while forwarding
-  *or* curtained. Capture keeps working under the overlay.
+  double-tap dismisses. Idle timer is held while forwarding *or* curtained,
+  and capture keeps working under the overlay. Brightness is a system-sticky
+  setting, so it auto-restores on backgrounding.
+  **Offered with VoiceOver on too** (2026-08-23; it used to be hidden, on the
+  theory that VoiceOver's own Screen Curtain covered it). It does not: that is
+  a different switch in a different place, and it leaves the backlight on —
+  brightness 0 is the half that saves the battery. No extra behaviour comes
+  with it. The overlay is one labeled element with an accessibility action, so
+  a VoiceOver double tap dismisses it exactly like the tap gesture does, and
+  the `TabView` under it is `.accessibilityHidden(curtainActive)` so a swipe
+  can't wander into UI the user can no longer see.
+- **`autoScreenCurtain`** (Settings toggle, off by default): raises the curtain
+  by itself the first time a session reaches the PC — a session otherwise
+  always started with the same three presses. Deliberately **once per session**
+  (`curtainAutoRaised`, reset when forwarding stops) so a reconnect never
+  re-blacks a screen the user just asked to see, and **only from the Start
+  tab** — connecting from Virtual Input means the user is about to touch the
+  key pad, which a curtain would cover.
 
 - **SDK 26 Cmd-chord theft**: since the iOS 26 SDK, the system consumes
   Cmd chords (Cmd+B/I/U, Cmd+A/C/V/X/Z/F, …) **before `pressesBegan`** —
@@ -451,6 +477,59 @@ Ctrl+C copies it.
   window, or hiding the app (⌘H / `applicationDidHide`), goes back to
   `.accessory`, i.e. menu-bar only. `LSUIElement` stays true; the policy is
   flipped at runtime.
+
+## iOS visual design (`apps/iOS/Theme.swift`)
+
+Reworked 2026-08-23 after "it doesn't look like it fits together, stylish" and
+"we don't need that much texting in the settings screen". Both complaints had
+the same root: the app was stock SwiftUI with the explanation for every control
+printed next to it.
+
+- **One accent, everywhere.** `AccentColor` in both asset catalogs — indigo
+  `#4B3FD6`, lifted to `#8B82FF` for dark mode — wired in via
+  `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME` in `project.yml`. Everything
+  tints from it with no code: buttons, toggles, the tab bar, and (because
+  `VirtualKeyPad` reads `UIView.tintColor`) the pad's "modifier on" and "key
+  down" washes. Don't hardcode a colour anywhere; change the asset instead.
+  One consequence had to be fixed at the same time: the pad's key-down label
+  was hardcoded `.white`, which is right over a dark blue and wrong over a
+  light violet — it now picks black or white by WCAG contrast
+  (`UIColor.highestContrastForeground`), which is also what makes a future
+  accent change safe.
+- **`SectionHeader(_:systemImage:)` is the only section header in the app** —
+  SF Symbol, sentence case, semibold, full contrast. The system default (small,
+  grey, uppercased) is what a bare `Form` gives you and is most of why the
+  screens read as unstyled. Used on all three tabs *and* inside every info
+  sheet, which is what ties the sheets to the screens they explain.
+- **`remKeysCard(active:)` + `cardRow()`** are the one card treatment: a
+  continuous-radius panel with a hairline accent edge, dropped into a `Form`
+  row whose own background is cleared. `active: true` swaps in a soft accent
+  gradient and firms the border. Exactly one thing uses it today — the Start
+  tab's hero — and that is the point: if everything is a card, nothing is.
+- **Start is a hero card**: status LED (green live / amber connecting / grey
+  idle), the state, the connection line, and the Start–Stop button, all in one
+  panel, over two ordinary sections. They used to be separate `Form` rows with
+  a paragraph of footer between them, which buried the only thing the tab is
+  for.
+- **Settings rows do not explain themselves.** The teaching text lives in
+  exactly two opt-in places: the info sheet (which describes the settings *as
+  currently set*, so it beats a static footer anyway) and each control's
+  VoiceOver hint, which costs a sighted user no screen space. Exactly one
+  footer survives — "Shift and Control always map straight across", because
+  four pickers give no hint that two modifiers are deliberately missing. Don't
+  reintroduce the others; that is the change, not an oversight.
+- **Visible text and accessibility label must not drift.** Shortening a row's
+  visible label and restoring the long version in `accessibilityLabel` was
+  tried during this pass and backed out: Voice Control matches on the *visible*
+  string, so the two diverging makes rows unspeakable. Labels are written once,
+  self-describing, and left alone.
+- **The app icon is generated** by `scripts/make-app-icon.py` (Pillow) into
+  both catalogs — one keycap with an arrow on it, on an indigo plate. Re-run it
+  after changing the accent. The old placeholder set two letters and a rule on
+  a gradient; letter pairs turn to mush at the 60 pt the home screen actually
+  draws, and it still said "KB" long after the rebrand. iOS gets one flattened
+  1024 RGB (no alpha — ASC rejects it), macOS the rounded-square-on-transparent
+  set at every size.
 
 ## Accessibility (non-negotiable — daily personal use)
 - Every control has a label/hint; no state is conveyed by color/visuals alone.
@@ -744,10 +823,10 @@ to TestFlight.
   run** — no .NET SDK on Jonathan's PC, so CI is its first compile and
   milestone 4 its first execution.
 - ✅ XcodeGen project, fastlane, CI + release workflows, docs.
-- ✅ Signing secrets wired; asset catalogs with a **generated placeholder
-  icon** (gradient + "KB→", `apps/{iOS,macOS}/Assets.xcassets`) — replace
-  with real art when available (iOS marketing icon must stay flattened RGB,
-  no alpha).
+- ✅ Signing secrets wired; app icon generated by `scripts/make-app-icon.py`
+  into `apps/{iOS,macOS}/Assets.xcassets` (keycap + arrow on the indigo
+  accent). Re-run it if the accent changes; the iOS marketing icon must stay
+  flattened RGB, no alpha.
 - ⏳ Not yet done: on-device testing on real hardware (iPhone via TestFlight,
   Mac locally, Windows PC).
 

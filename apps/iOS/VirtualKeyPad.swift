@@ -344,6 +344,10 @@ final class KeyPadUIView: UIView {
         // A solid accent key needs an outline that is *not* accent, or the
         // border disappears into the fill.
         let downOutline = UIColor.label.resolvedColor(with: traitCollection).cgColor
+        // Whichever of black/white actually contrasts with the accent, rather
+        // than always white: the dark-mode accent is a *light* violet, and
+        // white on it lands at about 3:1 — legal for large text and no more.
+        let downText = accent.highestContrastForeground
         for (rowIndex, row) in rows.enumerated() {
             for (columnIndex, key) in row.enumerated() {
                 guard rowIndex < labels.count, columnIndex < labels[rowIndex].count else { continue }
@@ -353,10 +357,11 @@ final class KeyPadUIView: UIView {
                 label.backgroundColor = down
                     ? accent
                     : (on ? accent.withAlphaComponent(0.5) : .tertiarySystemFill)
-                // White on the solid fill, the ordinary label colour on the
-                // half wash — which stays readable in both light and dark
-                // mode, where a tinted label on a tinted fill would not.
-                label.textColor = down ? .white : .label
+                // The contrasting foreground on the solid fill, the ordinary
+                // label colour on the half wash — which stays readable in both
+                // light and dark mode, where a tinted label on a tinted fill
+                // would not.
+                label.textColor = down ? downText : .label
                 label.font = .systemFont(
                     ofSize: labelPointSize,
                     weight: on || down ? .semibold : .regular
@@ -710,5 +715,25 @@ final class KeyPadUIView: UIView {
         feedbackEntering(padKey)
         announce(description(of: padKey))
         startPress(on: padKey)
+    }
+}
+
+private extension UIColor {
+    /// Black or white, whichever contrasts more with this colour.
+    ///
+    /// Hardcoding white is fine while the accent is a dark blue and wrong the
+    /// moment it isn't — the app's dark-mode accent is a light violet, where
+    /// black is more than twice the contrast. Must be called on an already
+    /// resolved colour; a dynamic one reports the components of whichever
+    /// trait collection it happens to resolve against.
+    var highestContrastForeground: UIColor {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard getRed(&r, green: &g, blue: &b, alpha: &a) else { return .white }
+        func linear(_ c: CGFloat) -> CGFloat {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        // WCAG relative luminance, then the two contrast ratios it implies.
+        let l = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? .black : .white
     }
 }

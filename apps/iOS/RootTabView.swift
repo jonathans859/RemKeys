@@ -18,16 +18,23 @@ struct RootTabView: View {
 
     @State private var selectedTab: AppTab = .start
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     // Screen curtain: black overlay + brightness 0 = effectively display-off
     // (fully off on OLED) while the app stays foreground and keeps capturing —
     // the battery saver for long forwarding sessions with the idle timer held.
-    // Only offered while VoiceOver is off; VoiceOver has its own Screen
-    // Curtain (three-finger triple tap) and our double-tap-to-dismiss would
-    // collide with its gestures.
+    // Offered whether or not VoiceOver is running: VoiceOver has a Screen
+    // Curtain of its own, but it is a separate switch that has to be found and
+    // flipped, and it says nothing about brightness — which is the half that
+    // saves the battery. With VoiceOver on the overlay is the only element on
+    // screen and its dismissal is a plain activation, so nothing about the
+    // behaviour changes.
     @State private var curtainActive = false
     @State private var brightnessBeforeCurtain: CGFloat = 1
+    /// Whether this forwarding session has already raised the curtain by
+    /// itself. Reset when forwarding stops, so `autoScreenCurtain` fires once
+    /// per session and a reconnect never re-blacks a screen the user just
+    /// asked to see.
+    @State private var curtainAutoRaised = false
 
     var body: some View {
         ZStack {
@@ -44,6 +51,11 @@ struct RootTabView: View {
                     .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(AppTab.settings)
             }
+            // With the curtain up the screen is meant to be gone. Hiding the
+            // tabs from the accessibility tree leaves VoiceOver exactly one
+            // element — the curtain itself — so a swipe cannot wander into UI
+            // the user can no longer see.
+            .accessibilityHidden(curtainActive)
 
             if curtainActive {
                 curtain
@@ -56,22 +68,34 @@ struct RootTabView: View {
             wireUpBridge()
         }
         .onChange(of: scenePhase) { _, phase in
-            // Leaving the foreground means we can't capture anyway; stop
-            // forwarding so the remote never sits with a half-held chord.
-            if phase != .active, bridge.forwardingEnabled {
-                bridge.forwardingEnabled = false
-            }
-            // Brightness is a system-wide setting that outlives the app —
-            // never leave the backgrounded user with a dark phone.
-            if phase != .active {
+            switch phase {
+            case .inactive:
+                // NOT a reason to stop. `.inactive` is Control Center,
+                // Notification Center, the app switcher, a call banner — the
+                // app is still frontmost and comes back in a second, and
+                // having to press Start again after every glance at Control
+                // Center was the whole complaint. Presses genuinely do stop
+                // arriving while that overlay is up, though, so a key that was
+                // physically down right then may never report its release:
+                // let go of it at both ends and carry on forwarding.
+                if bridge.forwardingEnabled {
+                    bridge.releaseHeldKeys()
+                    CaptureView.requestForgetHeldKeys()
+                }
+            case .background:
+                // Actually gone. Capture is impossible from here, so stop
+                // forwarding rather than leave the remote holding a chord —
+                // and brightness is a system-wide setting that outlives the
+                // app, so never leave the user with a dark phone.
+                if bridge.forwardingEnabled {
+                    bridge.forwardingEnabled = false
+                }
                 setCurtain(false)
-            }
-        }
-        .onChange(of: voiceOverEnabled) { _, on in
-            // VoiceOver turned on mid-curtain: hand the screen back — from
-            // here on its own Screen Curtain is the right tool.
-            if on {
-                setCurtain(false)
+            case .active:
+                // Whatever took the screen may have taken first responder too.
+                CaptureView.requestReclaim()
+            @unknown default:
+                break
             }
         }
         .onChange(of: selectedTab) { _, tab in
@@ -88,9 +112,9 @@ struct RootTabView: View {
         Color.black
             .ignoresSafeArea()
             .onTapGesture(count: 2) { setCurtain(false) }
-            // VoiceOver never meets this (the feature is gated off), but
-            // Switch Control / Full Keyboard Access users need a labeled way
-            // back out.
+            // The tap gesture serves everyone else; VoiceOver, Switch Control
+            // and Full Keyboard Access users leave through the action below,
+            // which a VoiceOver double tap triggers just the same.
             .accessibilityLabel("Screen curtain")
             .accessibilityHint("Turns the screen back on")
             .accessibilityAddTraits(.isButton)
@@ -122,6 +146,20 @@ struct RootTabView: View {
         UIApplication.shared.isIdleTimerDisabled = bridge.forwardingEnabled || curtainActive
     }
 
+    /// `autoScreenCurtain`: the session has reached the PC, so black the
+    /// screen without being asked. Once per session (see `curtainAutoRaised`),
+    /// and only from the Start tab — connecting from Virtual Input means the
+    /// user is about to touch the key pad, and a curtain over the pad would
+    /// take away the very thing they are using.
+    private func raiseCurtainAutomaticallyIfWanted() {
+        guard settings.autoScreenCurtain,
+              !curtainAutoRaised,
+              !curtainActive,
+              selectedTab == .start else { return }
+        curtainAutoRaised = true
+        setCurtain(true)
+    }
+
     private func handleMagicTap() {
         switch selectedTab {
         case .virtualInput:
@@ -138,10 +176,12 @@ struct RootTabView: View {
     private func wireUpBridge() {
         bridge.forwardingDidChange = { enabled in
             updateIdleTimer()
+            if !enabled { curtainAutoRaised = false }
             postQueuedAnnouncement(enabled ? "Forwarding on" : "Forwarding off")
         }
         bridge.statusDidChange = { status in
             postQueuedAnnouncement(status.announcement)
+            if status.isConnected { raiseCurtainAutomaticallyIfWanted() }
         }
     }
 }

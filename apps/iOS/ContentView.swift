@@ -11,14 +11,18 @@ import BridgeCore
 /// state, and the idle timer is held off while forwarding so the screen never
 /// sleeps out from under the user. App-wide behavior (magic tap, scene-phase
 /// stop, bridge callbacks) lives in `RootTabView`.
+///
+/// The screen is one **hero card** — state, connection line and the one button
+/// that matters, together — over two ordinary sections. Status and action used
+/// to be separate `Form` rows with a paragraph of footer between them, which
+/// buried the only thing this tab is for. Everything that explains rather than
+/// reports lives in the info sheet, reachable from the toolbar.
 struct ContentView: View {
     let settings: AppSettings
     let bridge: BridgeClient
     /// Raises the screen curtain, which lives in `RootTabView` so its overlay
     /// covers the tab bar too.
     let activateCurtain: () -> Void
-
-    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     private var diagnostics: CaptureDiagnostics { .shared }
 
@@ -36,12 +40,9 @@ struct ContentView: View {
 
             NavigationStack {
                 Form {
-                    statusSection
+                    heroSection
                     connectionSection
-                    forwardingSection
-                    if !voiceOverEnabled {
-                        curtainSection
-                    }
+                    curtainSection
                 }
                 .navigationTitle("RemKeys")
                 // Compact title app-wide: it sits at the top of the screen and
@@ -65,14 +66,17 @@ struct ContentView: View {
     /// (field request 2026-07-19) so Start stays a lean status-and-go page.
     private var infoSheet: some View {
         InfoSheet(title: "Start") {
-            Section("How forwarding works") {
+            Section {
                 Text("While forwarding is active, keys typed on a connected hardware keyboard are sent to the Windows PC instead of acting here. Keystrokes only forward while RemKeys is in the foreground with the screen on — that is an iOS rule, so the screen is kept awake while forwarding runs.")
+                Text("Pulling down Control Center or the notifications, or glancing at the app switcher, does not stop forwarding: keys simply pause until RemKeys is in front again. Forwarding stops when you actually leave the app.")
+            } header: {
+                SectionHeader("How forwarding works", systemImage: "arrow.left.arrow.right")
             }
-            Section("Tips") {
+            Section {
                 Text("A two-finger double tap anywhere toggles forwarding (on the Virtual Input tab it sends the built combination instead). A physical toggle shortcut can be recorded in Settings.")
-                if !voiceOverEnabled {
-                    Text("The screen curtain blacks out the display and drops brightness to zero to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on.")
-                }
+                Text("The screen curtain blacks out the display and drops brightness to zero to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on. Settings can raise it by itself as soon as a session connects.")
+            } header: {
+                SectionHeader("Tips", systemImage: "lightbulb")
             }
             diagnosticsSection
         }
@@ -80,33 +84,71 @@ struct ContentView: View {
 
     // MARK: Sections
 
-    private var statusSection: some View {
+    /// State and action in one panel. The card fills with the accent while a
+    /// session is live, so "is it on?" is answerable at a glance without
+    /// reading a word.
+    private var heroSection: some View {
         Section {
-            HStack {
-                Image(systemName: isForwarding ? "dot.radiowaves.left.and.right" : "pause.circle")
-                    .foregroundStyle(isForwarding ? .green : .secondary)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isForwarding ? "Forwarding active" : "Forwarding paused")
-                        .font(.headline)
-                    Text(bridge.status.announcement)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 14) {
+                    statusDot
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(isForwarding ? "Forwarding active" : "Forwarding paused")
+                            .font(.title3.weight(.semibold))
+                        Text(bridge.status.announcement)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(isForwarding ? "Forwarding active" : "Forwarding paused")
+                .accessibilityValue(bridge.status.announcement)
+                .accessibilityAddTraits(.updatesFrequently)
+
+                Button {
+                    toggleForwarding()
+                } label: {
+                    Text(isForwarding ? "Stop forwarding" : "Start forwarding")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(isForwarding ? .red : .accentColor)
+                .accessibilityLabel(isForwarding ? "Stop forwarding" : "Start forwarding")
+                .accessibilityHint(isForwarding
+                    ? "Stops sending keystrokes to the Windows PC"
+                    : "Connects and starts sending keystrokes to the Windows PC")
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(isForwarding ? "Forwarding active" : "Forwarding paused")
-            .accessibilityValue(bridge.status.announcement)
-            .accessibilityAddTraits(.updatesFrequently)
-        } footer: {
-            if isForwarding {
-                Text("Keep RemKeys open and the screen on. Keystrokes only forward while this app is in the foreground.")
-            }
+            .remKeysCard(active: isForwarding)
+            .cardRow()
         }
     }
 
+    /// A status LED rather than a symbol: green live, amber reaching for the
+    /// PC, grey idle. The halo is what makes a 14-point dot findable at a
+    /// glance; the dot itself is decorative, since the card's own label and
+    /// value already carry the state to VoiceOver.
+    private var statusDot: some View {
+        ZStack {
+            Circle()
+                .fill(statusColor.opacity(0.20))
+                .frame(width: 38, height: 38)
+            Circle()
+                .fill(statusColor)
+                .frame(width: 14, height: 14)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var statusColor: Color {
+        guard isForwarding else { return .secondary }
+        return bridge.status.isConnected ? .green : .orange
+    }
+
     private var connectionSection: some View {
-        Section("Windows PC") {
+        Section {
             LabeledContent("Tailscale address") {
                 TextField("100.x.y.z", text: Binding(
                     get: { settings.targetHost },
@@ -130,39 +172,27 @@ struct ContentView: View {
                 .keyboardType(.numberPad)
             }
             .accessibilityHint("Must match the port in the Windows agent's appsettings.json")
+        } header: {
+            SectionHeader("Windows PC", systemImage: "desktopcomputer")
         }
-    }
-
-    private var forwardingSection: some View {
-        Section {
-            Button {
-                toggleForwarding()
-            } label: {
-                Text(isForwarding ? "Stop forwarding" : "Start forwarding")
-                    .frame(maxWidth: .infinity)
-                    .fontWeight(.semibold)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(isForwarding ? .red : .accentColor)
-            .accessibilityLabel(isForwarding ? "Stop forwarding" : "Start forwarding")
-            .accessibilityHint(isForwarding
-                ? "Stops sending keystrokes to the Windows PC"
-                : "Connects and starts sending keystrokes to the Windows PC")
-        }
-        // The magic-tap tip and the rest of the teaching text live in the
-        // info sheet — Start stays lean.
     }
 
     /// Battery saver for long forwarding sessions: black overlay + brightness
-    /// zero (see `RootTabView`). Hidden entirely while VoiceOver runs —
-    /// VoiceOver's own Screen Curtain (three-finger triple tap) does the same
-    /// job, and the double-tap dismissal would fight VoiceOver gestures.
+    /// zero (see `RootTabView`). Offered with VoiceOver running too — its own
+    /// Screen Curtain is a different switch in a different place and leaves
+    /// the backlight on, which is the half that costs the battery.
     private var curtainSection: some View {
         Section {
-            Button("Screen curtain") {
+            Button {
                 activateCurtain()
+            } label: {
+                Label("Turn the screen off", systemImage: "moon.fill")
             }
-            .accessibilityHint("Turns the screen black to save battery. Keystrokes keep forwarding.")
+            // No accessibilityLabel override: Voice Control matches on the
+            // visible text, so the two must not drift apart.
+            .accessibilityHint("Blacks the screen out and drops brightness to zero to save battery. Keystrokes keep forwarding.")
+        } header: {
+            SectionHeader("Screen curtain", systemImage: "moon.stars")
         } footer: {
             Text("Double-tap the screen to turn it back on.")
         }
@@ -221,7 +251,7 @@ struct ContentView: View {
                 }
             }
         } header: {
-            Text("Diagnostics")
+            SectionHeader("Diagnostics", systemImage: "waveform.path.ecg")
         } footer: {
             Text("If a keyboard is detected but Key-downs seen stays at zero while you type, another layer is consuming keys before they reach RemKeys — with VoiceOver running that is usually QuickNav. Try turning QuickNav off (press Left and Right arrow together) and typing again. Key-downs seen counts keys UIKit delivers; HID capture counts the same keys read straight from the keyboard, which is the path that still sees Command chords when the system keeps them.")
         }

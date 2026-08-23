@@ -53,6 +53,20 @@ public final class AppSettings {
         didSet { defaults.set(targetPort, forKey: Keys.targetPort) }
     }
 
+    // MARK: Screen curtain (iOS)
+
+    /// Whether the screen curtain is raised by itself the first time a
+    /// forwarding session reaches the Windows PC. Off by default.
+    ///
+    /// The curtain is the battery saver for a long session, and a session
+    /// almost always starts the same way: press Start, wait for "Connected",
+    /// press Screen curtain. This removes the third press. It only ever fires
+    /// once per session, so dismissing the curtain to look at the screen is
+    /// not undone by the next reconnect.
+    public var autoScreenCurtain: Bool {
+        didSet { defaults.set(autoScreenCurtain, forKey: Keys.autoScreenCurtain) }
+    }
+
     // MARK: Modifier mappings (per physical side, both platforms)
 
     // Left and right are mapped independently on every configurable modifier:
@@ -219,6 +233,7 @@ public final class AppSettings {
         self.rightOptionMapping = mapping(Keys.rightOptionMapping, legacy: Keys.legacyOptionMapping, default: .alt)
         self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
+        self.autoScreenCurtain = defaults.bool(forKey: Keys.autoScreenCurtain)
         self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
         self.virtualInputLiveTyping = defaults.bool(forKey: Keys.virtualInputLiveTyping)
@@ -268,6 +283,7 @@ public final class AppSettings {
         // "virtualPadSliderMode", "virtualPadLayout", "pcKeyboardLayout",
         // "interfaceOrientationLock" and "virtualPadLatchDelay" — all of them
         // belonged to arrangements the 2026-08-20 rebuild removed.
+        static let autoScreenCurtain = "autoScreenCurtain"
         static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
         static let virtualInputKeepText = "virtualInputKeepText"
         static let virtualInputLiveTyping = "virtualInputLiveTyping"

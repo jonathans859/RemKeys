@@ -104,8 +104,12 @@ public final class BridgeClient {
     }
 
     /// Emit an up for every key we believe is still held, then clear the set.
-    /// Runs before a deliberate disconnect / forwarding-off.
-    private func releaseHeldKeys() {
+    /// Runs before a deliberate disconnect / forwarding-off, and whenever the
+    /// capture layer stops being able to see key-ups — an iOS app that goes
+    /// inactive (Control Center, the app switcher) keeps forwarding, but a key
+    /// that was physically down when the overlay appeared may never report its
+    /// release, and the agent would repeat it forever.
+    public func releaseHeldKeys() {
         for vk in heldKeys {
             send(KeyEvent(vk: vk, pressed: false))
         }

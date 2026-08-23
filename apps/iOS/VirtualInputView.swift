@@ -366,18 +366,22 @@ struct VirtualInputView: View {
     /// something the pad isn't doing right now.
     private var infoSheet: some View {
         InfoSheet(title: "Virtual Input") {
-            Section("Key pad") {
+            Section {
                 Text("The pad is three zones wide, so every zone is a corner, the middle of an edge, or the centre — something a finger can find without counting along a row. Touches on it act immediately; VoiceOver gestures are bypassed. Drag to hear the key under your finger, with a tick at each boundary, and lift to send it at once. Landing a second finger cancels the drag, so nothing is sent.")
                 Text("The bottom two rows are always the six modifiers — Control, Shift, Alt, Windows, AltGr, Caps Lock — in that order, and they stay exactly there whichever keys are above them. Lift on one to turn it on or off. Two-finger tap anywhere on the pad turns them all off.")
+            } header: {
+                SectionHeader("Key pad", systemImage: "square.grid.3x3.fill")
             }
-            Section("Pages") {
+            Section {
                 Text("Everything above the modifiers is one page at a time: \(pageList). Two-finger swipe left for the next page, right for the previous one; a harder vibration means there is no page that way. The page control at the top left does the same — flick up or down on it with VoiceOver.")
                 Text("On the Navigation page the arrows are laid out as they mean: Up along the top edge, Down along the bottom, Left and Right at the sides, with Enter in the middle. The corners are Home and Page Up above, End and Page Down below.")
                 if !settings.virtualPadExtendedFKeys {
                     Text("F13 to F24 can be added as a further page under Key pad in Settings. It costs nothing to the other pages.")
                 }
+            } header: {
+                SectionHeader("Pages", systemImage: "rectangle.stack.fill")
             }
-            Section("Letters and text") {
+            Section {
                 Text("Letters, digits and punctuation are not on the pad. They go in the text field instead, typed with the iPhone's own keyboard — which is faster than any keyboard we could draw on glass, and which Braille Screen Input and dictation already work with.")
                 if liveTypingOn {
                     Text("Send as you type is on, so the field is a direct line to the PC: every character arrives the moment you type it, deleting a character sends Backspace, and Return sends Enter. There is no Send button — nothing is waiting to be sent. Modifiers that are on wrap every character and stay on, so with Caps Lock on you can type h, h, h and move heading to heading.")
@@ -388,24 +392,32 @@ struct VirtualInputView: View {
                 Text("Text without modifiers is typed on the PC exactly as written, including umlauts, regardless of the PC's keyboard layout. With modifiers turned on, each character becomes its US-position key instead — shortcuts match keys, not characters — and characters without a US key are skipped and announced.")
                 Text("For screen-reader navigation on the PC — Caps Lock plus H for headings, say — turn Caps Lock on at the pad, type the letter once, and turn on Keep text after sending: every further heading is then a single Send.")
                 Text("To empty the field in one step, focus it with VoiceOver and use its Clear text action — swipe up or down to find it, then double tap.")
+            } header: {
+                SectionHeader("Letters and text", systemImage: "textformat")
             }
-            Section("Modifiers") {
+            Section {
                 Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
                 Text("Caps Lock counts as a modifier here because that is what it is on the PC when a screen reader is running — NVDA's desktop layout uses it as the screen-reader key. Turn it on, then send a key, and the PC gets Caps Lock plus that key. To flip the lock itself instead, hold the Caps Lock zone until it is pressed down, then lift.")
+            } header: {
+                SectionHeader("Modifiers", systemImage: "option")
             }
             if settings.virtualPadRichHaptics {
-                Section("What the vibrations tell you") {
+                Section {
                     Text("Moving onto a key always vibrates exactly once, and how hard it vibrates tells you the key's state: the usual light tick if it is off, a firmer knock if it is turned on, a hard knock if it is being held down on the PC. So you can feel what is already on while exploring, without waiting for it to be spoken.")
                     Text("This can be turned off under Key pad in Settings, leaving the same light tick for every key. The vibrations that mark holding a key down are separate and always on.")
+                } header: {
+                    SectionHeader("What the vibrations tell you", systemImage: "waveform")
                 }
             }
             if settings.virtualPadHoldEnabled {
-                Section("Holding a key") {
+                Section {
                     Text("Press and keep holding any key on the pad. After \(VirtualKeys.secondsDescription(settings.virtualPadHoldDelay)) it is pressed down on the PC and stays down until you lift, with a firm vibration to mark the moment: that is how you get key repeat, such as holding Backspace to delete a run of text or Down to keep scrolling. On the pad the key gets a strong coloured background while it is down.")
                     Text("Holding works on modifiers too, which is how to send a plain Caps Lock press and flip the lock itself. The timing and the spoken cues can be changed in Settings; the vibrations stay either way.")
+                } header: {
+                    SectionHeader("Holding a key", systemImage: "hand.tap.fill")
                 }
             }
-            Section("Sending") {
+            Section {
                 if liveTypingOn {
                     Text("Send as you type is on, so there is no Send button for text. Keys sent from the pad still go straight out, wrapped in whatever modifiers are on, and a two-finger double tap with the field empty sends the modifiers by themselves.")
                 } else if settings.virtualInputKeepText {
@@ -414,6 +426,8 @@ struct VirtualInputView: View {
                     Text("Send — or a two-finger double tap anywhere on this tab — delivers the modifiers that are on plus the typed text, then resets both. To repeat the same text, turn on Keep text after sending, the button just left of Send.")
                 }
                 Text("Sending needs forwarding: if it is off, Send turns it on and asks you to send again once connected. Keys sent straight from the pad are silent when they work; you only hear a message when something failed.")
+            } header: {
+                SectionHeader("Sending", systemImage: "paperplane.fill")
             }
         }
     }
