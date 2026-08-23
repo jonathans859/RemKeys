@@ -24,12 +24,28 @@ jobs:
       contents: write   # attach the zip to a Release
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the version number is the commit count.
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      # 1.0.<commit count>, the same build-number rule the iOS/macOS lanes use:
+      # monotonic on main, recomputable from any checkout, and comparable as a
+      # plain integer. Only the number is passed — the SDK appends "+<commit>"
+      # to InformationalVersion by itself from the checkout's git data. Both
+      # show in the tray's About dialog and in the first line of the log.
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          $build = git rev-list --count HEAD
+          "version=1.0.$build" >> $env:GITHUB_OUTPUT
       - name: Publish
         working-directory: windows-agent
-        run: dotnet publish KeyBridgeAgent.csproj -c Release -r win-x64 --self-contained true -o publish
+        run: >
+          dotnet publish RemKeysAgent.csproj -c Release -r win-x64 --self-contained true -o publish
+          -p:Version=${{ steps.version.outputs.version }}
       - name: Add the install scripts
         working-directory: windows-agent
         shell: pwsh
@@ -40,7 +56,7 @@ jobs:
       - name: Attach the build to this run
         uses: actions/upload-artifact@v4
         with:
-          name: KeyBridgeAgent-win-x64
+          name: RemKeysAgent-win-x64
           path: windows-agent/publish/*
           if-no-files-found: error
       # A Release asset does want to be one file, so that zip is built here
@@ -49,9 +65,9 @@ jobs:
         if: github.event_name == 'release'
         working-directory: windows-agent
         shell: pwsh
-        run: Compress-Archive -Path publish/* -DestinationPath KeyBridgeAgent-win-x64.zip
+        run: Compress-Archive -Path publish/* -DestinationPath RemKeysAgent-win-x64.zip
       - name: Attach zip to the Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: windows-agent/KeyBridgeAgent-win-x64.zip
+          files: windows-agent/RemKeysAgent-win-x64.zip

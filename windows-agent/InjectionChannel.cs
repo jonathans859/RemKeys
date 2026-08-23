@@ -3,7 +3,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading.Channels;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// The service→helper link. Deliberately the same newline-framed text as the
@@ -14,17 +14,17 @@ namespace KeyBridgeAgent;
 public static class PipeProtocol
 {
     /// <summary>
-    /// Full path is <c>\\.\pipe\KeyBridgeAgent.inject</c>. LocalSystem only —
+    /// Full path is <c>\\.\pipe\RemKeysAgent.inject</c>. LocalSystem only —
     /// this one types on the secure desktop, so its ACL is a security boundary.
     /// </summary>
-    public const string PipeName = "KeyBridgeAgent.inject";
+    public const string PipeName = "RemKeysAgent.inject";
 
     /// <summary>
-    /// Full path is <c>\\.\pipe\KeyBridgeAgent.status</c>. Deliberately a
+    /// Full path is <c>\\.\pipe\RemKeysAgent.status</c>. Deliberately a
     /// separate pipe with a wider ACL: the tray runs as the signed-in user and
     /// must never be able to reach the injection channel.
     /// </summary>
-    public const string StatusPipeName = "KeyBridgeAgent.status";
+    public const string StatusPipeName = "RemKeysAgent.status";
 
     /// <summary>Helper→service, once on connect: <c>hello &lt;desktop&gt;</c>.</summary>
     public const string Hello = "hello";

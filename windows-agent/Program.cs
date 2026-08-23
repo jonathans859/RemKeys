@@ -1,5 +1,5 @@
 using System.Security.Principal;
-using KeyBridgeAgent;
+using RemKeysAgent;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
 // One executable, four personalities — see AgentMode. No arguments is the
@@ -29,13 +29,24 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 
 // Bind config. Missing/malformed sections just leave defaults in place — the
 // options object always has safe values, so the agent never fails to start.
-builder.Services.Configure<KeyBridgeOptions>(
-    builder.Configuration.GetSection(KeyBridgeOptions.SectionName));
+//
+// The legacy "KeyBridge" section is bound first and the current "RemKeys" one
+// over it, so a hand-edited appsettings.json that predates the rename keeps
+// working: keys the new section doesn't mention keep the old section's value.
+// Without this the rename would silently reset a customised port or log
+// directory back to the defaults, with nothing to see but the wrong port.
+builder.Services.Configure<RemKeysOptions>(
+    builder.Configuration.GetSection(RemKeysOptions.LegacySectionName));
+builder.Services.Configure<RemKeysOptions>(
+    builder.Configuration.GetSection(RemKeysOptions.SectionName));
 
 // File logging alongside the executable (or the configured directory). All
 // three processes share one file, tagged so they stay tellable apart.
 var logDirectory = builder.Configuration
-    .GetSection(KeyBridgeOptions.SectionName)[nameof(KeyBridgeOptions.LogDirectory)] ?? string.Empty;
+    .GetSection(RemKeysOptions.SectionName)[nameof(RemKeysOptions.LogDirectory)]
+    ?? builder.Configuration
+        .GetSection(RemKeysOptions.LegacySectionName)[nameof(RemKeysOptions.LogDirectory)]
+    ?? string.Empty;
 builder.Logging.AddProvider(new FileLoggerProvider(logDirectory, mode.LogTag));
 
 builder.Services.AddSingleton(mode);
@@ -49,7 +60,7 @@ switch (mode.Role)
         // SendInput could never reach the interactive desktop. The supervisor
         // puts a helper on each desktop that can.
         // No-ops when the process was not started by the SCM, so running
-        // "KeyBridgeAgent.exe --service" by hand still works for debugging.
+        // "RemKeysAgent.exe --service" by hand still works for debugging.
         builder.Services.AddWindowsService();
         builder.Services.AddSingleton<InjectionHub>();
         builder.Services.AddSingleton<IKeystrokeSink>(sp => sp.GetRequiredService<InjectionHub>());
@@ -97,6 +108,11 @@ switch (mode.Role)
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
 
+// First line of every process's contribution to the log: which build this is.
+// Three processes share one file and a zip can sit on a PC for months, so a
+// log without this cannot answer "was that fixed in the build you are running".
+logger.LogInformation("RemKeys agent {Version} starting as {Mode}.", AgentVersion.Display, mode.LogTag);
+
 // Single instance. The exe is windowless, so double-clicking it gives no
 // feedback and it is easy to start several copies — which used to pile up as
 // extra processes retrying the busy port forever. A second launch logs one
@@ -106,13 +122,13 @@ if (mode.Role != AgentRole.Service)
 {
     // Helpers are keyed by desktop so the Default and Winlogon ones coexist.
     var mutexName = mode.Role == AgentRole.Helper
-        ? $@"Local\KeyBridgeAgent.helper.{mode.Desktop}"
-        : @"Local\KeyBridgeAgent";
+        ? $@"Local\RemKeysAgent.helper.{mode.Desktop}"
+        : @"Local\RemKeysAgent";
 
     singleInstance = new Mutex(initiallyOwned: true, mutexName, out var isFirstInstance);
     if (!isFirstInstance)
     {
-        logger.LogWarning("Another KeyBridge agent ({Mode}) is already running in this session; exiting. " +
+        logger.LogWarning("Another RemKeys agent ({Mode}) is already running in this session; exiting. " +
             "Use the tray icon or uninstall-agent.bat to stop the running one.", mode.LogTag);
         singleInstance.Dispose();
         return 0;
@@ -136,7 +152,7 @@ using (singleInstance)
         if (!isElevated)
         {
             logger.LogWarning("Running WITHOUT elevation: keystrokes will silently not reach elevated windows " +
-                "or screen-reader dialogs (uiAccess). Start the agent via the KeyBridgeAgent scheduled task " +
+                "or screen-reader dialogs (uiAccess). Start the agent via the RemKeysAgent scheduled task " +
                 "(install-agent.bat) instead of launching the exe directly.");
         }
     }

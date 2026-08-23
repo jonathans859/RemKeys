@@ -1,4 +1,4 @@
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Parser for the wire format shared with the Apple apps:

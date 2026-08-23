@@ -7,14 +7,14 @@ REM
 REM Same thing as "Turn on lock screen support..." in the tray menu; this is
 REM the recovery path for when there is no tray to click.
 REM
-REM Run as Administrator, from the folder containing KeyBridgeAgent.exe.
+REM Run as Administrator, from the folder containing RemKeysAgent.exe.
 REM
 REM Note: while this is on, anyone who can reach this PC over Tailscale can
 REM type at the lock screen. The listener therefore refuses connections from
 REM loopback and from non-Tailscale addresses unless appsettings.json opts in.
 
 setlocal
-set BIN_PATH=%~dp0KeyBridgeAgent.exe
+set BIN_PATH=%~dp0RemKeysAgent.exe
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (

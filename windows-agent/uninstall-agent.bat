@@ -1,5 +1,5 @@
 @echo off
-REM Stops the KeyBridge agent and removes its logon scheduled task.
+REM Stops the RemKeys agent and removes its logon scheduled task.
 REM Run as Administrator. Also cleans up the old service-based install.
 
 net session >nul 2>&1
@@ -12,14 +12,24 @@ if %errorlevel% neq 0 (
 
 REM Lock screen support first: its service would otherwise respawn the desktop
 REM helpers that taskkill is about to remove.
+sc stop RemKeysSecureAgent >nul 2>&1
+sc delete RemKeysSecureAgent >nul 2>&1
+
+schtasks /End /TN "RemKeysAgent" >nul 2>&1
+taskkill /IM RemKeysAgent.exe /F >nul 2>&1
+schtasks /Delete /TN "RemKeysAgent" /F >nul 2>&1
+
+REM Old service-based install, if present.
+sc stop RemKeysAgent >nul 2>&1
+sc delete RemKeysAgent >nul 2>&1
+
+REM And anything still installed under the pre-rename KeyBridge names, so
+REM "uninstall" really does leave nothing typing on this PC.
 sc stop KeyBridgeSecureAgent >nul 2>&1
 sc delete KeyBridgeSecureAgent >nul 2>&1
-
 schtasks /End /TN "KeyBridgeAgent" >nul 2>&1
 taskkill /IM KeyBridgeAgent.exe /F >nul 2>&1
 schtasks /Delete /TN "KeyBridgeAgent" /F >nul 2>&1
-
-REM Old service-based install, if present.
 sc stop KeyBridgeAgent >nul 2>&1
 sc delete KeyBridgeAgent >nul 2>&1
 

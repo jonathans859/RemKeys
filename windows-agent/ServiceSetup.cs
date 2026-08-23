@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.ServiceProcess;
 using System.Windows.Forms;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Installs and removes the optional lock-screen service, and swaps it with
@@ -16,9 +16,18 @@ namespace KeyBridgeAgent;
 /// </summary>
 public static class ServiceSetup
 {
-    public const string ServiceName = "KeyBridgeSecureAgent";
+    public const string ServiceName = "RemKeysSecureAgent";
     public const string ServiceDisplayName = "RemKeys lock screen support";
-    public const string TaskName = "KeyBridgeAgent";
+    public const string TaskName = "RemKeysAgent";
+
+    // What the same three things were called before the agent was renamed from
+    // KeyBridge to RemKeys. A leftover old install is not harmless: it has its
+    // own task, exe and mutex, so the new agent does not supersede it — both
+    // start and fight over port 5391. Every path that installs something clears
+    // these first.
+    private const string LegacyServiceName = "KeyBridgeSecureAgent";
+    private const string LegacyTaskName = "KeyBridgeAgent";
+    private const string LegacyProcessName = "KeyBridgeAgent";
 
     private const string ServiceDescription =
         "Receives RemKeys keystrokes and replays them on whichever desktop is in front, " +
@@ -68,6 +77,8 @@ public static class ServiceSetup
         // the service starts into a busy socket and spends its first ten
         // seconds retrying.
         WaitForProcessExit(mode.WaitForPid, TimeSpan.FromSeconds(15));
+
+        RemoveLegacyInstall();
 
         // The logon task stays registered — it is what puts the tray in the
         // user's session, and only a process there can show a menu a screen
@@ -149,6 +160,8 @@ public static class ServiceSetup
             return 1;
         }
 
+        RemoveLegacyInstall();
+
         if (IsInstalled())
         {
             StopAndDeleteService();
@@ -208,6 +221,21 @@ public static class ServiceSetup
                 "-ExecutionTimeLimit (New-TimeSpan -Seconds 0) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries)");
         }
         return result;
+    }
+
+    /// <summary>
+    /// Clear out an install made under the old KeyBridge names. Every step is
+    /// best-effort and silent when there is nothing there, which is the normal
+    /// case — this only ever finds something on a PC that ran a pre-rename
+    /// build. Settings survive: both names read the same appsettings.json.
+    /// </summary>
+    private static void RemoveLegacyInstall()
+    {
+        Run("schtasks", "/End", "/TN", LegacyTaskName);
+        Run("schtasks", "/Delete", "/TN", LegacyTaskName, "/F");
+        Run("taskkill", "/IM", LegacyProcessName + ".exe", "/F");
+        Run("sc", "stop", LegacyServiceName);
+        Run("sc", "delete", LegacyServiceName);
     }
 
     private static void StopAndDeleteService()

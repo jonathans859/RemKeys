@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 // (there is none at all in the lock-screen service).
 using ThreadingTimer = System.Threading.Timer;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Types a held key over and over, the way a keyboard attached to this PC
@@ -69,7 +69,7 @@ public sealed class KeyRepeater : IDisposable
     };
 
     private readonly IKeystrokeSink _sink;
-    private readonly KeyBridgeOptions _options;
+    private readonly RemKeysOptions _options;
     private readonly ILogger _logger;
 
     private readonly object _gate = new();
@@ -84,7 +84,7 @@ public sealed class KeyRepeater : IDisposable
     private bool? _peerRepeats;
     private bool _disposed;
 
-    public KeyRepeater(IKeystrokeSink sink, KeyBridgeOptions options, ILogger logger)
+    public KeyRepeater(IKeystrokeSink sink, RemKeysOptions options, ILogger logger)
     {
         _sink = sink;
         _options = options;

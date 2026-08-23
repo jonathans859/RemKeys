@@ -10,8 +10,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>KeyBridgeAgent</RootNamespace>
-    <AssemblyName>KeyBridgeAgent</AssemblyName>
+    <RootNamespace>RemKeysAgent</RootNamespace>
+    <AssemblyName>RemKeysAgent</AssemblyName>
     <!-- Windowless: the logon task must not spawn a closable console window.
          All output goes to the file logger; stop via uninstall-agent.bat or
          Task Scheduler, not by closing a window. -->
@@ -22,6 +22,33 @@
     <PublishSingleFile>false</PublishSingleFile>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+
+  <!-- Build identity, shown in the tray's About dialog and logged at startup.
+
+       CI passes -p:Version=1.0.N, where N is the repository's commit count.
+       Same build-number rule the iOS/macOS lanes use: monotonic on main,
+       recomputable from any checkout, and comparable as a plain integer if an
+       updater ever needs to ask "is theirs newer than mine". The commit hash
+       is not passed: the SDK appends "+<sha>" to InformationalVersion from the
+       checkout's own git data, which AgentVersion splits back apart. A local
+       dotnet build keeps the -dev fallback below, so a hand-built exe can
+       never be mistaken for a release.
+
+       The build date is stamped rather than taken from the file's timestamp:
+       deterministic builds zero the PE header's timestamp, and a file's
+       mtime survives neither a copy nor some unzip tools. -->
+  <PropertyGroup>
+    <!-- CI's -p:Version=… is a global property and overrides this outright. -->
+    <Version>1.0.0-dev</Version>
+    <Product>RemKeys agent</Product>
+    <Company>jonathan859</Company>
+    <Description>Receives RemKeys keystrokes over the network and replays them on this PC.</Description>
+    <Copyright>© 2026 jonathan859</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="BuildDate" Value="$([System.DateTime]::UtcNow.ToString('yyyy-MM-dd'))" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />

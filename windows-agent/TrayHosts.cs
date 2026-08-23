@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows.Forms;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// What the tray menu can do, which differs by how the agent was started. The
