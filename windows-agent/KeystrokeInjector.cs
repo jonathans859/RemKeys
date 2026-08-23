@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Replays virtual-key transitions as real Windows keystrokes via

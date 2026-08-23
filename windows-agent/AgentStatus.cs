@@ -1,4 +1,4 @@
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 public enum AgentState
 {

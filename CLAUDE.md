@@ -10,13 +10,44 @@ Bundle id: `com.jonathan859.keybridge`.
 "KeyBridge" was taken, so the ASC app record is "RemKeys"). The rebrand covers
 everything a user sees: display names, `PRODUCT_NAME` (so the bundle is
 `RemKeys.app` / `RemKeys.ipa`), in-app strings, permission-prompt text, the
-icon, and the macOS zip (`RemKeys-macOS.zip`). Internal names stay KeyBridge —
-targets/schemes (`KeyBridge-iOS`/`-macOS`), bundle id, `BridgeCore`
-API names, and the Windows agent (`KeyBridgeAgent`, service name, its zip) —
-renaming those buys nothing and would churn CI, the ASC record, and installed
-services. Don't "fix" the mismatch in either direction. (Exception: Jonathan
-renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
-`…/keybridge` URLs redirect.)
+icon, and the macOS zip (`RemKeys-macOS.zip`). **The Windows agent was renamed
+too, on 2026-08-23** — down to the file names: `RemKeysAgent.exe` /
+`.csproj`, namespace `RemKeysAgent`, logon task `RemKeysAgent`, service
+`RemKeysSecureAgent`, pipes `RemKeysAgent.inject`/`.status`, config section
+`RemKeys`, log file `remkeys-<date>.log`, CI artifact and zip
+`RemKeysAgent-win-x64`. The agent is the one piece a user installs and points
+at by name, so the mismatch cost more than the churn saved. **Renaming is not
+free on an installed PC**: the old install has its own task name, exe name and
+mutex, so the new agent does *not* supersede it — both would come up and fight
+over port 5391. `install-agent.bat`, `uninstall-agent.bat` and
+`ServiceSetup.RemoveLegacyInstall()` therefore delete the `KeyBridgeAgent` task,
+the `KeyBridgeAgent.exe` process and the `KeyBridgeSecureAgent` service before
+installing anything. `RemKeysOptions.LegacySectionName` keeps reading the old
+`"KeyBridge"` appsettings section underneath the new one, so a hand-edited port
+or log directory is not silently reset to defaults.
+
+Internal names that *stay* KeyBridge: Xcode targets/schemes
+(`KeyBridge-iOS`/`-macOS`), the bundle id (`com.jonathan859.keybridge`), and
+`BridgeCore` API names — renaming those would churn the ASC record and the
+signing setup for nothing a user ever sees. Don't "fix" that mismatch in either
+direction. (Jonathan also renamed the GitHub repo to `jonathans859/RemKeys` on
+2026-07-18; old `…/keybridge` URLs redirect.)
+
+**The agent knows its own build** (`AgentVersion.cs`, added 2026-08-23):
+`1.0.<commit count>` stamped by `deploy-windows.yml` via `-p:Version=`, the
+same rule the iOS/macOS build numbers follow, so versions are monotonic on main
+and comparable as a plain integer — which is what an updater would need. The
+commit hash is *not* passed on the command line: the .NET SDK appends
+`+<sha>` to `InformationalVersion` from the checkout's git data by itself. The
+build date is stamped as an `AssemblyMetadata` item rather than read from the
+file, because deterministic builds zero the PE timestamp and an mtime survives
+neither a copy nor some unzip tools. A local `dotnet build` gets `1.0.0-dev`,
+so a hand-built exe can never be mistaken for a release. It surfaces in two
+places: the first line every process writes to the log, and the tray's
+**"About RemKeys agent…"** dialog (version, commit, build date, lock-screen
+mode, elevation, port, live status, exe path, log path). That dialog is a plain
+`MessageBox` on purpose — a screen reader reads the whole body on open and
+Ctrl+C copies it.
 
 ## What each piece does
 
@@ -493,7 +524,7 @@ renamed the GitHub repo itself to `jonathans859/RemKeys` on 2026-07-18; old
   status channel with it. So the **logon task stays registered in both modes**:
   with the service on, that user-session process runs no listener and injects
   nothing — it is just the tray, fed by a second pipe
-  (`KeyBridgeAgent.status`, `StatusChannel.cs`) carrying the status line out
+  (`RemKeysAgent.status`, `StatusChannel.cs`) carrying the status line out
   and exactly one command (`stop`) back. That pipe is separate from the
   injection pipe *on purpose*: the injection pipe stays LocalSystem-only
   because it types on the secure desktop, while the status pipe is ACL'd for

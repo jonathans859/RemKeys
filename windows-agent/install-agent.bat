@@ -1,6 +1,6 @@
 @echo off
-REM Registers the KeyBridge agent as a LOGON SCHEDULED TASK and starts it.
-REM Run as Administrator, from the folder containing KeyBridgeAgent.exe.
+REM Registers the RemKeys agent as a LOGON SCHEDULED TASK and starts it.
+REM Run as Administrator, from the folder containing RemKeysAgent.exe.
 REM
 REM Why not a Windows service that injects: services run in session 0, where
 REM SendInput cannot reach the interactive desktop - every injected keystroke
@@ -14,8 +14,8 @@ REM "Turn on lock screen support..." (or install-lockscreen.bat), which adds a
 REM supervising service that spawns a helper per desktop.
 
 setlocal
-set TASK_NAME=KeyBridgeAgent
-set BIN_PATH=%~dp0KeyBridgeAgent.exe
+set TASK_NAME=RemKeysAgent
+set BIN_PATH=%~dp0RemKeysAgent.exe
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
@@ -32,21 +32,47 @@ if not exist "%BIN_PATH%" (
     exit /b 1
 )
 
-REM Clean up a service left over from the old (broken) service-based install.
+REM Anything left from before the agent was renamed from KeyBridge to RemKeys.
+REM The old install has its own task name, its own exe name and its own mutex,
+REM so the new one would NOT supersede it - both would come up and fight over
+REM port 5391, and the loser would sit there retrying while the winner typed.
+REM Remove the old one outright; its settings are read from the same
+REM appsettings.json, so nothing is lost.
+schtasks /Query /TN "KeyBridgeAgent" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Removing the old KeyBridge logon task...
+    schtasks /End /TN "KeyBridgeAgent" >nul 2>&1
+    schtasks /Delete /TN "KeyBridgeAgent" /F >nul 2>&1
+)
+taskkill /IM KeyBridgeAgent.exe /F >nul 2>&1
+sc query KeyBridgeSecureAgent >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Removing the old KeyBridge lock screen service...
+    sc stop KeyBridgeSecureAgent >nul 2>&1
+    sc delete KeyBridgeSecureAgent >nul 2>&1
+    timeout /t 2 /nobreak >nul 2>&1
+)
 sc query KeyBridgeAgent >nul 2>&1
 if %errorlevel% equ 0 (
-    echo Removing old KeyBridgeAgent Windows service...
     sc stop KeyBridgeAgent >nul 2>&1
     sc delete KeyBridgeAgent >nul 2>&1
 )
 
+REM Clean up a service left over from the old (broken) service-based install.
+sc query RemKeysAgent >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Removing old RemKeysAgent Windows service...
+    sc stop RemKeysAgent >nul 2>&1
+    sc delete RemKeysAgent >nul 2>&1
+)
+
 REM Lock screen support, if it is on, owns the port. Exactly one of the two may
 REM run, and asking for the logon task means asking for the in-session agent.
-sc query KeyBridgeSecureAgent >nul 2>&1
+sc query RemKeysSecureAgent >nul 2>&1
 if %errorlevel% equ 0 (
     echo Turning off lock screen support first ^(it would fight for the port^)...
-    sc stop KeyBridgeSecureAgent >nul 2>&1
-    sc delete KeyBridgeSecureAgent >nul 2>&1
+    sc stop RemKeysSecureAgent >nul 2>&1
+    sc delete RemKeysSecureAgent >nul 2>&1
     timeout /t 2 /nobreak >nul 2>&1
 )
 

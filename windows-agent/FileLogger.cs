@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Minimal dependency-free file logger. Writes timestamped lines to a
@@ -21,12 +21,24 @@ public sealed class FileLoggerProvider : ILoggerProvider
     /// </param>
     public FileLoggerProvider(string directory, string tag = "agent")
     {
-        _directory = string.IsNullOrWhiteSpace(directory)
-            ? Path.Combine(AppContext.BaseDirectory, "logs")
-            : directory;
+        _directory = ResolveDirectory(directory);
         _tag = tag;
         try { Directory.CreateDirectory(_directory); } catch { /* logged path may be invalid; ignore */ }
     }
+
+    /// <summary>
+    /// Where a configured directory actually lands — empty means a "logs"
+    /// folder beside the executable. Public so the About dialog can name the
+    /// file without re-deriving the rule and getting it subtly wrong.
+    /// </summary>
+    public static string ResolveDirectory(string configured) =>
+        string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(AppContext.BaseDirectory, "logs")
+            : configured;
+
+    /// <summary>Full path of the file today's lines go to.</summary>
+    public static string CurrentPath(string configured) =>
+        Path.Combine(ResolveDirectory(configured), $"remkeys-{DateTime.Now:yyyy-MM-dd}.log");
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(this, categoryName);
 
@@ -40,7 +52,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
             line += Environment.NewLine + exception;
         }
 
-        var path = Path.Combine(_directory, $"keybridge-{DateTime.Now:yyyy-MM-dd}.log");
+        var path = CurrentPath(_directory);
         lock (_gate)
         {
             // The lock only covers this process. With lock-screen support on,

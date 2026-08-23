@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.Options;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// The network loop: listens for a single Apple-side peer over TCP, reads
@@ -32,7 +32,7 @@ namespace KeyBridgeAgent;
 public sealed class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
-    private readonly KeyBridgeOptions _options;
+    private readonly RemKeysOptions _options;
     private readonly AgentStatus _status;
     private readonly IKeystrokeSink _sink;
     private readonly AgentMode _mode;
@@ -44,7 +44,7 @@ public sealed class Worker : BackgroundService
 
     public Worker(
         ILogger<Worker> logger,
-        IOptions<KeyBridgeOptions> options,
+        IOptions<RemKeysOptions> options,
         AgentStatus status,
         IKeystrokeSink sink,
         AgentMode mode)
@@ -82,7 +82,7 @@ public sealed class Worker : BackgroundService
             try
             {
                 listener.Start();
-                _logger.LogInformation("KeyBridge agent listening on port {Port}.", port);
+                _logger.LogInformation("RemKeys agent listening on port {Port}.", port);
                 _status.Set(AgentState.Listening, $"Waiting for a connection on port {port}");
                 break;
             }
@@ -156,7 +156,7 @@ public sealed class Worker : BackgroundService
         CloseQuietly(currentClient);
         await currentSession;
         listener.Stop();
-        _logger.LogInformation("KeyBridge agent stopped.");
+        _logger.LogInformation("RemKeys agent stopped.");
     }
 
     /// <summary>

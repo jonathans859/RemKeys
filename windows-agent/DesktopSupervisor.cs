@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Service-side supervisor: keeps one injector helper alive on each desktop of

@@ -4,7 +4,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading.Channels;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Service side of the tray link: publishes the status line to whoever is

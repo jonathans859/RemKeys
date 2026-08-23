@@ -1,13 +1,21 @@
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
-/// Configuration bound from the "KeyBridge" section of appsettings.json. Every
+/// Configuration bound from the "RemKeys" section of appsettings.json. Every
 /// value has a safe default so a missing or malformed config never stops the
 /// service — it logs and runs with defaults instead.
 /// </summary>
-public sealed class KeyBridgeOptions
+public sealed class RemKeysOptions
 {
-    public const string SectionName = "KeyBridge";
+    public const string SectionName = "RemKeys";
+
+    /// <summary>
+    /// What this section was called before the agent was rebranded. Still read,
+    /// underneath <see cref="SectionName"/>, so an appsettings.json a user
+    /// edited before the rename keeps its settings instead of silently
+    /// reverting to the defaults.
+    /// </summary>
+    public const string LegacySectionName = "KeyBridge";
 
     /// <summary>TCP port to listen on. Must match the Apple apps' port.</summary>
     public int ListenPort { get; set; } = 5391;

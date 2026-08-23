@@ -3,7 +3,7 @@ using System.IO.Pipes;
 using System.Security.Principal;
 using System.Text;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// The injector half of the service split. Runs as LocalSystem inside the

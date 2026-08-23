@@ -1,8 +1,9 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Microsoft.Extensions.Options;
 
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// System-tray presence for the otherwise windowless agent: an icon whose
@@ -19,6 +20,7 @@ public sealed class TrayIconService : IHostedService
 {
     private readonly AgentStatus _status;
     private readonly ITrayHost _host;
+    private readonly RemKeysOptions _options;
     private readonly ILogger<TrayIconService> _logger;
 
     private Thread? _uiThread;
@@ -27,10 +29,15 @@ public sealed class TrayIconService : IHostedService
     private ToolStripMenuItem? _statusItem;
     private nint _iconHandle;
 
-    public TrayIconService(AgentStatus status, ITrayHost host, ILogger<TrayIconService> logger)
+    public TrayIconService(
+        AgentStatus status,
+        ITrayHost host,
+        IOptions<RemKeysOptions> options,
+        ILogger<TrayIconService> logger)
     {
         _status = status;
         _host = host;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -59,6 +66,8 @@ public sealed class TrayIconService : IHostedService
             menu.Items.Add(new ToolStripMenuItem(_host.ModeLine) { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_host.ToggleLabel, null, (_, _) => SafeInvoke(_host.Toggle));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add("About RemKeys agent…", null, (_, _) => SafeInvoke(ShowAbout));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Exit RemKeys agent", null, (_, _) => SafeInvoke(_host.Exit));
 
@@ -97,6 +106,40 @@ public sealed class TrayIconService : IHostedService
         {
             _logger.LogError(ex, "A tray menu action failed.");
         }
+    }
+
+    /// <summary>
+    /// Everything you would otherwise have to dig out of a log file to answer
+    /// "which build is this and what is it doing": the version and the commit
+    /// it came from, which mode it is in, whether it is elevated (the failure
+    /// that is otherwise completely silent), the port, and where the log is.
+    ///
+    /// A plain MessageBox on purpose — a screen reader reads its whole body on
+    /// open, and Ctrl+C copies the text, which is exactly what is wanted when
+    /// reporting something. It runs on the tray's own STA thread, so the menu
+    /// is already gone by the time it appears.
+    /// </summary>
+    private void ShowAbout()
+    {
+        var elevation = _status.IsElevated
+            ? "elevated (keystrokes reach elevated and screen-reader windows)"
+            : "NOT elevated — keystrokes will not reach elevated or screen-reader windows";
+
+        var text = string.Join(Environment.NewLine, new[]
+        {
+            "RemKeys agent",
+            "Version " + AgentVersion.Display,
+            "",
+            _host.ModeLine,
+            "Running as: " + elevation,
+            "Listening port: " + _options.ListenPort,
+            "Status: " + _status.Description,
+            "",
+            "Program: " + (Environment.ProcessPath ?? "unknown"),
+            "Log file: " + FileLoggerProvider.CurrentPath(_options.LogDirectory),
+        });
+
+        MessageBox.Show(text, "About RemKeys agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void OnStatusChanged()
@@ -161,7 +204,7 @@ public sealed class TrayIconService : IHostedService
     }
 
     /// <summary>
-    /// Distinct 16×16 icon drawn in code (blue circle, white "K") so the exe
+    /// Distinct 16×16 icon drawn in code (blue circle, white "R") so the exe
     /// ships no asset and never falls back to the generic-app icon.
     /// </summary>
     private static Icon CreateIcon(out nint handle)
@@ -173,8 +216,8 @@ public sealed class TrayIconService : IHostedService
             using var fill = new SolidBrush(Color.FromArgb(0, 120, 215));
             g.FillEllipse(fill, 0, 0, 15, 15);
             using var font = new Font("Segoe UI", 8, FontStyle.Bold, GraphicsUnit.Point);
-            var size = g.MeasureString("K", font);
-            g.DrawString("K", font, Brushes.White, (16 - size.Width) / 2, (16 - size.Height) / 2);
+            var size = g.MeasureString("R", font);
+            g.DrawString("R", font, Brushes.White, (16 - size.Width) / 2, (16 - size.Height) / 2);
         }
         handle = bitmap.GetHicon();
         return Icon.FromHandle(handle);

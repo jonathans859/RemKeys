@@ -4,10 +4,10 @@ REM classic logon scheduled task back, i.e. the agent that runs only while you
 REM are signed in.
 REM
 REM Same thing as "Turn off lock screen support..." in the tray menu.
-REM Run as Administrator, from the folder containing KeyBridgeAgent.exe.
+REM Run as Administrator, from the folder containing RemKeysAgent.exe.
 
 setlocal
-set BIN_PATH=%~dp0KeyBridgeAgent.exe
+set BIN_PATH=%~dp0RemKeysAgent.exe
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (

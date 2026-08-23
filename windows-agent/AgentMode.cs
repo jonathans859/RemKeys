@@ -1,4 +1,4 @@
-namespace KeyBridgeAgent;
+namespace RemKeysAgent;
 
 /// <summary>
 /// Which of the agent's four personalities this process is. One executable
