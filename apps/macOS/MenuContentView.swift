@@ -81,13 +81,13 @@ struct MenuContentView: View {
     private var connectionControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Windows PC").font(.caption).foregroundStyle(.secondary)
-            TextField("Tailscale address", text: Binding(
+            TextField("IP address", text: Binding(
                 get: { settings.targetHost },
                 set: { settings.targetHost = $0 }
             ))
             .textFieldStyle(.roundedBorder)
-            .accessibilityLabel("Tailscale address")
-            .accessibilityHint("The target computer's Tailscale IP address")
+            .accessibilityLabel("IP address")
+            .accessibilityHint("The Windows PC's address: its Tailscale IP, or a local one if both machines are on the same network")
 
             TextField("Port", value: Binding(
                 get: { settings.targetPort },

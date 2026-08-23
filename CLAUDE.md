@@ -501,16 +501,32 @@ printed next to it.
   grey, uppercased) is what a bare `Form` gives you and is most of why the
   screens read as unstyled. Used on all three tabs *and* inside every info
   sheet, which is what ties the sheets to the screens they explain.
+  **It carries `.isHeader`, and that line is load-bearing.** A `Form` gives its
+  own `Text` headers the heading trait so VoiceOver's rotor can jump section to
+  section; a custom view handed to `header:` does **not** inherit it. The first
+  version shipped bold text that only looked like a heading, and because every
+  screen is built out of this one type, that lost rotor navigation everywhere
+  at once — info sheets included, which are the longest reads in the app
+  (field-reported 2026-08-23). Styling a heading is never enough; say it is
+  one. `children: .ignore` goes with it so what VoiceOver lands on is exactly
+  the title and not the symbol's name.
 - **`remKeysCard(active:)` + `cardRow()`** are the one card treatment: a
   continuous-radius panel with a hairline accent edge, dropped into a `Form`
   row whose own background is cleared. `active: true` swaps in a soft accent
   gradient and firms the border. Exactly one thing uses it today — the Start
   tab's hero — and that is the point: if everything is a card, nothing is.
 - **Start is a hero card**: status LED (green live / amber connecting / grey
-  idle), the state, the connection line, and the Start–Stop button, all in one
-  panel, over two ordinary sections. They used to be separate `Form` rows with
-  a paragraph of footer between them, which buried the only thing the tab is
-  for.
+  idle), the state, the connection line, and **both** session buttons — Start/
+  Stop, then the screen curtain at the same size directly beneath it — in one
+  panel, over a single "Windows PC" section. They used to be separate `Form`
+  rows across three sections with a paragraph of footer between them, which
+  buried the only things the tab is for. The curtain sits with Start rather
+  than in a section of its own because it is pressed just as often: it is how a
+  long session begins (field-reported 2026-08-23).
+- **The address field is labelled "IP address", not "Tailscale address."**
+  Tailscale is how it is expected to be used and what the placeholder shows,
+  but nothing in the app requires it — a plain LAN address works identically,
+  and the old label read as a requirement. Same wording on macOS.
 - **Settings rows do not explain themselves.** The teaching text lives in
   exactly two opt-in places: the info sheet (which describes the settings *as
   currently set*, so it beats a static footer anyway) and each control's
@@ -533,6 +549,13 @@ printed next to it.
 
 ## Accessibility (non-negotiable — daily personal use)
 - Every control has a label/hint; no state is conveyed by color/visuals alone.
+- **Headings are real headings.** Anything that looks like a section title
+  carries `.isHeader` so VoiceOver's rotor can jump between them — see
+  `SectionHeader` under iOS visual design for the trap that made this a rule.
+- **A visible label and its accessibility label must not diverge.** Voice
+  Control matches on the *visible* string, so shortening a row's text and
+  restoring the long phrase in `accessibilityLabel` makes the row unspeakable.
+  Write the label once, self-describing.
 - **iOS**: state changes are announced via `UIAccessibility.post(.announcement)`
   (forwarding on/off, connection status). Magic tap (two-finger double tap)
   lives on the root tab view and routes by tab: on Virtual Input it sends the

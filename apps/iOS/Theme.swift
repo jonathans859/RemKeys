@@ -18,13 +18,24 @@ enum Theme {
 }
 
 /// The one section header in the app: an SF Symbol, the title in sentence
-/// case, semibold and at full contrast.
+/// case, semibold and at full contrast — and **an actual heading**.
 ///
-/// The system default — small, grey, SHOUTED IN CAPS — is what a plain
-/// `Form` gives you and is most of why a settings screen reads as unstyled.
-/// Sentence case plus a glyph gives each section a landmark a sighted user can
-/// scan to, and VoiceOver reads the title exactly as written either way (the
-/// symbol is decorative and carries no label of its own).
+/// The system default — small, grey, SHOUTED IN CAPS — is what a plain `Form`
+/// gives you and is most of why a settings screen reads as unstyled. Sentence
+/// case plus a glyph gives each section a landmark a sighted user can scan to.
+///
+/// `.isHeader` is the load-bearing line, not the styling. A `Form` gives its
+/// *own* `Text` headers the heading trait, so VoiceOver's rotor can jump
+/// section to section; a custom view handed to `header:` does not inherit
+/// that, and the first version of this type shipped bold text that merely
+/// looked like a heading and could not be navigated to (field-reported
+/// 2026-08-23). Every screen in the app is built out of these, so losing the
+/// trait cost rotor navigation everywhere at once — including inside the info
+/// sheets, which are the longest reads in the app and need it most.
+///
+/// `children: .ignore` makes what VoiceOver reads exactly the title: `Label`
+/// is one element already, but combining leaves the symbol free to contribute
+/// a name of its own, and a heading has to be worth landing on.
 struct SectionHeader: View {
     let title: String
     let systemImage: String
@@ -41,6 +52,9 @@ struct SectionHeader: View {
             // Overrides the uppercasing a Form section applies to its header.
             .textCase(nil)
             .padding(.bottom, 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 

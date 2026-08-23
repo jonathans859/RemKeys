@@ -12,11 +12,13 @@ import BridgeCore
 /// sleeps out from under the user. App-wide behavior (magic tap, scene-phase
 /// stop, bridge callbacks) lives in `RootTabView`.
 ///
-/// The screen is one **hero card** — state, connection line and the one button
-/// that matters, together — over two ordinary sections. Status and action used
-/// to be separate `Form` rows with a paragraph of footer between them, which
-/// buried the only thing this tab is for. Everything that explains rather than
-/// reports lives in the info sheet, reachable from the toolbar.
+/// The screen is one **hero card** — state, connection line, and both of the
+/// buttons a session is driven by (Start/Stop, then the screen curtain at the
+/// same size directly under it) — over a single "Windows PC" section. All four
+/// used to be separate `Form` rows in three sections with a paragraph of
+/// footer between them, which buried the only things this tab is for.
+/// Everything that explains rather than reports lives in the info sheet,
+/// reachable from the toolbar.
 struct ContentView: View {
     let settings: AppSettings
     let bridge: BridgeClient
@@ -42,7 +44,6 @@ struct ContentView: View {
                 Form {
                     heroSection
                     connectionSection
-                    curtainSection
                 }
                 .navigationTitle("RemKeys")
                 // Compact title app-wide: it sits at the top of the screen and
@@ -106,23 +107,47 @@ struct ContentView: View {
                 .accessibilityValue(bridge.status.announcement)
                 .accessibilityAddTraits(.updatesFrequently)
 
-                Button {
-                    toggleForwarding()
-                } label: {
-                    Text(isForwarding ? "Stop forwarding" : "Start forwarding")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
+                // The two things this screen is for, stacked and the same
+                // size. The curtain used to be a plain text row in a section
+                // of its own further down; it is pressed just as often as
+                // Start is (it is how a long session begins), so it gets a
+                // button of the same weight, immediately below.
+                VStack(spacing: 10) {
+                    Button {
+                        toggleForwarding()
+                    } label: {
+                        Text(isForwarding ? "Stop forwarding" : "Start forwarding")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(isForwarding ? .red : .accentColor)
+                    .accessibilityHint(isForwarding
+                        ? "Stops sending keystrokes to the Windows PC"
+                        : "Connects and starts sending keystrokes to the Windows PC")
+
+                    Button {
+                        activateCurtain()
+                    } label: {
+                        Label("Turn the screen off", systemImage: "moon.fill")
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                    }
+                    // Bordered, not prominent: same footprint as Start, but
+                    // clearly the second of the two.
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    // No accessibilityLabel override anywhere in this stack:
+                    // Voice Control matches on the visible text, so a label
+                    // and its button must not drift apart.
+                    .accessibilityHint("Blacks the screen out and drops brightness to zero to save battery. Keystrokes keep forwarding. Double-tap the screen to turn it back on.")
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(isForwarding ? .red : .accentColor)
-                .accessibilityLabel(isForwarding ? "Stop forwarding" : "Start forwarding")
-                .accessibilityHint(isForwarding
-                    ? "Stops sending keystrokes to the Windows PC"
-                    : "Connects and starts sending keystrokes to the Windows PC")
             }
             .remKeysCard(active: isForwarding)
             .cardRow()
+        } footer: {
+            Text("Double-tap the screen to turn it back on.")
         }
     }
 
@@ -149,7 +174,11 @@ struct ContentView: View {
 
     private var connectionSection: some View {
         Section {
-            LabeledContent("Tailscale address") {
+            // "IP address", not "Tailscale address": Tailscale is how this is
+            // expected to be used and what the placeholder shows, but nothing
+            // in the app requires it — a plain LAN address works exactly the
+            // same, and the old label read as a requirement.
+            LabeledContent("IP address") {
                 TextField("100.x.y.z", text: Binding(
                     get: { settings.targetHost },
                     set: { settings.targetHost = $0 }
@@ -161,7 +190,7 @@ struct ContentView: View {
                 .submitLabel(.done)
                 .onSubmit { CaptureView.requestReclaim() }
             }
-            .accessibilityHint("The target computer's Tailscale IP address")
+            .accessibilityHint("The Windows PC's address: its Tailscale IP, or a local one if both machines are on the same network")
 
             LabeledContent("Port") {
                 TextField("5391", value: Binding(
@@ -174,27 +203,6 @@ struct ContentView: View {
             .accessibilityHint("Must match the port in the Windows agent's appsettings.json")
         } header: {
             SectionHeader("Windows PC", systemImage: "desktopcomputer")
-        }
-    }
-
-    /// Battery saver for long forwarding sessions: black overlay + brightness
-    /// zero (see `RootTabView`). Offered with VoiceOver running too — its own
-    /// Screen Curtain is a different switch in a different place and leaves
-    /// the backlight on, which is the half that costs the battery.
-    private var curtainSection: some View {
-        Section {
-            Button {
-                activateCurtain()
-            } label: {
-                Label("Turn the screen off", systemImage: "moon.fill")
-            }
-            // No accessibilityLabel override: Voice Control matches on the
-            // visible text, so the two must not drift apart.
-            .accessibilityHint("Blacks the screen out and drops brightness to zero to save battery. Keystrokes keep forwarding.")
-        } header: {
-            SectionHeader("Screen curtain", systemImage: "moon.stars")
-        } footer: {
-            Text("Double-tap the screen to turn it back on.")
         }
     }
 
