@@ -30,6 +30,12 @@ struct RootTabView: View {
     // behaviour changes.
     @State private var curtainActive = false
     @State private var brightnessBeforeCurtain: CGFloat = 1
+    /// Whether we are currently holding the screen's brightness at zero.
+    /// Tracked apart from `curtainActive` because the two have to part company
+    /// the moment the app stops being frontmost: the black overlay is ours to
+    /// keep, but the brightness belongs to the whole phone. See the
+    /// scene-phase handler.
+    @State private var brightnessHeldDown = false
     /// Whether this forwarding session has already raised the curtain by
     /// itself. Reset when forwarding stops, so `autoScreenCurtain` fires once
     /// per session and a reconnect never re-blacks a screen the user just
@@ -82,6 +88,16 @@ struct RootTabView: View {
                     bridge.releaseHeldKeys()
                     CaptureView.requestForgetHeldKeys()
                 }
+                // Hand the brightness back here, not at `.background`.
+                // `.inactive` is where the user is looking at something that
+                // is NOT us — Control Center, the app switcher, the home
+                // screen mid-swipe — and those can last as long as they like
+                // without ever reaching `.background`, leaving a phone that is
+                // simply dark everywhere. It is also the last callback a
+                // force-quit from the switcher is sure to deliver. The curtain
+                // itself stays up: coming back re-blacks the screen and the
+                // session was never interrupted.
+                releaseBrightness()
             case .background:
                 // Actually gone. Capture is impossible from here, so stop
                 // forwarding rather than leave the remote holding a chord —
@@ -94,6 +110,11 @@ struct RootTabView: View {
             case .active:
                 // Whatever took the screen may have taken first responder too.
                 CaptureView.requestReclaim()
+                // Frontmost again, so the curtain that stayed up gets its
+                // brightness back down. Re-reads the current level first, so a
+                // brightness the user changed while they were away is what we
+                // restore to later.
+                if curtainActive { holdBrightnessDown() }
             @unknown default:
                 break
             }
@@ -125,12 +146,28 @@ struct RootTabView: View {
         guard curtainActive != on else { return }
         curtainActive = on
         if on {
-            brightnessBeforeCurtain = screen?.brightness ?? 1
-            screen?.brightness = 0
+            holdBrightnessDown()
         } else {
-            screen?.brightness = brightnessBeforeCurtain
+            releaseBrightness()
         }
         updateIdleTimer()
+    }
+
+    /// Take the screen to zero, remembering what it was. Both halves are
+    /// idempotent on `brightnessHeldDown`, or a second call would record zero
+    /// as the level to restore to and the phone would never come back.
+    private func holdBrightnessDown() {
+        guard !brightnessHeldDown, let screen else { return }
+        brightnessBeforeCurtain = screen.brightness
+        brightnessHeldDown = true
+        screen.brightness = 0
+    }
+
+    /// Give the brightness back. Safe to call when we are not holding it.
+    private func releaseBrightness() {
+        guard brightnessHeldDown, let screen else { return }
+        brightnessHeldDown = false
+        screen.brightness = brightnessBeforeCurtain
     }
 
     /// The scene's screen; `UIScreen.main` is deprecated in scene-based apps.

@@ -181,8 +181,20 @@ Ctrl+C copies it.
 - **Screen curtain** (Start tab button, overlay in `RootTabView`): black
   overlay + brightness 0, the battery saver for long forwarding sessions;
   double-tap dismisses. Idle timer is held while forwarding *or* curtained,
-  and capture keeps working under the overlay. Brightness is a system-sticky
-  setting, so it auto-restores on backgrounding.
+  and capture keeps working under the overlay.
+  **The overlay and the brightness are held separately** (`curtainActive` vs
+  `brightnessHeldDown`, split 2026-08-24). Brightness is a system-wide setting
+  that outlives the app, so it is given back at **`.inactive`** and taken down
+  again on the return to `.active` — while the overlay stays up throughout, so
+  a glance at Control Center still costs nothing. Restoring only at
+  `.background` (as it did between 2026-08-23 and this fix) left the phone
+  dark everywhere: `.inactive` can last as long as the user likes — Control
+  Center, Notification Center, the app switcher, the home screen mid-swipe —
+  and never reaches `.background` at all, and it is also the last callback a
+  force-quit from the switcher is sure to deliver. Field-reported 2026-08-24
+  as "swipe out of the app and the brightness stays dark". Both helpers guard
+  on `brightnessHeldDown`, or a second hold would record 0 as the level to
+  restore to and the screen would never come back.
   **Offered with VoiceOver on too** (2026-08-23; it used to be hidden, on the
   theory that VoiceOver's own Screen Curtain covered it). It does not: that is
   a different switch in a different place, and it leaves the backlight on —
