@@ -58,23 +58,58 @@ public sealed class RemKeysOptions
     public int KeyRepeatIntervalMs { get; set; }
 
     /// <summary>
-    /// Lock-screen mode only: accept connections from outside Tailscale's
-    /// address ranges (100.64.0.0/10 and fd7a:115c:a1e0::/48).
+    /// Lock-screen mode only: how far out the circle of machines allowed to
+    /// type at this PC's lock screen reaches — <c>Tailscale</c> (the default),
+    /// <c>LocalNetwork</c> or <c>Any</c>. See <see cref="PeerAccess"/>.
     ///
-    /// Off by default because in that mode the listener runs as LocalSystem and
-    /// can type on the secure desktop — a connection from anywhere else is a
-    /// way past the lock screen. The classic in-session agent ignores this;
-    /// it can only do what the signed-in user could do anyway.
+    /// A string rather than the enum itself so a typo in a hand-edited config
+    /// cannot stop the service from starting: it is parsed leniently and falls
+    /// back to the safest value with a warning. Normally set from the tray
+    /// menu, which writes this key.
+    ///
+    /// The classic in-session agent ignores it entirely; it can only do what
+    /// the signed-in user could do anyway.
+    /// </summary>
+    public string LockScreenAccess { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Superseded by <see cref="LockScreenAccess"/>, still read so an
+    /// appsettings.json written before it existed keeps its meaning: true here
+    /// is what <c>Any</c> is now. The tray removes this key when it writes the
+    /// new one, so the file only ever states one policy.
     /// </summary>
     public bool AllowNonTailscalePeers { get; set; }
 
     /// <summary>
-    /// Lock-screen mode only: accept connections from this machine itself.
-    ///
-    /// Off by default: with a LocalSystem listener, loopback turns any ordinary
-    /// process on this PC into a way to type as SYSTEM on the secure desktop —
-    /// a local privilege-escalation path that does not exist without the
-    /// service.
+    /// Lock-screen mode only: accept connections from this machine itself even
+    /// under <see cref="PeerAccess.Tailscale"/>, which otherwise refuses them —
+    /// with a LocalSystem listener, loopback turns any ordinary process on this
+    /// PC into a way to type as SYSTEM on the secure desktop. Kept as the local
+    /// testing escape hatch; the wider two settings allow loopback anyway.
     /// </summary>
     public bool AllowLoopbackPeers { get; set; }
+
+    /// <summary>
+    /// The peer policy actually in force, resolving the current key, then the
+    /// legacy boolean, then the default. <paramref name="warning"/> is non-null
+    /// only when the configured value could not be understood.
+    /// </summary>
+    public PeerAccess ResolveLockScreenAccess(out string? warning)
+    {
+        warning = null;
+
+        // IsNullOrWhiteSpace, not Trim().Length: a literal null in the JSON
+        // binds as null, and this runs in the service's constructor — an NRE
+        // here would be a service that will not start over a config typo.
+        if (string.IsNullOrWhiteSpace(LockScreenAccess))
+        {
+            return AllowNonTailscalePeers ? PeerAccess.Any : PeerAccess.Tailscale;
+        }
+
+        if (PeerAccessPolicy.TryParse(LockScreenAccess, out var access)) return access;
+
+        warning = $"LockScreenAccess \"{LockScreenAccess}\" is not one of " +
+            $"{string.Join(", ", PeerAccessPolicy.All.Select(PeerAccessPolicy.Canonical))}";
+        return PeerAccess.Tailscale;
+    }
 }

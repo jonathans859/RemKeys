@@ -1,7 +1,7 @@
 namespace RemKeysAgent;
 
 /// <summary>
-/// Which of the agent's four personalities this process is. One executable
+/// Which of the agent's five personalities this process is. One executable
 /// covers all of them so there is a single file to ship, sign and update.
 /// </summary>
 public enum AgentRole
@@ -34,6 +34,19 @@ public enum AgentRole
 
     /// <summary><c>--uninstall-service</c>, run from the tray.</summary>
     UninstallService,
+
+    /// <summary>
+    /// <c>--set-access &lt;Tailscale|LocalNetwork|Any&gt;</c>, run elevated from
+    /// the tray: writes the lock-screen peer policy into appsettings.json and
+    /// restarts the service so it takes effect.
+    ///
+    /// It is its own elevated process for the same reason the install verb is.
+    /// The tray runs as the signed-in user, and the status pipe it talks to the
+    /// service over is open to any interactive user — widening who may type on
+    /// the secure desktop must not be something a non-admin can do by sending a
+    /// line down that pipe.
+    /// </summary>
+    SetPeerAccess,
 }
 
 /// <summary>The two desktops of an interactive window station that matter here.</summary>
@@ -64,6 +77,11 @@ public sealed class AgentMode
     /// </summary>
     public int WaitForPid { get; init; }
 
+    /// <summary>
+    /// Peer policy to write. Meaningful for <see cref="AgentRole.SetPeerAccess"/>.
+    /// </summary>
+    public PeerAccess Access { get; init; } = PeerAccess.Tailscale;
+
     public bool IsWinlogonHelper => Role == AgentRole.Helper
         && string.Equals(Desktop, DesktopNames.Winlogon, StringComparison.OrdinalIgnoreCase);
 
@@ -72,6 +90,7 @@ public sealed class AgentMode
         var role = AgentRole.Standalone;
         var desktop = DesktopNames.Default;
         var waitPid = 0;
+        var access = PeerAccess.Tailscale;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -95,6 +114,18 @@ public sealed class AgentMode
                 case "--wait-pid":
                     if (i + 1 < args.Length && int.TryParse(args[i + 1], out var pid)) { waitPid = pid; i++; }
                     break;
+                case "--set-access":
+                    // An unparseable value falls back to the safest policy
+                    // rather than to whatever was there — this verb only ever
+                    // arrives from the tray, so a bad one means something is
+                    // wrong and the strictest answer is the right guess.
+                    role = AgentRole.SetPeerAccess;
+                    if (i + 1 < args.Length && PeerAccessPolicy.TryParse(args[i + 1], out var parsed))
+                    {
+                        access = parsed;
+                        i++;
+                    }
+                    break;
             }
         }
 
@@ -104,7 +135,13 @@ public sealed class AgentMode
             ? DesktopNames.Winlogon
             : DesktopNames.Default;
 
-        return new AgentMode { Role = role, Desktop = desktop, WaitForPid = waitPid };
+        return new AgentMode
+        {
+            Role = role,
+            Desktop = desktop,
+            WaitForPid = waitPid,
+            Access = access,
+        };
     }
 
     /// <summary>Short tag for log lines, so the three processes are tellable apart in one file.</summary>
@@ -114,6 +151,7 @@ public sealed class AgentMode
         AgentRole.Helper => $"helper:{Desktop}",
         AgentRole.InstallService => "install",
         AgentRole.UninstallService => "uninstall",
+        AgentRole.SetPeerAccess => "set-access",
         _ => "agent",
     };
 }

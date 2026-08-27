@@ -45,6 +45,10 @@ normally used, and it is what encrypts and authenticates the link.
   keep typing at the lock screen, the sign-in screen and UAC prompts. It swaps
   the logon task for a LocalSystem service, and tightens which peers are
   accepted, since anyone who can reach the port could then type as SYSTEM.
+  **Who may type at the lock screen** is a tray menu of its own while this is
+  on: Tailscale addresses only (the default), Tailscale or this local network,
+  or any address. Pick the second one if you use RemKeys over a plain home
+  network — otherwise the PC will refuse the connection and say so in the tray.
 - **Key repeat** — held keys repeat at the PC's own repeat delay and rate;
   Windows does not repeat injected keys by itself.
 - **Dropped links recover on their own** — TCP keepalive at both ends, the

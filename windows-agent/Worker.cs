@@ -40,6 +40,8 @@ public sealed class Worker : BackgroundService
     private readonly HashSet<ushort> _held = new();
     /// <summary>Types a held key over and over; Windows will not do it for injected input.</summary>
     private readonly KeyRepeater _repeater;
+    /// <summary>Who may connect. Only consulted in lock-screen mode; see <see cref="PeerAccess"/>.</summary>
+    private readonly PeerAccess _access;
     private int _port;
 
     public Worker(
@@ -55,6 +57,13 @@ public sealed class Worker : BackgroundService
         _sink = sink;
         _mode = mode;
         _repeater = new KeyRepeater(sink, _options, logger);
+
+        _access = _options.ResolveLockScreenAccess(out var accessWarning);
+        if (accessWarning is not null)
+        {
+            _logger.LogWarning("{Warning}; falling back to {Access}.",
+                accessWarning, PeerAccessPolicy.Canonical(_access));
+        }
     }
 
     public override void Dispose()
@@ -83,6 +92,13 @@ public sealed class Worker : BackgroundService
             {
                 listener.Start();
                 _logger.LogInformation("RemKeys agent listening on port {Port}.", port);
+                if (_mode.Role == AgentRole.Service)
+                {
+                    // The one setting that can make a working install look
+                    // broken ("connected, nothing typed"), so state it up front.
+                    _logger.LogInformation("{Menu}: {Access}.",
+                        TrayText.PeerMenuTitle, PeerAccessPolicy.Label(_access));
+                }
                 _status.Set(AgentState.Listening, $"Waiting for a connection on port {port}");
                 break;
             }
@@ -131,6 +147,15 @@ public sealed class Worker : BackgroundService
             if (!IsAllowed(address, remote, out var rejection))
             {
                 _logger.LogWarning("Rejected connection from {Remote}: {Reason}", remote, rejection);
+                // Say it in the tray too, which is the only channel a screen
+                // reader has: a peer refused by the policy looks like a working
+                // install from the other end, since the app connects and simply
+                // types into nothing. Not while a real peer is live, though —
+                // a stray port scan must not wipe "Connected to …".
+                if (currentSession.IsCompleted)
+                {
+                    _status.Set(AgentState.Listening, $"Refused {remote} — {rejection}");
+                }
                 CloseQuietly(client);
                 continue;
             }
@@ -344,46 +369,11 @@ public sealed class Worker : BackgroundService
             return false;
         }
 
-        if (IPAddress.IsLoopback(address) && !_options.AllowLoopbackPeers)
-        {
-            // The listener is LocalSystem and can type on the secure desktop:
-            // loopback would let any process on this PC escalate to SYSTEM
-            // input. Set AllowLoopbackPeers to override for local testing.
-            rejection = "loopback is not allowed while lock screen support is on";
-            return false;
-        }
+        if (PeerAccessPolicy.Allows(_access, address, _options.AllowLoopbackPeers)) return true;
 
-        if (!_options.AllowNonTailscalePeers && !IsTailscaleAddress(address) && !IPAddress.IsLoopback(address))
-        {
-            rejection = "not a Tailscale address (set AllowNonTailscalePeers to override)";
-            return false;
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Tailscale hands out IPv4 from the CGNAT block 100.64.0.0/10 and IPv6
-    /// from fd7a:115c:a1e0::/48. Anything else reached this port over a plain
-    /// LAN or a forwarded port, which is not the threat model.
-    /// </summary>
-    private static bool IsTailscaleAddress(IPAddress address)
-    {
-        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
-
-        if (address.AddressFamily == AddressFamily.InterNetwork)
-        {
-            var octets = address.GetAddressBytes();
-            return octets[0] == 100 && octets[1] >= 64 && octets[1] <= 127;
-        }
-
-        if (address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            var bytes = address.GetAddressBytes();
-            return bytes[0] == 0xFD && bytes[1] == 0x7A && bytes[2] == 0x11 && bytes[3] == 0x5C
-                && bytes[4] == 0xA1 && bytes[5] == 0xE0;
-        }
-
+        // Name the tray item that changes this, so the log tells a user on a
+        // plain LAN what to do rather than only that they were refused.
+        rejection = PeerAccessPolicy.Rejection(_access);
         return false;
     }
 

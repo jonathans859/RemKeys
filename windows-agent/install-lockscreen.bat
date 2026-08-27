@@ -9,9 +9,11 @@ REM the recovery path for when there is no tray to click.
 REM
 REM Run as Administrator, from the folder containing RemKeysAgent.exe.
 REM
-REM Note: while this is on, anyone who can reach this PC over Tailscale can
-REM type at the lock screen. The listener therefore refuses connections from
-REM loopback and from non-Tailscale addresses unless appsettings.json opts in.
+REM Note: while this is on, anyone who can reach the port can type at the lock
+REM screen, so the listener only accepts Tailscale addresses to start with.
+REM If you connect over a plain home or office network instead, change
+REM "Who may type at the lock screen" in the tray menu afterwards - or set
+REM LockScreenAccess to "LocalNetwork" (or "Any") in appsettings.json.
 
 setlocal
 set BIN_PATH=%~dp0RemKeysAgent.exe

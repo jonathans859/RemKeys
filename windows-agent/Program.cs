@@ -2,19 +2,21 @@ using System.Security.Principal;
 using RemKeysAgent;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
-// One executable, four personalities — see AgentMode. No arguments is the
+// One executable, five personalities — see AgentMode. No arguments is the
 // classic in-session agent, so an existing install keeps behaving exactly as
 // it did.
 var mode = AgentMode.Parse(args);
 
-// The install/uninstall verbs are one-shot: they do their work, tell the user
-// in a dialog, and exit. No host, no listener.
+// The install/uninstall/set-access verbs are one-shot: they do their work, tell
+// the user in a dialog, and exit. No host, no listener.
 switch (mode.Role)
 {
     case AgentRole.InstallService:
         return ServiceSetup.Install(mode);
     case AgentRole.UninstallService:
         return ServiceSetup.Uninstall();
+    case AgentRole.SetPeerAccess:
+        return ServiceSetup.SetPeerAccess(mode.Access);
 }
 
 // Anchor the content root to the exe's folder: the logon scheduled task and

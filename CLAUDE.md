@@ -579,10 +579,11 @@ printed next to it.
   user can track remote state from the sound alone.
 
 ## Windows agent
-- .NET 8 worker host, **one exe with four modes** (`AgentMode.cs`): no args =
+- .NET 8 worker host, **one exe with five modes** (`AgentMode.cs`): no args =
   the in-session agent, `--service` = the lock-screen supervisor, `--helper
-  --desktop <name>` = a per-desktop injector, and `--install-service` /
-  `--uninstall-service` = the one-shot mode switchers.
+  --desktop <name>` = a per-desktop injector, `--install-service` /
+  `--uninstall-service` = the one-shot mode switchers, and `--set-access
+  <Tailscale|LocalNetwork|Any>` = the one-shot peer-policy writer.
 - **Default install: a logon scheduled task in the user's session, and the
   injecting process is NEVER a session 0 service** (`install-agent.bat` /
   `uninstall-agent.bat`, **run as Administrator**). A service lives in
@@ -653,13 +654,48 @@ printed next to it.
   sees the service running and comes up as a tray client instead.
 - **Security consequence, deliberate**: with this on, anyone who can reach the
   port can type at the lock screen, and the listener is LocalSystem. So in
-  service mode *only*, the peer policy tightens — loopback is refused
-  (otherwise any medium-IL process on the PC could type as SYSTEM on the
-  secure desktop, a local EoP that doesn't exist otherwise) and peers outside
-  Tailscale's ranges (100.64.0.0/10, fd7a:115c:a1e0::/48) are refused.
-  `AllowLoopbackPeers` / `AllowNonTailscalePeers` override. The in-session
-  agent keeps its old laxer policy: it can only do what the signed-in user
-  already could.
+  service mode *only*, the peer policy tightens. The in-session agent keeps its
+  old laxer policy — it can only do what the signed-in user already could — so
+  this whole question exists in exactly one mode.
+- **"Who may type at the lock screen" is one ordered scale, not a bag of
+  booleans** (`PeerAccess.cs`, added 2026-08-26; the tray menu item is the
+  user-facing name and `TrayText.PeerMenuTitle` is the single source of that
+  string). Three values: **`Tailscale`** (default — 100.64.0.0/10 and
+  fd7a:115c:a1e0::/48, loopback refused), **`LocalNetwork`** (adds RFC 1918,
+  169.254/16, fc00::/7, fe80::/10 and loopback) and **`Any`**. Reason for the
+  rebuild: **not everyone uses Tailscale** — nothing in the apps requires it,
+  a plain LAN address works identically, and the old policy silently refused
+  those users with the only clue in a log file. Two things follow from the
+  shape: loopback is *not* a separate axis in the wider two settings (once any
+  LAN address is accepted, a local process can just connect to the PC's own LAN
+  address, so refusing 127.0.0.1 would be theatre — `AllowLoopbackPeers`
+  survives only as the testing escape hatch under `Tailscale`), and the LAN
+  ranges are a **fixed list rather than "whatever subnet this PC's adapters are
+  on"**, because a rule the user can predict beats one that changes when a VPN
+  or a dock appears. `AllowNonTailscalePeers` still reads as `Any` when
+  `LockScreenAccess` is absent (`ResolveLockScreenAccess`), and the tray deletes
+  that key when it writes the new one so the file states one policy. An
+  unparseable value logs and falls back to `Tailscale` rather than refusing to
+  start.
+- **Changing it goes through UAC, not the status pipe** (`--set-access`,
+  `ServiceSetup.SetPeerAccess`). The pipe was right there and already carries
+  `stop`, but it is ACL'd for `Interactive`: stopping a service on your own
+  console is no worse than pulling the plug, while widening who may type on the
+  secure desktop is an administrator's decision. So the tray relaunches the exe
+  elevated exactly like the install toggle does; the elevated process writes
+  `appsettings.json` (via a temp file; a config that won't parse is left alone
+  rather than clobbered), restarts the service — options bind once at startup,
+  and a live-reload path through the one check guarding the lock screen isn't
+  worth the saving — and restarts the logon task so the tray re-reads the file.
+  That restart is why the tray needs no protocol change to stay truthful.
+- **A refused peer is announced, not just logged.** This setting is the one that
+  makes a working install look broken from the phone's end (it connects, and
+  nothing is typed), so a rejection also becomes the tray status —
+  `Refused <ip> — not allowed by "Who may type at the lock screen: …"` — which
+  is what NVDA reads in the tray. Guarded on `currentSession.IsCompleted` so a
+  stray port scan can't wipe a live "Connected to …". A pinned `AllowedRemoteIP`
+  overrides the whole scale, so the tray greys the choices out and says so
+  rather than offering one that would change nothing.
 - **Ctrl+Alt+Del cannot be injected** — SAS is handled below the input stack.
   On a box with *Require Ctrl+Alt+Del* set, that needs `SendSAS()` and the
   `SoftwareSASGeneration` policy; on a default Windows 11 install any keypress
@@ -682,15 +718,35 @@ printed next to it.
   tooltip is what NVDA announces in the tray, so it's the accessible status
   channel. Exit menu item stops the host cleanly (in lock-screen mode it asks
   the service to stop over the status pipe, taking the helpers with it).
-  `install-agent.bat` also clears schtasks defaults that killed the agent
+- **Exit asks you to type the word "exit"** (`ConfirmExitDialog.cs`, added
+  2026-08-27), not to press a default button. Exit sits at the bottom of a menu
+  a screen-reader user arrows through, and what it costs is invisible: the agent
+  is windowless, so a mis-triggered Exit looks like nothing happening until a
+  keystroke silently fails to arrive — and it stays gone until the next sign-in,
+  or the next *reboot* with lock-screen support on. No stray Enter produces
+  "exit" in an empty box. It is the one dialog in the app that isn't a plain
+  `MessageBox`, so it earns its accessibility explicitly: a real `FixedDialog`
+  (which is what makes NVDA read the whole body on open), the prompt as a
+  `Label` immediately before the text box, taskbar + topmost (a windowless app's
+  dialog must not be able to hide), and — deliberately — a **Stop button that is
+  never disabled**. A disabled WinForms button is skipped in the tab order
+  entirely, so disable-until-valid would leave a blind user pressing Enter at a
+  dialog that answers nothing; a wrong word gets a spoken MessageBox instead.
+  `ITrayHost.ExitConsequence` supplies the body, because stopping the service
+  takes the lock screen's keyboard with it and stopping the in-session agent
+  does not.
+- `install-agent.bat` also clears schtasks defaults that killed the agent
   (72-h execution limit, stop-on-battery). The tray always runs in the
   **user's session** (the logon task), never in a LocalSystem process — see
   the lock-screen section for why.
 - `appsettings.json`: `ListenPort` (default 5391), optional `AllowedRemoteIP`
-  (empty = accept any Tailscale peer), `LogDirectory`, the key-repeat trio
-  `KeyRepeat` / `KeyRepeatDelayMs` / `KeyRepeatIntervalMs` (on, and 0 = follow
-  this PC's own settings), and the lock-screen-only `AllowLoopbackPeers` /
-  `AllowNonTailscalePeers` (both off).
+  (empty = accept any peer the policy allows; a pinned address overrides the
+  policy entirely), `LogDirectory`, the key-repeat trio `KeyRepeat` /
+  `KeyRepeatDelayMs` / `KeyRepeatIntervalMs` (on, and 0 = follow this PC's own
+  settings), and the lock-screen-only `LockScreenAccess`
+  (`Tailscale`/`LocalNetwork`/`Any`, written by the tray) plus the
+  `AllowLoopbackPeers` testing hatch and the superseded
+  `AllowNonTailscalePeers`.
 - Keystroke injection via `SendInput` (`KeystrokeInjector.cs`), with the
   extended-key flag set for the nav cluster, right-hand modifiers, numpad
   divide, Win/Apps, and media keys. **All keys are injected scancode-primary

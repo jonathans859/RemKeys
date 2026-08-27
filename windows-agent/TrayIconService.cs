@@ -66,10 +66,11 @@ public sealed class TrayIconService : IHostedService
             menu.Items.Add(new ToolStripMenuItem(_host.ModeLine) { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(_host.ToggleLabel, null, (_, _) => SafeInvoke(_host.Toggle));
+            AddPeerMenu(menu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("About RemKeys agent…", null, (_, _) => SafeInvoke(ShowAbout));
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit RemKeys agent", null, (_, _) => SafeInvoke(_host.Exit));
+            menu.Items.Add("Exit RemKeys agent…", null, (_, _) => SafeInvoke(ConfirmAndExit));
 
             _icon = new NotifyIcon
             {
@@ -93,6 +94,43 @@ public sealed class TrayIconService : IHostedService
     }
 
     /// <summary>
+    /// The "who may type at the lock screen" submenu — present only in
+    /// lock-screen mode, since that is the only mode with a peer policy at all.
+    ///
+    /// The setting in force is the submenu's own label rather than a line
+    /// inside it, so a screen reader announces it in passing and only someone
+    /// who wants to change it has to open the submenu. The three choices are
+    /// checkable items: a radio group is what this is, and NVDA reads the
+    /// checked one without any extra wording.
+    /// </summary>
+    private void AddPeerMenu(ContextMenuStrip menu)
+    {
+        var peers = _host.Peers;
+        if (peers is null) return;
+
+        var submenu = new ToolStripMenuItem(peers.SummaryLine);
+        foreach (var (value, label, inForce) in peers.Choices)
+        {
+            submenu.DropDownItems.Add(new ToolStripMenuItem(
+                label, null, (_, _) => SafeInvoke(() => peers.Choose(value)))
+            {
+                Checked = inForce,
+                Enabled = peers.CanChange,
+            });
+        }
+
+        if (!peers.CanChange)
+        {
+            // A pinned AllowedRemoteIP overrides the scale entirely. Say so
+            // rather than offering a choice that would change nothing.
+            submenu.DropDownItems.Add(new ToolStripMenuItem(
+                "Set by AllowedRemoteIP in appsettings.json") { Enabled = false });
+        }
+
+        menu.Items.Add(submenu);
+    }
+
+    /// <summary>
     /// A menu handler that throws would take down the tray thread and, with
     /// it, the only status channel a screen reader has.
     /// </summary>
@@ -106,6 +144,18 @@ public sealed class TrayIconService : IHostedService
         {
             _logger.LogError(ex, "A tray menu action failed.");
         }
+    }
+
+    /// <summary>
+    /// Exit asks first, and asks for the word "exit" rather than for a button
+    /// press — see <see cref="ConfirmExitDialog"/> for why this one item earns
+    /// that much friction. Cancelling leaves everything running, so there is
+    /// nothing to undo on that path.
+    /// </summary>
+    private void ConfirmAndExit()
+    {
+        if (!ConfirmExitDialog.Confirmed(_host.ExitConsequence)) return;
+        _host.Exit();
     }
 
     /// <summary>
@@ -131,6 +181,7 @@ public sealed class TrayIconService : IHostedService
             "Version " + AgentVersion.Display,
             "",
             _host.ModeLine,
+            _host.Peers?.SummaryLine ?? PinnedOrOpenLine(),
             "Running as: " + elevation,
             "Listening port: " + _options.ListenPort,
             "Status: " + _status.Description,
@@ -140,6 +191,21 @@ public sealed class TrayIconService : IHostedService
         });
 
         MessageBox.Show(text, "About RemKeys agent", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    /// <summary>
+    /// Who may connect, for a mode that has no policy scale — the in-session
+    /// agent, which accepts anyone who can reach the port because it can only
+    /// type what the signed-in user could type anyway. `AllowedRemoteIP` is the
+    /// one thing that still narrows it there, so say so when it is set rather
+    /// than claiming the door is open.
+    /// </summary>
+    private string PinnedOrOpenLine()
+    {
+        var pinned = _options.AllowedRemoteIP.Trim();
+        return pinned.Length > 0
+            ? "Accepts connections from: only " + pinned
+            : "Accepts connections from: any address that can reach the port";
     }
 
     private void OnStatusChanged()

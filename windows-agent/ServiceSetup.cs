@@ -1,18 +1,21 @@
 using System.Diagnostics;
 using System.ServiceProcess;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows.Forms;
 
 namespace RemKeysAgent;
 
 /// <summary>
-/// Installs and removes the optional lock-screen service, and swaps it with
-/// the classic logon scheduled task so exactly one of the two ever owns the
-/// port.
+/// Installs and removes the optional lock-screen service, swaps it with the
+/// classic logon scheduled task so exactly one of the two ever owns the port,
+/// and writes the one setting that only exists while it is on — who may type at
+/// the lock screen.
 ///
-/// Both directions run as their own short-lived process (<c>--install-service</c>
-/// / <c>--uninstall-service</c>) launched from the tray menu, because
-/// installing needs elevation and removing needs the agent that is being
-/// replaced to be gone first.
+/// All three run as their own short-lived process (<c>--install-service</c> /
+/// <c>--uninstall-service</c> / <c>--set-access</c>) launched from the tray
+/// menu, because each needs elevation and the swap needs the agent that is
+/// being replaced to be gone first.
 /// </summary>
 public static class ServiceSetup
 {
@@ -144,6 +147,9 @@ public static class ServiceSetup
             "Lock screen support is on.\r\n\r\n" +
             "RemKeys now runs as a Windows service and starts before you sign in, so you can type " +
             "on the lock screen, at the sign-in screen and in UAC prompts.\r\n\r\n" +
+            "Only Tailscale addresses are accepted while this is on. If you connect over a plain " +
+            $"home or office network instead, change \"{TrayText.PeerMenuTitle}\" in the tray menu, " +
+            "or nothing you type will arrive.\r\n\r\n" +
             "The tray icon comes back in a few seconds. To turn this off again, use " +
             "\"Turn off lock screen support\" in the tray menu.");
         return 0;
@@ -187,6 +193,146 @@ public static class ServiceSetup
             "RemKeys is back to the normal agent that runs while you are signed in. Keystrokes no " +
             "longer reach the lock screen, the sign-in screen or UAC prompts.");
         return 0;
+    }
+
+    // ---- Peer policy -----------------------------------------------------
+
+    /// <summary>
+    /// Write the lock-screen peer policy into appsettings.json and make it
+    /// take effect. Runs as its own elevated process (<c>--set-access</c>)
+    /// launched from the tray.
+    ///
+    /// Elevation is not just about writing a file in Program Files. Widening
+    /// who may type on the secure desktop is an administrator's decision: the
+    /// tray runs as the signed-in user and its status pipe is open to any
+    /// interactive account, so this deliberately does not travel down that
+    /// pipe as a command.
+    ///
+    /// The service is restarted rather than told to re-read: its options are
+    /// bound once at startup, and a live-reload path through the one check
+    /// that guards the lock screen is not worth the saving. The logon task is
+    /// restarted too, so the tray's menu shows the new value instead of the
+    /// one it read when it started.
+    /// </summary>
+    public static int SetPeerAccess(PeerAccess access)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+
+        if (!TryWritePeerAccess(path, access, out var error))
+        {
+            Ui.Error("RemKeys",
+                "Could not save the setting.\r\n\r\n" + error + "\r\n\r\n" +
+                $"File: {path}\r\n\r\nNothing was changed.");
+            return 1;
+        }
+
+        // The service is only there to restart when lock-screen support is on,
+        // which is the only mode the setting means anything in — but writing it
+        // ahead of time is harmless and keeps this verb usable from a script.
+        var serviceInstalled = IsInstalled();
+        var serviceError = string.Empty;
+        var restarted = !serviceInstalled || RestartService(out serviceError);
+        if (!restarted)
+        {
+            Ui.Error("RemKeys",
+                "The setting was saved, but the lock screen service would not restart, so it is " +
+                "still using the old one.\r\n\r\n" + serviceError + "\r\n\r\n" +
+                "Restart the PC, or turn lock screen support off and on again from the tray menu.");
+        }
+
+        // Bring the tray back with fresh config; it reads the same file.
+        Run("schtasks", "/End", "/TN", TaskName);
+        Run("schtasks", "/Run", "/TN", TaskName);
+
+        if (!restarted) return 1;
+
+        Ui.Info("RemKeys",
+            $"{TrayText.PeerMenuTitle}: {PeerAccessPolicy.Label(access)}.\r\n\r\n" +
+            (serviceInstalled
+                ? "The lock screen service was restarted, so any connected device has to reconnect — " +
+                  "the apps do that by themselves."
+                : "It takes effect the next time lock screen support is turned on."));
+        return 0;
+    }
+
+    /// <summary>
+    /// Set the key in the "RemKeys" section, creating it if the file has none,
+    /// and drop the superseded <c>AllowNonTailscalePeers</c> from both the
+    /// current and the legacy section so the file states exactly one policy.
+    /// A file that will not parse is left untouched: overwriting someone's
+    /// hand-edited config to fix one key would be the worse failure.
+    /// </summary>
+    private static bool TryWritePeerAccess(string path, PeerAccess access, out string error)
+    {
+        error = string.Empty;
+        try
+        {
+            JsonObject root;
+            if (File.Exists(path))
+            {
+                var parsed = JsonNode.Parse(
+                    File.ReadAllText(path),
+                    documentOptions: new JsonDocumentOptions
+                    {
+                        CommentHandling = JsonCommentHandling.Skip,
+                        AllowTrailingCommas = true,
+                    });
+                if (parsed is not JsonObject obj)
+                {
+                    error = "appsettings.json is not a JSON object; fix it by hand and try again.";
+                    return false;
+                }
+                root = obj;
+            }
+            else
+            {
+                root = new JsonObject();
+            }
+
+            if (root[RemKeysOptions.SectionName] is not JsonObject section)
+            {
+                section = new JsonObject();
+                root[RemKeysOptions.SectionName] = section;
+            }
+
+            section[nameof(RemKeysOptions.LockScreenAccess)] = PeerAccessPolicy.Canonical(access);
+            section.Remove(nameof(RemKeysOptions.AllowNonTailscalePeers));
+            (root[RemKeysOptions.LegacySectionName] as JsonObject)
+                ?.Remove(nameof(RemKeysOptions.AllowNonTailscalePeers));
+
+            // Write via a temporary file so a failure halfway cannot leave the
+            // agent with a truncated config it would have to fall back from.
+            var temporary = path + ".new";
+            File.WriteAllText(temporary, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporary, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool RestartService(out string error)
+    {
+        error = string.Empty;
+        try
+        {
+            using var controller = new ServiceController(ServiceName);
+            if (controller.Status != ServiceControllerStatus.Stopped)
+            {
+                controller.Stop();
+                controller.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+
+        return StartService(out error);
     }
 
     /// <summary>
