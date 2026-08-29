@@ -1,4 +1,4 @@
-name: Deploy iOS
+name: TestFlight
 
 # Every push to main that touches the iOS app (or anything it builds from)
 # uploads a build to TestFlight. The internal group "Core" has automatic
@@ -17,17 +17,19 @@ on:
   push:
     branches: [main]
     paths:
+      # Deliberately no self-reference: a CI-only edit should not mint a
+      # tester-visible build with no app change. Safe because the pipeline
+      # itself lives in jonathans859/apple-ci and is exercised there.
       - 'apps/iOS/**'
       - 'BridgeCore/**'
       - 'project.yml'
-      - '.github/workflows/deploy-ios.yml'
   workflow_dispatch:
 
 # One run at a time; a newer push cancels a superseded one. Parallel uploads
 # against one app record race App Store Connect processing, and finishing a
 # stale archive is billed macOS minutes for a build nobody will install.
 concurrency:
-  group: deploy-ios
+  group: testflight
   cancel-in-progress: true
 
 jobs:

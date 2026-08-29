@@ -1,6 +1,8 @@
 # This repo is authored on Windows but its CI runs on Unix (macOS/Ubuntu)
 # runners. Force LF on everything the runners execute so CRLF never sneaks
 # into a shell heredoc or YAML run-block.
+* text=auto
+
 *.yml   text eol=lf
 *.yaml  text eol=lf
 *.sh    text eol=lf
