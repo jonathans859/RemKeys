@@ -17,7 +17,7 @@ default_platform(:ios)
 # -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1) without
 # failing the import_certificate step; the run then dies much later with a
 # misleading "no signing certificate" error. Fail fast instead. Bit us
-# twice (DEVID_P12 2026-07-17, IOS_DEV_P12 2026-07-18).
+# twice (DEVID_P12 2026-07-17, the iOS dev cert 2026-07-18).
 def assert_identity_present(name)
   identities = sh("security find-identity -v -p codesigning", log: false)
   UI.user_error!("'#{name}' missing after import — bad .p12 password or format") unless identities.include?(name)
@@ -48,10 +48,10 @@ platform :ios do
     require "base64"
     require "tmpdir"
     dev_p12_path = File.join(Dir.tmpdir, "ios_dev.p12")
-    File.binwrite(dev_p12_path, Base64.decode64(ENV.fetch("IOS_DEV_P12")))
+    File.binwrite(dev_p12_path, Base64.decode64(ENV.fetch("APPLE_DEV_CERT_P12")))
     import_certificate(
       certificate_path: dev_p12_path,
-      certificate_password: ENV.fetch("IOS_DEV_P12_PASSWORD"),
+      certificate_password: ENV.fetch("APPLE_DEV_CERT_P12_PASSWORD"),
       keychain_name: ENV["MATCH_KEYCHAIN_NAME"] || "fastlane_tmp_keychain",
       keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || ""
     )

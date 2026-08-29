@@ -882,15 +882,26 @@ is distributed as a **Developer ID-signed, notarized** build via GitHub
 Releases (same channel as the Windows agent). iOS is unaffected and still ships
 to TestFlight.
 
-### Secrets (all set in the repo as of 2026-07-17)
+### Secrets (shared across every repo on the Apple account, as of 2026-08-29)
 - iOS TestFlight + macOS notarization: `ASC_KEY_ID`, `ASC_ISSUER_ID`,
-  `ASC_KEY_P8` (App Store Connect API key), `APPLE_TEAM_ID`.
-- iOS signing: `IOS_DEV_P12` + `IOS_DEV_P12_PASSWORD` — ONE cached Apple
-  Development cert (key material in `~/Downloads/keybridge/ios_dev.*` on
-  Jonathan's PC, minted 2026-07-18 via the ASC API). Imported into the CI
-  keychain by the `ios_beta` lane so Xcode cloud signing reuses it; without
-  it every ephemeral runner minted a new certificate until the account hit
-  Apple's cap and archiving failed with "Choose a certificate to revoke".
+  `ASC_KEY_P8` (App Store Connect API key, role **Admin**), `APPLE_TEAM_ID`.
+  **One key serves the whole account** — the old per-repo keys were revoked.
+- iOS signing: `APPLE_DEV_CERT_P12` + `APPLE_DEV_CERT_P12_PASSWORD` — ONE
+  cached Apple Development cert, cert id `TFTHX2B28Q`, shared by every repo
+  (key material in `~/.keys/apple-dev.*` on Jonathan's PC). It cannot be
+  per-repo: Apple returns 409 when minting a second Development certificate
+  while one is current, and the certificate identifies the *team*, not an app.
+  Imported into the CI keychain by the `ios_beta` lane so Xcode cloud signing
+  reuses it; without it every ephemeral runner minted a new certificate until
+  the account hit Apple's cap and archiving failed with "Choose a certificate
+  to revoke".
+- **The predecessor cert was destroyed by an account-wide sweep** (2026-08),
+  and nothing showed it: a revoked .p12 still imports cleanly, still satisfies
+  `find-identity`, and the build still goes green — while cloud signing quietly
+  mints a fresh certificate every run. If certificates start piling up again,
+  suspect this before anything else, and check with
+  `asc certificates list --certificate-type DEVELOPMENT` after a build rather
+  than trusting a green tick.
 - macOS Developer ID signing: `DEVID_P12` (base64-encoded Developer ID
   Application `.p12`) and `DEVID_P12_PASSWORD`. The `mac_release` lane imports
   the cert into the CI keychain — no `match`, no certs repo.
