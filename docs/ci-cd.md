@@ -22,17 +22,30 @@
   - `deploy-windows.yml` — push to main → agent zip as a run artifact (and a
     Release asset on release). Stamps the agent version via `-p:Version=`.
 
+## The iOS pipeline is shared
+
+`deploy-ios.yml` is a ~15-line caller of
+[`jonathans859/apple-ci`](https://github.com/jonathans859/apple-ci), the shared
+TestFlight pipeline used by every app on this Apple account. Archive, export,
+upload, versioning and the one shared Apple Development certificate are defined
+once there rather than in each repo. It uploads with `asc`, so the iOS path needs
+no Ruby.
+
+Build number = `<commit count>.0.<run attempt>`, which reaches the bundle only
+because `project.yml` maps `CFBundleVersion: $(CURRENT_PROJECT_VERSION)` into the
+generated Info.plist. Without that mapping XcodeGen emits a literal `1.0`/`1` and
+Xcode renumbers at export — which is what this app shipped for months (`1.0 (63)`
+against a project saying 1.0.0). Re-running a build on the same commit fails the
+upload as a duplicate build number; push a new commit instead.
+
 ## fastlane
 
-Lanes: `ios ios_beta`, `mac mac_release` (`fastlane/Fastfile`).
-
-Build number = `git rev-list --count HEAD` (needs `fetch-depth: 0`): monotonic on
-main, recomputable from any checkout. Re-running a run whose upload already
-succeeded fails as a duplicate build — push a new commit instead.
-
-The mac lane signs **manually with Developer ID end-to-end**: the CI keychain has
-no Apple Development cert, so automatic signing would find no identity for the
-archive step. No profile is needed without sandbox or restricted entitlements.
+One lane left: `mac mac_release` (`fastlane/Fastfile`). It stays because it is
+genuinely one-off — the Mac app installs a CGEventTap, so it cannot be sandboxed,
+cannot ship through TestFlight, and signs **manually with Developer ID
+end-to-end**: the CI keychain has no Apple Development cert, so automatic signing
+would find no identity for the archive step. No profile is needed without a
+sandbox or restricted entitlements.
 
 ## Signing notes
 
