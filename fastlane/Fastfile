@@ -1,19 +1,16 @@
 # KeyBridge fastlane lanes.
 #
+#   ios_beta     — archive the iOS app with Apple cloud signing and upload to
+#                  TestFlight.
 #   mac_release  — archive the macOS menu-bar app, sign with Developer ID,
 #                  notarize, and staple. (The Mac app installs a CGEventTap and
 #                  therefore cannot be sandboxed, so it ships outside the Mac
 #                  App Store — no TestFlight for macOS.)
 #
-# The iOS lane is gone: iOS TestFlight builds go through the shared workflow in
-# jonathans859/apple-ci, which uploads with asc and needs no Ruby at all. Only
-# the Developer ID lane is left here, because it is genuinely one-off -- the Mac
-# app installs a CGEventTap, so it cannot be sandboxed and cannot use TestFlight.
-#
-# Builds the .xcodeproj that XcodeGen generates; CI runs `xcodegen generate`
+# Both build the .xcodeproj that XcodeGen generates; CI runs `xcodegen generate`
 # before invoking fastlane.
 
-default_platform(:mac)
+default_platform(:ios)
 
 # `security import` reports a bad .p12 (wrong password OR an
 # OpenSSL-3-format file macOS can't read — build p12s with
@@ -34,6 +31,70 @@ def ci_api_key
     key_content: ENV.fetch("ASC_KEY_P8"),
     is_key_content_base64: false
   )
+end
+
+platform :ios do
+  desc "Build and upload the iOS app to TestFlight"
+  lane :ios_beta do
+    api_key = ci_api_key
+    setup_ci
+
+    # Import the one cached Apple Development certificate (base64 .p12 secret)
+    # so Xcode's cloud signing finds a valid identity and reuses it. Without
+    # this, every CI run minted a fresh certificate — the account hit Apple's
+    # certificate cap on 2026-07-18 and archiving died with "Choose a
+    # certificate to revoke". Cloud signing itself stays on (it still manages
+    # the provisioning profile); only the certificate is pinned.
+    require "base64"
+    require "tmpdir"
+    dev_p12_path = File.join(Dir.tmpdir, "ios_dev.p12")
+    File.binwrite(dev_p12_path, Base64.decode64(ENV.fetch("APPLE_DEV_CERT_P12")))
+    import_certificate(
+      certificate_path: dev_p12_path,
+      certificate_password: ENV.fetch("APPLE_DEV_CERT_P12_PASSWORD"),
+      keychain_name: ENV["MATCH_KEYCHAIN_NAME"] || "fastlane_tmp_keychain",
+      keychain_password: ENV["MATCH_KEYCHAIN_PASSWORD"] || ""
+    )
+    assert_identity_present("Apple Development")
+
+    update_code_signing_settings(
+      use_automatic_signing: true,
+      team_id: ENV.fetch("APPLE_TEAM_ID"),
+      path: "KeyBridge.xcodeproj",
+      targets: ["KeyBridge-iOS"]
+    )
+
+    # Monotonic on main and recomputable from any checkout (needs
+    # fetch-depth: 0 in the workflow). Re-running a run whose upload already
+    # succeeded is rejected as a duplicate — push a new commit instead.
+    increment_build_number(
+      build_number: sh("git rev-list --count HEAD").strip,
+      xcodeproj: "KeyBridge.xcodeproj"
+    )
+
+    build_app(
+      project: "KeyBridge.xcodeproj",
+      scheme: "KeyBridge-iOS",
+      export_method: "app-store",
+      xcargs: "-allowProvisioningUpdates " \
+              "-authenticationKeyPath #{ENV['ASC_KEY_PATH']} " \
+              "-authenticationKeyID #{ENV['ASC_KEY_ID']} " \
+              "-authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID']}",
+      export_options: {
+        signingStyle: "automatic",
+        teamID: ENV.fetch("APPLE_TEAM_ID"),
+        # Xcode otherwise rewrites CFBundleVersion at export to its own sequential
+        # number, discarding the commit-count value increment_build_number set.
+        manageAppVersionAndBuildNumber: false
+      }
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      skip_waiting_for_build_processing: true,
+      changelog: ENV["CHANGELOG"] || "Latest KeyBridge build."
+    )
+  end
 end
 
 platform :mac do

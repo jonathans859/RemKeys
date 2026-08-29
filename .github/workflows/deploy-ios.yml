@@ -1,17 +1,12 @@
 name: Deploy iOS
 
 # Every push to main that touches the iOS app (or anything it builds from)
-# uploads a build to TestFlight. The internal group "Core" has automatic
-# distribution enabled, so it reaches testers as soon as App Store Connect
-# finishes processing.
+# uploads a build to TestFlight. An internal tester group with automatic
+# distribution enabled receives it as soon as App Store Connect finishes
+# processing — no group-assignment call needed. Also runs on Release publish
+# so a Release always has a matching TestFlight build.
 #
-# The pipeline itself lives in jonathans859/apple-ci, shared with every app on
-# this Apple account: archive, export, upload, versioning and the one shared
-# Apple Development certificate are defined once there rather than six times.
-#
-# No release trigger: this app has no external TestFlight group, so there is
-# nothing for a release to promote. The macOS zip and the Windows agent are
-# still attached to releases by their own workflows.
+# Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, APPLE_TEAM_ID.
 
 on:
   push:
@@ -20,24 +15,55 @@ on:
       - 'apps/iOS/**'
       - 'BridgeCore/**'
       - 'project.yml'
+      - 'fastlane/**'
+      - 'Gemfile'
       - '.github/workflows/deploy-ios.yml'
+  release:
+    types: [published]
   workflow_dispatch:
 
-# One run at a time; a newer push cancels a superseded one. Parallel uploads
-# against one app record race App Store Connect processing, and finishing a
-# stale archive is billed macOS minutes for a build nobody will install.
+# One run at a time, and a newer push cancels a superseded run: parallel
+# pilot runs against one app record race ASC processing, and finishing a
+# stale archive is billed macOS minutes for a build nobody will install
+# (a cancelled mid-upload build is simply discarded by ASC).
 concurrency:
   group: deploy-ios
   cancel-in-progress: true
 
 jobs:
   testflight:
-    uses: jonathans859/apple-ci/.github/workflows/testflight.yml@v1
-    secrets: inherit
-    with:
-      platform: ios
-      project: KeyBridge.xcodeproj
-      scheme: KeyBridge-iOS
-      app-id: "6791947815"
-      xcodegen-spec: project.yml
-      artifact-name: RemKeys-ipa
+    name: iOS → TestFlight (internal)
+    # macos-26, not macos-15: App Store Connect enforces an SDK floor on
+    # uploads (2026: iOS 26 SDK → Xcode 26), and macos-15 tops out at 16.4.
+    # Only uploads have the floor — ci.yml's unsigned builds stay on 15.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # build number = git rev-list --count HEAD
+      - name: Select newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true   # installs the bundle and caches the gems
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Write API key to disk
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s' "${{ secrets.ASC_KEY_P8 }}" > "$RUNNER_TEMP/asc/AuthKey.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
+      - name: Build and upload to TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Cached Apple Development cert — see the ios_beta lane.
+          APPLE_DEV_CERT_P12: ${{ secrets.APPLE_DEV_CERT_P12 }}
+          APPLE_DEV_CERT_P12_PASSWORD: ${{ secrets.APPLE_DEV_CERT_P12_PASSWORD }}
+          # Becomes TestFlight's "What to Test" (raw text, not markdown).
+          CHANGELOG: ${{ github.event_name == 'release' && github.event.release.body || github.event.head_commit.message }}
+        run: bundle exec fastlane ios ios_beta
