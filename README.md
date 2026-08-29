@@ -76,5 +76,10 @@ Then run `install-agent.bat` from the publish output, as Administrator.
 
 ## Documentation
 
-See [`CLAUDE.md`](CLAUDE.md) for architecture, design rationale, build/run
-instructions for every component, known gotchas, and CI/CD setup.
+[`CLAUDE.md`](CLAUDE.md) covers the architecture, the wire format, the shared
+rules and how to build each piece. Per-component detail lives in [`docs/`](docs):
+
+- [`docs/ios.md`](docs/ios.md) — iOS capture, the Virtual Input tab, visual design
+- [`docs/macos.md`](docs/macos.md) — the event tap and the menu-bar app
+- [`docs/windows-agent.md`](docs/windows-agent.md) — modes, injection, lock-screen support, config
+- [`docs/ci-cd.md`](docs/ci-cd.md) — workflows, signing, distribution
