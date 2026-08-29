@@ -51,6 +51,14 @@ targets:
       path: apps/iOS/Info.generated.plist
       properties:
         CFBundleDisplayName: RemKeys
+        # Without these two the generated Info.plist carries a LITERAL 1.0/1:
+        # MARKETING_VERSION and CURRENT_PROJECT_VERSION are build settings, and
+        # XcodeGen does not map them into the plist by itself, so the build number
+        # increment_build_number writes never reaches the bundle and Xcode renumbers
+        # sequentially at export (this app shipped '1.0 (63)' against a project
+        # saying 1.0.0).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         # All four orientations: ASC rejects iPad multitasking apps (90474)
         # unless PortraitUpsideDown is present too.
@@ -87,6 +95,14 @@ targets:
       path: apps/macOS/Info.generated.plist
       properties:
         CFBundleDisplayName: RemKeys
+        # Without these two the generated Info.plist carries a LITERAL 1.0/1:
+        # MARKETING_VERSION and CURRENT_PROJECT_VERSION are build settings, and
+        # XcodeGen does not map them into the plist by itself, so the build number
+        # increment_build_number writes never reaches the bundle and Xcode renumbers
+        # sequentially at export (this app shipped '1.0 (63)' against a project
+        # saying 1.0.0).
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
         NSInputMonitoringUsageDescription: "RemKeys reads the physical Caps Lock key so it can be forwarded as a held modifier to your Windows PC."

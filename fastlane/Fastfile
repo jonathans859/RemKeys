@@ -82,7 +82,10 @@ platform :ios do
               "-authenticationKeyIssuerID #{ENV['ASC_ISSUER_ID']}",
       export_options: {
         signingStyle: "automatic",
-        teamID: ENV.fetch("APPLE_TEAM_ID")
+        teamID: ENV.fetch("APPLE_TEAM_ID"),
+        # Xcode otherwise rewrites CFBundleVersion at export to its own sequential
+        # number, discarding the commit-count value increment_build_number set.
+        manageAppVersionAndBuildNumber: false
       }
     )
 
