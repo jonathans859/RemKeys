@@ -16,8 +16,9 @@ jobs:
   # separately. The iOS build is deliberately absent — every push to main
   # that touches iOS code triggers deploy-ios, which compiles the same code
   # against the real SDK minutes later; a simulator build here was redundant
-  # spend. The macOS app build stays: it is the only compile check for
-  # apps/macOS while its deploy workflow is disabled.
+  # spend. The macOS app build stays for a different reason: deploy-macos
+  # only runs on pushes to main, so this is the one place apps/macOS is
+  # compiled on a pull request, before the code can reach main at all.
   apple:
     name: BridgeCore tests + build macOS (unsigned)
     runs-on: macos-15
