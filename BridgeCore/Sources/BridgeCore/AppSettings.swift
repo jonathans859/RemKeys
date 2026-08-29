@@ -96,18 +96,24 @@ public final class AppSettings {
 
     // MARK: Virtual input (iOS)
 
-    /// Whether the key pad includes an F13–F24 band. Off by default: the
-    /// extra band shrinks every other zone, and F13+ is rarely needed.
+    /// Whether the key pad offers F13–F24 as a further page. Off by default,
+    /// since F13+ is rarely needed — but turning it on costs the other pages
+    /// nothing. It used to add a *band*, which shrank every zone on screen;
+    /// the 2026-08-20 rebuild made it one more page instead.
     public var virtualPadExtendedFKeys: Bool {
         didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
     }
 
-    /// Whether the pad's vibrations carry more than "you crossed a boundary":
-    /// a key that is already turned on answers with a double tick and one
-    /// held down on the PC with a firm one, and moving between rows gets its
-    /// own soft swell. On by default — with a dense keyboard layout under the
-    /// finger this is the channel that reports state without waiting for
-    /// speech, and it works with the phone in a pocket.
+    /// Whether the pad's vibrations carry more than "you crossed a boundary".
+    /// **One zone, one vibration** either way — with this on, how *hard* it is
+    /// is the key's state: light tick = off, firmer knock = turned on, hard
+    /// knock = down on the PC. On by default, since this is the channel that
+    /// reports state without waiting for speech.
+    ///
+    /// Encoding state as extra pulses was tried first and field-rejected
+    /// (2026-08-10): pulses have to be counted and told apart mid-drag, while
+    /// a single harder one is read instantly. There is deliberately no row
+    /// cue at all.
     public var virtualPadRichHaptics: Bool {
         didSet { defaults.set(virtualPadRichHaptics, forKey: Keys.virtualPadRichHaptics) }
     }
