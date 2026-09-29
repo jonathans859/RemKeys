@@ -14,7 +14,7 @@ concurrency:
 jobs:
   # One macOS job, not two: macOS runners bill 10x and each job rounds up
   # separately. The iOS build is deliberately absent — every push to main
-  # that touches iOS code triggers deploy-ios, which compiles the same code
+  # that touches iOS code triggers testflight.yml, which compiles the same code
   # against the real SDK minutes later; a simulator build here was redundant
   # spend. The macOS app build stays for a different reason: deploy-macos
   # only runs on pushes to main, so this is the one place apps/macOS is

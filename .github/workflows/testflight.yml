@@ -23,6 +23,8 @@ on:
       - 'apps/iOS/**'
       - 'BridgeCore/**'
       - 'project.yml'
+      # Package tests never reach the app binary.
+      - '!BridgeCore/Tests/**'
   workflow_dispatch:
 
 # One run at a time; a newer push cancels a superseded one. Parallel uploads
@@ -34,6 +36,12 @@ concurrency:
 
 jobs:
   testflight:
+    # A Mac-only change can still touch BridgeCore (the shared settings live
+    # there), which no path filter can tell apart from a change iOS needs.
+    # "[skip testflight]" in the push's head commit says so explicitly; CI and
+    # the macOS/Windows deploys still run. Manual runs have no head commit and
+    # always build.
+    if: ${{ !contains(github.event.head_commit.message, '[skip testflight]') }}
     uses: jonathans859/apple-ci/.github/workflows/testflight.yml@v1
     secrets: inherit
     with:

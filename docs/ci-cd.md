@@ -5,18 +5,27 @@
 - **`ci.yml`** — every push and PR: BridgeCore tests plus an unsigned macOS app
   build (one macOS job — jobs bill separately and macOS is 10×) and a Windows
   agent build on ubuntu (1× vs 2× on windows). No secrets.
-  **No iOS build in CI on purpose**: `deploy-ios` compiles the same code against
+  **No iOS build in CI on purpose**: `testflight.yml` compiles the same code against
   the real SDK on every push to main, so a simulator build was redundant billed
   minutes. Actions minutes are a real constraint here — don't add macOS jobs
   casually.
 - **Continuous per-platform deploys**, path-filtered so each fires only when its
   own platform or a shared input (`BridgeCore/**`, `project.yml`, `fastlane/**`)
-  changed. All three also fire on Release publish and attach their asset to the
-  Release.
-  - `deploy-ios.yml` — push to main → TestFlight upload (internal testers via a
+  changed. The macOS and Windows deploys also fire on Release publish and
+  attach their asset to the Release.
+  - `testflight.yml` — push to main → TestFlight upload (internal testers via a
     group with automatic distribution). Runs on `macos-26`: App Store Connect's
     SDK floor applies to uploads only, so `ci.yml` stays on the stabler
-    `macos-15`.
+    `macos-15`. `BridgeCore/Tests/**` doesn't trigger it, because tests never
+    reach the app.
+  - **`[skip testflight]` in the head commit's message skips the upload.** Put
+    it on Mac-only (or Windows-only) commits that still touch `BridgeCore`. The
+    shared settings live there, so a macOS setting changes a file iOS compiles,
+    and no path filter can tell that apart from a change iOS actually needs.
+    Without the marker, testers get an iOS build with nothing new in it. CI and
+    the other deploys still run; `[skip ci]` would stop those too. The marker
+    goes on the **last** commit of a push, and it skips the whole push, so
+    don't use it on a push that also carries an iOS change.
   - `deploy-macos.yml` — push to main → Developer ID-signed, notarized zip as a
     run artifact (and a Release asset on release).
   - `deploy-windows.yml` — push to main → agent zip as a run artifact (and a
@@ -24,7 +33,7 @@
 
 ## The iOS pipeline is shared
 
-`deploy-ios.yml` is a ~15-line caller of
+`testflight.yml` is a ~15-line caller of
 [`jonathans859/apple-ci`](https://github.com/jonathans859/apple-ci), the shared
 TestFlight pipeline used by every app on this Apple account. Archive, export,
 upload, versioning and the one shared Apple Development certificate are defined

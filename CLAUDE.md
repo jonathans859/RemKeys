@@ -11,6 +11,10 @@ Per-component notes (read the one you're working in):
 - [`docs/windows-agent.md`](docs/windows-agent.md) — modes, injection, lock screen, config
 - [`docs/ci-cd.md`](docs/ci-cd.md) — CI, signing, distribution
 
+A commit that changes only the Mac app or the Windows agent but still touches
+`BridgeCore/` ends its message with `[skip testflight]`, so iOS testers aren't
+sent a build with nothing new in it (see `docs/ci-cd.md`).
+
 | Component | Path | Role |
 |---|---|---|
 | **BridgeCore** | `BridgeCore/` | Shared Swift package: wire format, Windows VK constants, settings, network client. Used by both apps. |
