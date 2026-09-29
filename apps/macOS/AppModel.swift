@@ -104,6 +104,31 @@ final class AppModel {
         }
     }
 
+    // MARK: Pointer
+
+    /// Mirrors `settings.ignorePointerWhileForwarding`, going through the model
+    /// so flipping it mid-session takes effect at once. The setting refuses to
+    /// turn on without a toggle shortcut, so read it back rather than trusting
+    /// `newValue`.
+    var ignorePointerWhileForwarding: Bool {
+        get { settings.ignorePointerWhileForwarding }
+        set {
+            settings.ignorePointerWhileForwarding = newValue
+            syncPointerBlocking()
+        }
+    }
+
+    /// The trackpad is ignored only while forwarding is actually on. The
+    /// shortcut check repeats the setting's own invariant on purpose: this is
+    /// the line that decides whether the user can still stop forwarding.
+    private func syncPointerBlocking() {
+        capture.setPointerBlocking(
+            settings.ignorePointerWhileForwarding
+                && settings.toggleShortcut != nil
+                && bridge.forwardingEnabled
+        )
+    }
+
     // MARK: Toggle-shortcut recording
 
     var isRecordingShortcut: Bool { capture.isRecording }
@@ -121,8 +146,12 @@ final class AppModel {
     }
 
     func clearToggleShortcut() {
-        settings.toggleShortcut = nil
-        announce("Toggle shortcut cleared. Use the button to toggle forwarding.")
+        let wasIgnoringPointer = settings.ignorePointerWhileForwarding
+        settings.toggleShortcut = nil   // also turns ignoring the pointer off
+        syncPointerBlocking()
+        announce(wasIgnoringPointer
+            ? "Toggle shortcut cleared. Ignoring the trackpad is off too, since it needs the shortcut."
+            : "Toggle shortcut cleared. Use the button to toggle forwarding.")
     }
 
     // MARK: State side effects
@@ -130,6 +159,7 @@ final class AppModel {
     private func handleForwardingChange(_ enabled: Bool) {
         overlay.setVisible(enabled)
         syncFunctionKeyRow()
+        syncPointerBlocking()
         play(enabled ? .toggleOn : .toggleOff)
         announce(enabled ? "Forwarding on" : "Forwarding off")
         refreshStatusLine()

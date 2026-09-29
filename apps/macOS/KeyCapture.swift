@@ -5,6 +5,7 @@
 import Foundation
 import IOKit.hid
 import Observation
+import os
 import BridgeCore
 
 /// System-wide low-level keyboard hook.
@@ -29,6 +30,12 @@ import BridgeCore
 /// installed once and the forwarding decision is gated behind a boolean rather
 /// than torn down and rebuilt on every toggle.
 ///
+/// A third, optional hook: a **pointer tap** that swallows trackpad and mouse
+/// input while forwarding (`settings.ignorePointerWhileForwarding`). It is a
+/// separate tap, created alongside the keyboard one but left *disabled* except
+/// while it should act, so mouse movement never runs through our callback
+/// otherwise — see `setPointerBlocking`.
+///
 /// Callbacks are scheduled on the main run loop, so the C trampolines below
 /// can hop straight onto the main actor with `assumeIsolated`.
 @MainActor
@@ -43,6 +50,8 @@ final class KeyCapture {
 
     private(set) var state: State = .stopped
 
+    private static let log = Logger(subsystem: "com.jonathan859.keybridge", category: "KeyCapture")
+
     /// True while waiting to capture a chord for the toggle-shortcut recorder.
     /// Observable so the settings UI can reflect "Press keys…".
     private(set) var isRecording = false
@@ -56,6 +65,16 @@ final class KeyCapture {
     @ObservationIgnored private var eventTap: CFMachPort?
     @ObservationIgnored private var runLoopSource: CFRunLoopSource?
     @ObservationIgnored private var hidManager: IOHIDManager?
+    @ObservationIgnored private var pointerTap: CFMachPort?
+    @ObservationIgnored private var pointerRunLoopSource: CFRunLoopSource?
+    /// Whether the pointer tap should currently be swallowing. Kept so a tap
+    /// the system disables can be re-armed only when it is meant to be on.
+    @ObservationIgnored private var pointerBlocking = false
+    /// Mouse buttons whose *down* the pointer tap swallowed. Only those ups are
+    /// swallowed too: a button already held when blocking began (a drag in
+    /// progress as the toggle shortcut is pressed) must still be released on
+    /// the Mac, or the Mac is left mid-drag.
+    @ObservationIgnored private var swallowedButtons: Set<Int64> = []
 
     /// Physical Caps Lock state, from the HID hook (not the toggle LED).
     @ObservationIgnored private var capsHeld = false
@@ -98,6 +117,11 @@ final class KeyCapture {
             return
         }
         installHIDManager()
+        // Not fatal: without it forwarding works, the pointer just isn't
+        // ignored.
+        if !installPointerTap() {
+            Self.log.error("Pointer tap could not be created; the trackpad will not be ignored")
+        }
         state = .running
     }
 
@@ -114,6 +138,16 @@ final class KeyCapture {
         }
         runLoopSource = nil
         eventTap = nil
+
+        if let pointerTap {
+            CGEvent.tapEnable(tap: pointerTap, enable: false)
+        }
+        if let pointerRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), pointerRunLoopSource, .commonModes)
+        }
+        pointerRunLoopSource = nil
+        pointerTap = nil
+        swallowedButtons.removeAll()
 
         if let hidManager {
             IOHIDManagerUnscheduleFromRunLoop(
@@ -160,6 +194,23 @@ final class KeyCapture {
         bridge.sendKey(vk: vk, pressed: pressed)
     }
 
+    // MARK: Pointer blocking
+
+    /// Turn swallowing of trackpad/mouse input on or off. `AppModel` decides
+    /// (forwarding on, setting on, shortcut recorded); this only enables or
+    /// disables the already-installed tap, never rebuilds it. `pointerBlocking`
+    /// survives a `start()` rerun, which re-applies it to the new tap.
+    func setPointerBlocking(_ enabled: Bool) {
+        pointerBlocking = enabled
+        // A disabled tap sees nothing, so the up of a still-held swallowed
+        // button now reaches the Mac on its own. A stale entry would instead
+        // eat a genuine up the next time blocking comes on.
+        if !enabled { swallowedButtons.removeAll() }
+        if let pointerTap {
+            CGEvent.tapEnable(tap: pointerTap, enable: enabled)
+        }
+    }
+
     // MARK: Shortcut recording
 
     /// Arm the recorder: the next main-key press (with whatever modifiers are
@@ -197,6 +248,47 @@ final class KeyCapture {
         CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap
         runLoopSource = source
+        return true
+    }
+
+    /// Every event a trackpad or mouse produces. The gesture types (pinch,
+    /// swipe, rotate, force-click pressure…) have no case in `CGEventType`, so
+    /// they go by their raw values — `NSEvent.EventType`'s numbering.
+    private static let pointerEventTypes: [UInt32] = [
+        CGEventType.leftMouseDown.rawValue, CGEventType.leftMouseUp.rawValue,
+        CGEventType.rightMouseDown.rawValue, CGEventType.rightMouseUp.rawValue,
+        CGEventType.otherMouseDown.rawValue, CGEventType.otherMouseUp.rawValue,
+        CGEventType.leftMouseDragged.rawValue, CGEventType.rightMouseDragged.rawValue,
+        CGEventType.otherMouseDragged.rawValue,
+        CGEventType.mouseMoved.rawValue,
+        CGEventType.scrollWheel.rawValue,
+        18, // rotate
+        19, // beginGesture
+        20, // endGesture
+        29, // gesture
+        30, // magnify
+        31, // swipe
+        32, // smartMagnify
+        34, // pressure
+    ]
+
+    private func installPointerTap() -> Bool {
+        let mask = Self.pointerEventTypes.reduce(CGEventMask(0)) { $0 | (1 << CGEventMask($1)) }
+        guard let tap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: pointerTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            return false
+        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: pointerBlocking)
+        pointerTap = tap
+        pointerRunLoopSource = source
         return true
     }
 
@@ -292,6 +384,29 @@ final class KeyCapture {
         }
     }
 
+    /// Pointer-tap handler. The tap is only enabled while blocking, so this
+    /// swallows nearly everything it is given.
+    func handlePointerEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if pointerBlocking, let pointerTap { CGEvent.tapEnable(tap: pointerTap, enable: true) }
+            return Unmanaged.passUnretained(event)
+        }
+
+        let button = event.getIntegerValueField(.mouseEventButtonNumber)
+        switch type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            guard pointerBlocking else { return Unmanaged.passUnretained(event) }
+            swallowedButtons.insert(button)
+            return nil
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            // An up whose down we ate must not reach the Mac either; one whose
+            // down happened before blocking began must, to end that drag.
+            return swallowedButtons.remove(button) != nil ? nil : Unmanaged.passUnretained(event)
+        default:
+            return pointerBlocking ? nil : Unmanaged.passUnretained(event)
+        }
+    }
+
     private func handleFlagsChanged(keyCode: CGKeyCode, event: CGEvent) -> Unmanaged<CGEvent>? {
         // Caps Lock comes through the HID hook with a real direction. Here we
         // only suppress the synthetic toggle so it can't flip local Caps
@@ -369,6 +484,20 @@ private func keyCaptureEventTapCallback(
     let capture = Unmanaged<KeyCapture>.fromOpaque(userInfo).takeUnretainedValue()
     return MainActor.assumeIsolated {
         capture.handleEvent(type: type, event: event)
+    }
+}
+
+/// `CGEventTapCallBack` for the pointer tap. Main run loop, like the other.
+private func pointerTapCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    userInfo: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard let userInfo else { return Unmanaged.passUnretained(event) }
+    let capture = Unmanaged<KeyCapture>.fromOpaque(userInfo).takeUnretainedValue()
+    return MainActor.assumeIsolated {
+        capture.handlePointerEvent(type: type, event: event)
     }
 }
 

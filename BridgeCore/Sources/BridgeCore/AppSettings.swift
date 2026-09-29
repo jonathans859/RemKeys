@@ -208,6 +208,29 @@ public final class AppSettings {
         didSet { defaults.set(forwardFunctionKeyRow, forKey: Keys.forwardFunctionKeyRow) }
     }
 
+    // MARK: Pointer (macOS)
+
+    /// Whether the Mac's trackpad and mouse are ignored while forwarding, so a
+    /// palm on the trackpad can't click, scroll or swipe on the Mac mid-session.
+    /// Nothing is sent to the PC — the input is dropped. Off by default. Unused
+    /// on iOS.
+    ///
+    /// Only possible with a `toggleShortcut`: forwarding swallows every key,
+    /// so without a shortcut the pointer is the only way to stop it, and
+    /// blocking it too would lock the user out of their own Mac. The setter
+    /// refuses to turn it on without one, and clearing the shortcut turns it
+    /// off (`toggleShortcut`'s `didSet`) — so while this reads true, a
+    /// shortcut exists.
+    public var ignorePointerWhileForwarding: Bool {
+        get { ignorePointerStorage }
+        set {
+            ignorePointerStorage = newValue && toggleShortcut != nil
+            defaults.set(ignorePointerStorage, forKey: Keys.ignorePointerWhileForwarding)
+        }
+    }
+
+    private var ignorePointerStorage: Bool
+
     // MARK: Forwarding toggle shortcut
 
     /// Optional physical chord that turns forwarding on/off. `nil` means the
@@ -215,7 +238,10 @@ public final class AppSettings {
     /// hard-wired default hotkey. Recorded in-app on each platform and stored as
     /// JSON so the whole value (key code, modifiers, display name) round-trips.
     public var toggleShortcut: ToggleShortcut? {
-        didSet { persistToggleShortcut() }
+        didSet {
+            persistToggleShortcut()
+            if toggleShortcut == nil { ignorePointerWhileForwarding = false }
+        }
     }
 
     // MARK: Storage
@@ -256,12 +282,16 @@ public final class AppSettings {
         // Defaults to true: `bool(forKey:)` can't express that, so read the raw
         // object and fall back only when nothing was ever stored.
         self.forwardFunctionKeyRow = defaults.object(forKey: Keys.forwardFunctionKeyRow) as? Bool ?? true
-        if let data = defaults.data(forKey: Keys.toggleShortcut),
-           let decoded = try? JSONDecoder().decode(ToggleShortcut.self, from: data) {
-            self.toggleShortcut = decoded
-        } else {
-            self.toggleShortcut = nil
+        var shortcut: ToggleShortcut?
+        if let data = defaults.data(forKey: Keys.toggleShortcut) {
+            shortcut = try? JSONDecoder().decode(ToggleShortcut.self, from: data)
         }
+        self.toggleShortcut = shortcut
+        // Same invariant as the setter: never on without a shortcut to stop
+        // forwarding with. A local, because the macro-generated getter can't
+        // be read before every stored property is initialized.
+        self.ignorePointerStorage =
+            defaults.bool(forKey: Keys.ignorePointerWhileForwarding) && shortcut != nil
     }
 
     /// Persist (or clear) the recorded toggle shortcut as JSON.
@@ -301,5 +331,6 @@ public final class AppSettings {
         static let virtualPadHoldSpeech = "virtualPadHoldSpeech"
         static let virtualPadRichHaptics = "virtualPadRichHaptics"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
+        static let ignorePointerWhileForwarding = "ignorePointerWhileForwarding"
     }
 }

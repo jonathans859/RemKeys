@@ -67,6 +67,32 @@ resets the list to empty, dropping any hand-made `hidutil` remap the user had.
 Don't "improve" this into a `CGEventTap` translation of `NX_SYSDEFINED` events:
 several fn-row keys (Mission Control, Spotlight) never produce one.
 
+### Ignoring the trackpad (setting `ignorePointerWhileForwarding`, off by default)
+
+A **second event tap** in `KeyCapture` swallows every pointer event: clicks,
+drags, scrolls, moves, and the gesture types (raw values 18–20, 29–32, 34,
+which have no `CGEventType` case). It is installed next to the keyboard tap but
+kept **disabled** unless forwarding is on *and* the setting is on, so pointer
+events never pass through our main-thread callback otherwise. `AppModel.syncPointerBlocking()`
+decides when it is on. Nothing is forwarded; the input is just dropped, which
+keeps "no mouse forwarding" intact.
+
+**It requires a toggle shortcut.** Forwarding swallows every key, so without a
+shortcut, clicking RemKeys is the only way to stop it. `AppSettings` refuses to
+turn the setting on without a shortcut, clearing the shortcut turns it off, and
+`syncPointerBlocking` checks for the shortcut again, because that line decides
+whether the user can still get out.
+
+A button already held when blocking starts is released on the Mac normally.
+Only ups whose down was swallowed are swallowed, so the Mac isn't left in the
+middle of a drag.
+
+Not yet verified on hardware: whether the cursor still moves (`mouseMoved` is
+dropped, but the cursor may be drawn below the tap), and whether the Dock's
+system gestures (three- and four-finger swipes, Mission Control) are really
+blocked at this tap. There's no public event field that tells the built-in
+trackpad apart from an external mouse, so the setting covers both.
+
 ## UI (`apps/macOS/AppDelegate.swift`, `main.swift`)
 
 - **AppKit entry point, no SwiftUI `App`/`MenuBarExtra`.** A `MenuBarExtra` only

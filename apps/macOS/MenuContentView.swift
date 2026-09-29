@@ -120,6 +120,9 @@ struct MenuContentView: View {
 
             Divider()
             toggleShortcutControl
+
+            Divider()
+            pointerControl
         }
     }
 
@@ -164,6 +167,29 @@ struct MenuContentView: View {
                     Button("Clear") { model.clearToggleShortcut() }
                         .accessibilityHint("Removes the shortcut; the button still toggles forwarding.")
                 }
+            }
+        }
+    }
+
+    /// Ignoring the trackpad needs a toggle shortcut: forwarding swallows every
+    /// key, so without one the pointer is the only way to stop it. The reason
+    /// is shown as visible text, not only in a hint, so it reads the same to
+    /// everyone.
+    private var pointerControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Trackpad").font(.caption).foregroundStyle(.secondary)
+            Toggle("Ignore trackpad and mouse while forwarding", isOn: $model.ignorePointerWhileForwarding)
+                .disabled(settings.toggleShortcut == nil)
+                .accessibilityHint(
+                    "While forwarding is on, clicks, scrolling, gestures and pointer movement "
+                    + "are dropped so they can't act on this Mac. Nothing is sent to the "
+                    + "Windows PC. The toggle shortcut is then the only way to stop forwarding."
+                )
+            if settings.toggleShortcut == nil {
+                Text("Record a toggle shortcut first. Without one, the trackpad is the only way to stop forwarding.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

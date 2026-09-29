@@ -40,6 +40,34 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(AppSettings(defaults: defaults).forwardFunctionKeyRow)
     }
 
+    /// Ignoring the pointer must never be on without a toggle shortcut — the
+    /// pointer would otherwise be the only way to stop forwarding. Covers the
+    /// setter, clearing the shortcut, and a stale value in the domain.
+    func testIgnorePointerRequiresToggleShortcut() {
+        let defaults = UserDefaults(suiteName: "AppSettingsPointerTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsPointerTests")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertFalse(settings.ignorePointerWhileForwarding)
+
+        settings.ignorePointerWhileForwarding = true
+        XCTAssertFalse(settings.ignorePointerWhileForwarding, "refused without a shortcut")
+
+        settings.toggleShortcut = ToggleShortcut(keyCode: 0x60, modifiers: [], keyName: "F5")
+        settings.ignorePointerWhileForwarding = true
+        XCTAssertTrue(settings.ignorePointerWhileForwarding)
+        XCTAssertTrue(AppSettings(defaults: defaults).ignorePointerWhileForwarding)
+
+        settings.toggleShortcut = nil
+        XCTAssertFalse(settings.ignorePointerWhileForwarding, "clearing the shortcut turns it off")
+        XCTAssertFalse(AppSettings(defaults: defaults).ignorePointerWhileForwarding)
+
+        // A stored `true` with no shortcut (older build, hand-edited domain)
+        // still loads as off.
+        defaults.set(true, forKey: "ignorePointerWhileForwarding")
+        XCTAssertFalse(AppSettings(defaults: defaults).ignorePointerWhileForwarding)
+    }
+
     /// The key pad's hold gesture: on by default at 0.8 s, and a stored
     /// `false`/custom timing has to survive a reload — same
     /// `bool(forKey:)`/`double(forKey:)` trap as the function-key row.
