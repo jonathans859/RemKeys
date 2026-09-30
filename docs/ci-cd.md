@@ -27,7 +27,13 @@
     goes on the **last** commit of a push, and it skips the whole push, so
     don't use it on a push that also carries an iOS change.
   - `deploy-macos.yml` — push to main → Developer ID-signed, notarized zip as a
-    run artifact (and a Release asset on release).
+    run artifact (and a Release asset on release). Builds from main are also
+    published as a **Sparkle update** on the rolling `macos-updates`
+    prerelease: a versioned zip plus `appcast.xml`, signed with
+    `SPARKLE_ED_PRIVATE_KEY` using `sign_update` from the pinned,
+    checksum-verified Sparkle release. Details are in `docs/macos.md`. Bumping
+    Sparkle means changing `project.yml` *and* `SPARKLE_VERSION`/`SPARKLE_SHA256`
+    together.
   - `deploy-windows.yml` — push to main → agent zip as a run artifact (and a
     Release asset on release). Stamps the agent version via `-p:Version=`.
 

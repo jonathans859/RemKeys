@@ -21,10 +21,14 @@ Keyboard only: no mouse, clipboard, files, or screen sharing.
    Administrator**. It registers a logon scheduled task (not a Windows service —
    a session 0 service cannot inject into your desktop) and starts the agent,
    which shows up as a tray icon. Note the PC's Tailscale IP.
-2. **Mac**: install `RemKeys-macOS.zip` from the same Release, grant
-   Accessibility + Input Monitoring, enter the IP address, and toggle forwarding
-   from the menu-bar window (⌘F). Optionally record a global keyboard shortcut
-   there to toggle it from any app.
+2. **Mac**: download `RemKeys-macOS.zip` from the
+   [latest Mac build](../../releases/tag/macos-updates), unzip it, and **move
+   RemKeys to Applications** before first launch (a copy run from Downloads
+   can't update itself). Grant Accessibility + Input Monitoring, enter the IP
+   address, and toggle forwarding from the menu-bar window (⌘F). Optionally
+   record a global keyboard shortcut there to toggle it from any app. From then
+   on it updates itself: it checks daily, says so when an update is waiting,
+   and installs when you choose **Install update** in its window.
 3. **iPhone/iPad**: install from TestFlight, attach a keyboard, enter the IP
    address on the **Start** tab and tap **Start forwarding** (keeps working
    while the app is in the foreground). Optionally record a toggle shortcut in

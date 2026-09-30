@@ -221,8 +221,24 @@ struct MenuContentView: View {
     }
 
     private var footer: some View {
-        Button("Quit RemKeys") { NSApplication.shared.terminate(nil) }
-            .keyboardShortcut("q", modifiers: [.command])
+        HStack {
+            updateButton
+            Spacer()
+            Button("Quit RemKeys") { NSApplication.shared.terminate(nil) }
+                .keyboardShortcut("q", modifiers: [.command])
+        }
+    }
+
+    /// Says what it will do: once a scheduled check has found an update, the
+    /// label names it, so the button itself carries the state rather than a
+    /// badge next to it. One visible string, no separate accessibility label.
+    private var updateButton: some View {
+        Button(model.availableUpdate.map { "Install update (build \($0))…" } ?? "Check for updates…") {
+            model.checkForUpdates()
+        }
+        .accessibilityHint(model.availableUpdate == nil
+            ? "Looks for a newer version of RemKeys."
+            : "Opens the update. Installing restarts RemKeys, which ends forwarding.")
     }
 
     // MARK: Permission helpers

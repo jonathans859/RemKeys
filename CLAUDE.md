@@ -137,8 +137,9 @@ Then, from the publish output and **as Administrator**, `install-agent.bat`.
 
 ## Out of scope (do not add)
 
-Mouse/pointer forwarding, clipboard sync, file transfer, screen sharing/video,
-auto-update. Keyboard only.
+Mouse/pointer forwarding, clipboard sync, file transfer, screen sharing/video.
+Keyboard only. Auto-update exists for the **macOS app only** (Sparkle, see
+`docs/macos.md`); the Windows agent still has none.
 
 ## Status
 

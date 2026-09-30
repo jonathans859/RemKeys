@@ -6,8 +6,13 @@ name: Deploy macOS
 # attached to the Release. (The app installs a CGEventTap and cannot be
 # sandboxed, so there is no Mac App Store / TestFlight channel.)
 #
+# Builds from main are also published as a Sparkle update: the zip and a
+# one-item appcast.xml go onto the rolling `macos-updates` prerelease, which is
+# where installed copies look (SUFeedURL in project.yml).
+#
 # Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8 (notarization),
-#          APPLE_TEAM_ID, DEVID_P12, DEVID_P12_PASSWORD (signing).
+#          APPLE_TEAM_ID, DEVID_P12, DEVID_P12_PASSWORD (signing),
+#          SPARKLE_ED_PRIVATE_KEY (update signing; base64 Ed25519 seed).
 
 on:
   push:
@@ -45,6 +50,11 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
       - run: xcodegen generate
+      # Sparkle offers an update when the feed's build number beats the
+      # running app's CFBundleVersion, so every build needs a higher one. The
+      # commit count only ever rises on main (needs fetch-depth: 0).
+      - name: Build number
+        run: echo "BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
       - name: Build, sign, notarize
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -54,6 +64,13 @@ jobs:
           DEVID_P12: ${{ secrets.DEVID_P12 }}
           DEVID_P12_PASSWORD: ${{ secrets.DEVID_P12_PASSWORD }}
         run: bundle exec fastlane mac mac_release
+      # Check the artifact, not the workflow: a missing plist mapping once
+      # shipped a literal build number for months without anything failing.
+      - name: Verify the bundle's build number
+        run: |
+          set -euo pipefail
+          ACTUAL=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" output/RemKeys.app/Contents/Info.plist)
+          [ "$ACTUAL" = "$BUILD_NUMBER" ] || { echo "::error::CFBundleVersion is '$ACTUAL', expected '$BUILD_NUMBER'"; exit 1; }
       - name: Attach zip to this run
         uses: actions/upload-artifact@v4
         with:
@@ -65,3 +82,81 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: output/RemKeys-macOS.zip
+
+      # ---- Sparkle update (builds from main only) ---------------------------
+      - name: Publish the Sparkle update
+        if: github.event_name != 'release' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          # Pinned to the version project.yml builds against, checksum from
+          # the GitHub release. sign_update is handed the update-signing key,
+          # so it is verified before it runs.
+          SPARKLE_VERSION: "2.10.0"
+          SPARKLE_SHA256: "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c"
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          TAG=macos-updates
+          ZIP="RemKeys-macOS-$BUILD_NUMBER.zip"
+          cp output/RemKeys-macOS.zip "output/$ZIP"
+
+          # sign_update, from the pinned Sparkle release.
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle" && tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+
+          # Sign the exact bytes that will be downloaded. The key goes in on
+          # stdin, never onto disk or the command line.
+          SIGNATURE=$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" \
+            | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - -p "output/$ZIP")
+          LENGTH=$(stat -f %z "output/$ZIP")
+
+          # Prove the signature verifies against the public key *inside the
+          # app*. A secret that doesn't match SUPublicEDKey would otherwise
+          # publish updates every installed copy silently rejects.
+          PUBKEY=$(/usr/libexec/PlistBuddy -c "Print SUPublicEDKey" output/RemKeys.app/Contents/Info.plist)
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet cryptography
+          "$RUNNER_TEMP/venv/bin/python" - "$PUBKEY" "$SIGNATURE" "output/$ZIP" <<'PY'
+          import base64, sys
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+          pub, sig, path = sys.argv[1:]
+          Ed25519PublicKey.from_public_bytes(base64.b64decode(pub)).verify(
+              base64.b64decode(sig), open(path, "rb").read())
+          print("EdDSA signature verifies against the app's SUPublicEDKey")
+          PY
+
+          # Release notes: the Mac-relevant commits of this push. `before` is
+          # all zeros on a first push and absent on a manual run.
+          if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            git log --format=%s "$BEFORE..$GITHUB_SHA" -- apps/macOS BridgeCore project.yml > "$RUNNER_TEMP/notes.txt"
+          fi
+          [ -s "$RUNNER_TEMP/notes.txt" ] || git log -1 --format=%s > "$RUNNER_TEMP/notes.txt"
+
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" output/RemKeys.app/Contents/Info.plist)
+          MINSYS=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" output/RemKeys.app/Contents/Info.plist)
+          python3 scripts/make-appcast.py \
+            --build "$BUILD_NUMBER" --short-version "$SHORT" --min-system "$MINSYS" \
+            --url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ZIP" \
+            --length "$LENGTH" --signature "$SIGNATURE" \
+            --notes-file "$RUNNER_TEMP/notes.txt" --out output/appcast.xml
+
+          # The rolling prerelease is created once. A prerelease is never
+          # "latest", so a Windows-agent release can't displace the feed.
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --prerelease --target "$GITHUB_SHA" --title "RemKeys for Mac — latest build" \
+            --notes "The newest macOS build. Download RemKeys-macOS.zip, unzip it and move RemKeys to Applications; from then on it updates itself (Check for updates… in its window)."
+
+          # Zip first, feed second: the feed must never name a file that isn't
+          # there yet. RemKeys-macOS.zip is the fixed name for first installs.
+          gh release upload "$TAG" "output/$ZIP" --clobber
+          gh release upload "$TAG" output/RemKeys-macOS.zip --clobber
+          gh release upload "$TAG" output/appcast.xml --clobber
+
+          # Only the newest build is ever offered; drop the older zips. (grep
+          # exits 1 when there are none, which pipefail would treat as failure.)
+          gh release view "$TAG" --json assets --jq '.assets[].name' \
+            | { grep -E '^RemKeys-macOS-[0-9]+\.zip$' | grep -vx "$ZIP" || true; } \
+            | while read -r old; do gh release delete-asset "$TAG" "$old" --yes; done

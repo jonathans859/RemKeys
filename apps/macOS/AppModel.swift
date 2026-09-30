@@ -20,6 +20,11 @@ final class AppModel {
     let bridge: BridgeClient
     @ObservationIgnored let capture: KeyCapture
     @ObservationIgnored private let overlay = CaptureOverlay()
+    @ObservationIgnored private let updater = Updater()
+
+    /// Build number of an update a scheduled check found and Sparkle left for
+    /// us to report (see `Updater`), until the user opens the update dialog.
+    private(set) var availableUpdate: String?
 
     /// One-line, always-current summary for the menu. Doubles as the VoiceOver
     /// value; written as a full sentence.
@@ -47,6 +52,9 @@ final class AppModel {
         }
         bridge.statusDidChange = { [weak self] status in
             self?.handleStatusChange(status)
+        }
+        updater.availableUpdateDidChange = { [weak self] build in
+            self?.handleAvailableUpdate(build)
         }
     }
 
@@ -129,6 +137,23 @@ final class AppModel {
         )
     }
 
+    // MARK: Updates
+
+    /// Opens Sparkle's dialog: "up to date", or the waiting update.
+    func checkForUpdates() {
+        updater.checkForUpdates()
+    }
+
+    private func handleAvailableUpdate(_ build: String?) {
+        guard build != availableUpdate else { return }
+        availableUpdate = build
+        if let build {
+            play(.updateAvailable)
+            announce("RemKeys update available, build \(build)")
+        }
+        refreshStatusLine()
+    }
+
     // MARK: Toggle-shortcut recording
 
     var isRecordingShortcut: Bool { capture.isRecording }
@@ -176,11 +201,13 @@ final class AppModel {
     }
 
     private func refreshStatusLine() {
-        if bridge.forwardingEnabled {
-            statusLine = "Forwarding on — \(bridge.status.announcement)"
-        } else {
-            statusLine = "Forwarding off"
+        var line = bridge.forwardingEnabled
+            ? "Forwarding on — \(bridge.status.announcement)"
+            : "Forwarding off"
+        if let availableUpdate {
+            line += " · Update available (build \(availableUpdate))"
         }
+        statusLine = line
         menuStateDidChange?()
     }
 
@@ -191,6 +218,7 @@ final class AppModel {
         case toggleOff = "Pop"
         case connected = "Glass"
         case failed = "Funk"
+        case updateAvailable = "Hero"
     }
 
     private func play(_ cue: Cue) {

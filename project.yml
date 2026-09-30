@@ -19,6 +19,12 @@ options:
 packages:
   BridgeCore:
     path: BridgeCore
+  # In-app updates for the macOS app (Developer ID builds can't use the App
+  # Store's). Pinned exactly: deploy-macos.yml downloads sign_update from the
+  # same Sparkle release, and the two should move together.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 
 settings:
   base:
@@ -80,6 +86,7 @@ targets:
       - apps/macOS
     dependencies:
       - package: BridgeCore
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jonathan859.keybridge
@@ -106,6 +113,20 @@ targets:
         LSUIElement: true
         LSMinimumSystemVersion: "14.0"
         NSInputMonitoringUsageDescription: "RemKeys reads the physical Caps Lock key so it can be forwarded as a held modifier to your Windows PC."
+        # Sparkle. The feed is a fixed asset on the rolling `macos-updates`
+        # prerelease, which deploy-macos.yml rewrites on every Mac build — not
+        # `releases/latest`, which a Windows-agent release would take over.
+        SUFeedURL: https://github.com/jonathans859/RemKeys/releases/download/macos-updates/appcast.xml
+        # Public half of the EdDSA key that signs each update; the private half
+        # is the SPARKLE_ED_PRIVATE_KEY secret. Changing this strands every
+        # installed copy (they only accept updates signed by this key).
+        SUPublicEDKey: g1XqyQZU+Flnkxrepr7D0PjvXooalaGHc6sTa+IYeMk=
+        # Check daily without Sparkle's "check automatically?" prompt...
+        SUEnableAutomaticChecks: true
+        # ...but never install unasked: an update relaunches the app, which
+        # ends a forwarding session. Also hides the "install automatically"
+        # checkbox from the update dialog.
+        SUAllowsAutomaticUpdates: false
         ITSAppUsesNonExemptEncryption: false
 
 schemes:

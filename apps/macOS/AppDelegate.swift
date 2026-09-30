@@ -117,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let updateItem = appMenu.addItem(
+            withTitle: "Check for Updates…",
+            action: #selector(checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide RemKeys",
             action: #selector(NSApplication.hide(_:)),
@@ -143,5 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         NSApp.mainMenu = mainMenu
         NSApp.windowsMenu = windowMenu
+    }
+
+    @objc private func checkForUpdates(_ sender: Any?) {
+        model.checkForUpdates()
     }
 }

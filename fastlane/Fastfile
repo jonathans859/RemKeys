@@ -69,9 +69,16 @@ platform :mac do
       targets: ["KeyBridge-macOS"]
     )
 
+    # The build number is what Sparkle compares to decide "is this newer", so
+    # it must rise with every build. The workflow passes the commit count (the
+    # same number the appcast advertises); project.yml's literal "1" is only
+    # the local-build fallback. Before this, every Mac build shipped as (1).
+    build_number = ENV.fetch("BUILD_NUMBER")
+
     build_app(
       project: "KeyBridge.xcodeproj",
       scheme: "KeyBridge-macOS",
+      xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
       export_method: "developer-id",
       output_directory: "output",
       output_name: "RemKeys",

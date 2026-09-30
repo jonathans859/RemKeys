@@ -93,6 +93,39 @@ system gestures (three- and four-finger swipes, Mission Control) are really
 blocked at this tap. There's no public event field that tells the built-in
 trackpad apart from an external mouse, so the setting covers both.
 
+## Updates (`Updater.swift`, Sparkle 2)
+
+The Mac app can't use the App Store's updates, so it carries Sparkle. Every
+push to main that changes the Mac app publishes an update. The pieces are:
+
+- **Feed:** `SUFeedURL` points at `appcast.xml` on the rolling
+  **`macos-updates` prerelease**, which `deploy-macos.yml` rewrites on each
+  build, along with `RemKeys-macOS-<build>.zip` and a fixed-name
+  `RemKeys-macOS.zip` for first installs. It's a prerelease on purpose: that's
+  never GitHub's "latest", so a Windows-agent release can't displace the feed.
+- **Version:** Sparkle compares `CFBundleVersion`, so the lane stamps the
+  commit count (`BUILD_NUMBER`), and CI asserts the built bundle carries it.
+  Before this, every Mac build shipped as `(1)`.
+- **Signing:** each zip is signed with an Ed25519 key. The private half is the
+  `SPARKLE_ED_PRIVATE_KEY` secret (base64 of the 32-byte seed, Sparkle's own
+  format), and the public half is `SUPublicEDKey` in `project.yml`. CI checks
+  the signature against the key *inside the built app* before publishing.
+  **Changing or losing the key strands every installed copy**, which would then
+  need one manual reinstall.
+- **Never installs unasked** (`SUAllowsAutomaticUpdates: false`). An update
+  relaunches the app, which ends a forwarding session.
+- **Gentle reminders:** Sparkle only shows its own dialog right after launch,
+  when forwarding is always off. Otherwise a found update goes through
+  `AppModel`'s usual channels: the status line ("Update available (build N)"),
+  the "Hero" sound and an announcement. The window's button becomes
+  **Install update (build N)…**. The app menu has **Check for Updates…**.
+- `scripts/make-appcast.py` writes the one-item appcast. The release notes are
+  the Mac-relevant commit subjects of the push.
+
+To verify on hardware: that Accessibility and Input Monitoring grants survive an
+update (they should, since both builds carry the same Developer ID identity),
+and that Sparkle's dialogs read well with VoiceOver.
+
 ## UI (`apps/macOS/AppDelegate.swift`, `main.swift`)
 
 - **AppKit entry point, no SwiftUI `App`/`MenuBarExtra`.** A `MenuBarExtra` only
