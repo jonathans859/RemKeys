@@ -147,12 +147,12 @@ jobs:
           # "latest", so a Windows-agent release can't displace the feed.
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --prerelease --target "$GITHUB_SHA" --title "RemKeys for Mac — latest build" \
-            --notes "The newest macOS build. Download RemKeys-macOS.zip, unzip it and move RemKeys to Applications; from then on it updates itself (Check for updates… in its window)."
+            --notes "The newest macOS build. Download the RemKeys-macOS zip, unzip it and move RemKeys to Applications; from then on it updates itself (Check for updates… in its window)."
 
           # Zip first, feed second: the feed must never name a file that isn't
-          # there yet. RemKeys-macOS.zip is the fixed name for first installs.
+          # there yet. The versioned zip doubles as the first-install download,
+          # so the release holds just that and the feed.
           gh release upload "$TAG" "output/$ZIP" --clobber
-          gh release upload "$TAG" output/RemKeys-macOS.zip --clobber
           gh release upload "$TAG" output/appcast.xml --clobber
 
           # Only the newest build is ever offered; drop the older zips. (grep

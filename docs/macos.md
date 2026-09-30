@@ -100,8 +100,8 @@ push to main that changes the Mac app publishes an update. The pieces are:
 
 - **Feed:** `SUFeedURL` points at `appcast.xml` on the rolling
   **`macos-updates` prerelease**, which `deploy-macos.yml` rewrites on each
-  build, along with `RemKeys-macOS-<build>.zip` and a fixed-name
-  `RemKeys-macOS.zip` for first installs. It's a prerelease on purpose: that's
+  build, along with `RemKeys-macOS-<build>.zip`. Older zips are pruned, so
+  that one zip is also the first-install download. It's a prerelease on purpose: that's
   never GitHub's "latest", so a Windows-agent release can't displace the feed.
 - **Version:** Sparkle compares `CFBundleVersion`, so the lane stamps the
   commit count (`BUILD_NUMBER`), and CI asserts the built bundle carries it.

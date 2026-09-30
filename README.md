@@ -21,7 +21,7 @@ Keyboard only: no mouse, clipboard, files, or screen sharing.
    Administrator**. It registers a logon scheduled task (not a Windows service —
    a session 0 service cannot inject into your desktop) and starts the agent,
    which shows up as a tray icon. Note the PC's Tailscale IP.
-2. **Mac**: download `RemKeys-macOS.zip` from the
+2. **Mac**: download the `RemKeys-macOS-<build>.zip` from the
    [latest Mac build](../../releases/tag/macos-updates), unzip it, and **move
    RemKeys to Applications** before first launch (a copy run from Downloads
    can't update itself). Grant Accessibility + Input Monitoring, enter the IP
