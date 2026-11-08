@@ -92,6 +92,22 @@ forwarding *or* curtained, and capture keeps working underneath.
   remembered** as the level to restore to (raising the curtain always remembers, so a
   genuinely dim screen comes back dim). Overlays (Control Center, notifications) are `.inactive` and keep
   the curtain up, as before.
+- **Lock + unlock needed more** (second field report, 2026-11-08: leaving the app and
+  Control Center were fine, lock + unlock stayed dark even back in the app). Likely
+  iOS restores its own saved brightness — the 0 the curtain set — when the display
+  comes on, after the app's write on `.active`. So on return
+  (`restoreBrightnessAfterReturn`) the level is written now and re-written at 0.3,
+  1 and 2.5 s if the screen still reads near zero, and for 5 s a
+  `brightnessDidChangeNotification` that drops it to near zero is answered with a
+  write (`brightnessWatchUntil`). The lock is also caught directly
+  (`protectedDataWillBecomeUnavailable`, passcode only) and the unlock
+  (`protectedDataDidBecomeAvailable`) triggers the same restore. Re-writes only ever
+  lift a near-zero screen, so they never fight a level the user just set.
+- **Curtain log** (Start tab info sheet, bottom of Diagnostics, newest first):
+  scene phases, lock/unlock, curtain up/down, and every brightness write with what
+  the screen read straight after (`CaptureDiagnostics.logCurtain`). If the screen
+  stays dark again, those lines say whether the writes didn't happen, didn't land,
+  or were undone.
 - **Offered with VoiceOver on too**: its own Screen Curtain is a different switch in
   a different place and leaves the backlight on, and brightness 0 is the half that
   saves the battery. The overlay is one labeled element with an accessibility action,

@@ -258,6 +258,13 @@ struct ContentView: View {
                     Text("\(diagnostics.unmappedSeen)")
                 }
             }
+            if !diagnostics.curtainLog.isEmpty {
+                // Newest first: the end of a lock/unlock test is what matters.
+                ForEach(Array(diagnostics.curtainLog.reversed().enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.footnote.monospacedDigit())
+                }
+            }
         } header: {
             SectionHeader("Diagnostics", systemImage: "waveform.path.ecg")
         } footer: {

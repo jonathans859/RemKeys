@@ -41,6 +41,18 @@ final class CaptureDiagnostics {
     var lastGameControllerKey: String?
     /// Cmd chords intercepted by the priority `UIKeyCommand` claim.
     var chordsClaimed = 0
+    /// The screen curtain's last few events — scene phases, lock and unlock,
+    /// and every brightness write with what the screen reported straight
+    /// after. Exists because "dark after unlocking" (2026-11-08) could not be
+    /// reproduced off the device: one look at this list says whether the
+    /// writes never happened, were dropped, or were undone by iOS.
+    private(set) var curtainLog: [String] = []
+
+    func logCurtain(_ event: String) {
+        let stamp = Date().formatted(date: .omitted, time: .standard)
+        curtainLog.append("\(stamp) \(event)")
+        if curtainLog.count > 14 { curtainLog.removeFirst(curtainLog.count - 14) }
+    }
 
     private init() {
         refreshKeyboard()
