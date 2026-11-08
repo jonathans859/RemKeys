@@ -26,6 +26,14 @@
     the other deploys still run; `[skip ci]` would stop those too. The marker
     goes on the **last** commit of a push, and it skips the whole push, so
     don't use it on a push that also carries an iOS change.
+  - **`[skip macos]` is the mirror image, for `deploy-macos.yml`.** Put it on
+    iOS-only (or Windows-only) commits that still touch `BridgeCore` or
+    `project.yml`. It matters more than the TestFlight one: every build from main
+    is published as a Sparkle update, so a needless build offers every installed
+    Mac copy an update, and the relaunch ends a forwarding session. Same rules:
+    last commit of the push, and never on a push that also carries a Mac change.
+    A commit touching neither app (docs, CI) that still trips both path filters
+    carries both markers.
   - `deploy-macos.yml` — push to main → Developer ID-signed, notarized zip as a
     run artifact (and a Release asset on release). Builds from main are also
     published as a **Sparkle update** on the rolling `macos-updates`

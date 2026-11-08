@@ -35,6 +35,13 @@ concurrency:
 jobs:
   developer-id:
     name: macOS → Developer ID (notarized)
+    # The mirror of "[skip testflight]": an iOS-only change can still touch
+    # BridgeCore or project.yml, which no path filter can tell apart from a
+    # change the Mac app needs. A build from main is also a Sparkle update, so
+    # without the marker every installed copy is offered an update (and a
+    # relaunch, which ends a forwarding session) with nothing new in it.
+    # Releases and manual runs have no head commit and always build.
+    if: ${{ !contains(github.event.head_commit.message, '[skip macos]') }}
     runs-on: macos-15
     timeout-minutes: 45
     permissions:

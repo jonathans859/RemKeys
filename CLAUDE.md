@@ -13,7 +13,10 @@ Per-component notes (read the one you're working in):
 
 A commit that changes only the Mac app or the Windows agent but still touches
 `BridgeCore/` ends its message with `[skip testflight]`, so iOS testers aren't
-sent a build with nothing new in it (see `docs/ci-cd.md`).
+sent a build with nothing new in it. Likewise a commit that changes only the iOS
+app (or the Windows agent) but touches `BridgeCore/` or `project.yml` ends with
+`[skip macos]`, because every Mac build from main is published as a Sparkle
+update to installed copies (see `docs/ci-cd.md`).
 
 | Component | Path | Role |
 |---|---|---|
