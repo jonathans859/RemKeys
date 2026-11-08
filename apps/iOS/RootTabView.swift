@@ -109,6 +109,7 @@ struct RootTabView: View {
         )) { _ in
             guard let screen else { return }
             let now = screen.brightness
+            if Date() < brightnessWatchUntil { logCurtain("iOS reports brightness \(level(now))") }
             guard Date() < brightnessWatchUntil, !curtainActive, now < 0.05,
                   brightnessBeforeCurtain > now + 0.02 else { return }
             writeBrightness("iOS lowered it to \(level(now))")
@@ -227,6 +228,7 @@ struct RootTabView: View {
         guard brightnessHeldDown, let screen else { return }
         brightnessHeldDown = false
         screen.brightness = brightnessBeforeCurtain
+        logCurtain("release: set \(level(brightnessBeforeCurtain)), reads \(level(screen.brightness))")
     }
 
     /// Locking the phone or leaving the app: take the curtain down and give
@@ -255,11 +257,17 @@ struct RootTabView: View {
         writeBrightness("restore on \(reason)", nudge: true)
         brightnessWatchUntil = Date().addingTimeInterval(5)
         Task { @MainActor in
-            for delay in [0.3, 1.0] {
+            for delay in [0.3, 1.0, 2.5] {
                 try? await Task.sleep(for: .seconds(delay))
-                guard !curtainActive, let screen,
-                      abs(screen.brightness - brightnessBeforeCurtain) < 0.005 else { return }
-                writeBrightness("retry after \(delay)s", nudge: true)
+                guard !curtainActive, let screen else { return }
+                let now = screen.brightness
+                if now < 0.05 || abs(now - brightnessBeforeCurtain) < 0.005 {
+                    writeBrightness("retry after \(delay)s, read \(level(now))", nudge: true)
+                } else {
+                    // Somewhere else, not near zero: the user moved it.
+                    logCurtain("retry after \(delay)s: reads \(level(now)), leaving it")
+                    return
+                }
             }
         }
     }

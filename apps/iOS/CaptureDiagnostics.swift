@@ -51,7 +51,7 @@ final class CaptureDiagnostics {
     func logCurtain(_ event: String) {
         let stamp = Date().formatted(date: .omitted, time: .standard)
         curtainLog.append("\(stamp) \(event)")
-        if curtainLog.count > 14 { curtainLog.removeFirst(curtainLog.count - 14) }
+        if curtainLog.count > 40 { curtainLog.removeFirst(curtainLog.count - 40) }
     }
 
     private init() {

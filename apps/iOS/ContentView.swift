@@ -259,6 +259,14 @@ struct ContentView: View {
                 }
             }
             if !diagnostics.curtainLog.isEmpty {
+                // A real button, not a long-press on the text: the rows are
+                // plain `Text`, which neither VoiceOver nor a context menu can
+                // copy (field request 2026-11-08 — the log arrived as
+                // screenshots).
+                Button("Copy curtain log") {
+                    UIPasteboard.general.string = diagnostics.curtainLog.reversed().joined(separator: "\n")
+                    postQueuedAnnouncement("Curtain log copied")
+                }
                 // Newest first: the end of a lock/unlock test is what matters.
                 ForEach(Array(diagnostics.curtainLog.reversed().enumerated()), id: \.offset) { _, line in
                     Text(line)
