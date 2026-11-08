@@ -103,6 +103,14 @@ forwarding *or* curtained, and capture keeps working underneath.
   (`protectedDataWillBecomeUnavailable`, passcode only) and the unlock
   (`protectedDataDidBecomeAvailable`) triggers the same restore. Re-writes only ever
   lift a near-zero screen, so they never fight a level the user just set.
+- **The log disproved that** (third report, same day): "restore on background: set
+  1.00, reads 1.00", then "restore on active: set 1.00, reads 1.00" a second later,
+  screen still dark, no lock/unlock lines (a 1 s lock never makes protected data
+  unavailable). `UIScreen.brightness` reports the last value *set*, not the panel,
+  and a write equal to that value appears to be dropped — so the write made while
+  locking (which never reached the panel) poisoned the one on return. Return writes
+  are now **nudged**: set 0.02 away, then the level, so the real write is always a
+  change; repeated at 0.3 and 1 s unless the reading moved (the user changed it).
 - **Curtain log** (Start tab info sheet, bottom of Diagnostics, newest first):
   scene phases, lock/unlock, curtain up/down, and every brightness write with what
   the screen read straight after (`CaptureDiagnostics.logCurtain`). If the screen

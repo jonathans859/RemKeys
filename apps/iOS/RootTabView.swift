@@ -239,33 +239,46 @@ struct RootTabView: View {
         restoreBrightnessOnReturn = true
     }
 
-    /// Back after leaving: write the remembered level now and a few more
-    /// times while the display settles, and for a few seconds put it back if
-    /// iOS lowers it to near zero by itself. Re-writes only ever lift a
-    /// near-zero screen, so they never fight a brightness the user just set.
+    /// Back after leaving: write the remembered level now and twice more while
+    /// the display settles, and for a few seconds put it back if iOS lowers it
+    /// to near zero by itself.
+    ///
+    /// Every write here is **nudged** (see `writeBrightness`): the field log
+    /// of 2026-11-08 showed the write made while locking "reading" 1.00 and
+    /// the one on return "reading" 1.00 too, with the screen still dark. The
+    /// getter reports the last value set, not the panel, and a write equal to
+    /// that value appears to be dropped. The retries stop as soon as the
+    /// reading differs from what was set, i.e. the user changed it.
     private func restoreBrightnessAfterReturn(_ reason: String) {
         restoreBrightnessOnReturn = false
         guard !curtainActive else { return }
-        writeBrightness("restore on \(reason)")
+        writeBrightness("restore on \(reason)", nudge: true)
         brightnessWatchUntil = Date().addingTimeInterval(5)
         Task { @MainActor in
-            for delay in [0.3, 1.0, 2.5] {
+            for delay in [0.3, 1.0] {
                 try? await Task.sleep(for: .seconds(delay))
-                guard !curtainActive, let screen, screen.brightness < 0.05 else { continue }
-                writeBrightness("retry after \(delay)s")
+                guard !curtainActive, let screen,
+                      abs(screen.brightness - brightnessBeforeCurtain) < 0.005 else { return }
+                writeBrightness("retry after \(delay)s", nudge: true)
             }
         }
     }
 
     /// Set the remembered level and log what the screen reports straight
-    /// after — the line that tells a dropped write from an undone one.
-    private func writeBrightness(_ reason: String) {
+    /// after. With `nudge`, first set a value 0.02 away, so the real write is
+    /// always a change — UIKit seems to skip a write equal to its cached
+    /// value, and after a lock that cache no longer matches the panel.
+    private func writeBrightness(_ reason: String, nudge: Bool = false) {
         guard let screen else {
             logCurtain("\(reason): no screen")
             return
         }
-        screen.brightness = brightnessBeforeCurtain
-        logCurtain("\(reason): set \(level(brightnessBeforeCurtain)), reads \(level(screen.brightness))")
+        let target = brightnessBeforeCurtain
+        if nudge {
+            screen.brightness = target > 0.5 ? target - 0.02 : target + 0.02
+        }
+        screen.brightness = target
+        logCurtain("\(reason)\(nudge ? " (nudged)" : ""): set \(level(target)), reads \(level(screen.brightness))")
     }
 
     private func level(_ value: CGFloat) -> String {
