@@ -59,11 +59,11 @@ struct SettingsView: View {
                 SectionHeader("Modifier mapping", systemImage: "option")
             }
             Section {
-                Text("The curtain blacks the display out and takes the brightness to zero, which is where most of a long session's battery goes. Forwarding keeps running underneath it, and a double tap turns the screen back on.")
+                Text("The curtain blacks the display out; on iPhones with an OLED screen black pixels are switched off, which is where most of a long session's battery goes. It leaves the brightness alone, so the lock screen is never dark. Forwarding keeps running underneath it, and a double tap turns the screen back on.")
                 Text(settings.autoScreenCurtain
                      ? "It is raised for you as soon as a session connects with a hardware keyboard attached, so starting a session is one press. Without a keyboard it stays down, since you will most likely use the Virtual Input pad; a keyboard connected later in the session raises it then. It happens once per session — dismiss it and it stays down until you start forwarding again — and never while you are on the Virtual Input tab."
                      : "It is raised only when you press Screen curtain on the Start tab. Turn the setting on to have it raised for you when a session connects with a hardware keyboard attached.")
-                Text("Locking the phone or leaving the app takes the curtain down and gives the brightness back, so you come back to a normal screen. Control Center and notifications leave it up.")
+                Text("Locking the phone or leaving the app takes the curtain down, so you come back to a normal screen. Control Center and notifications leave it up.")
             } header: {
                 SectionHeader("Screen curtain", systemImage: "moon.stars")
             }

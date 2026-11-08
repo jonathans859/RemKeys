@@ -21,35 +21,24 @@ struct RootTabView: View {
     @State private var selectedTab: AppTab = .start
     @Environment(\.scenePhase) private var scenePhase
 
-    // Screen curtain: black overlay + brightness 0 = effectively display-off
-    // (fully off on OLED) while the app stays foreground and keeps capturing —
-    // the battery saver for long forwarding sessions with the idle timer held.
-    // Offered whether or not VoiceOver is running: VoiceOver has a Screen
-    // Curtain of its own, but it is a separate switch that has to be found and
-    // flipped, and it says nothing about brightness — which is the half that
-    // saves the battery. With VoiceOver on the overlay is the only element on
-    // screen and its dismissal is a plain activation, so nothing about the
-    // behaviour changes.
+    // Screen curtain: a full-screen black overlay while the app stays
+    // foreground and keeps capturing — the battery saver for long forwarding
+    // sessions with the idle timer held. On OLED iPhones black pixels are off,
+    // so the overlay alone is effectively display-off.
+    //
+    // It deliberately does NOT touch `UIScreen.brightness` (it used to drop it
+    // to 0). Brightness is the whole phone's setting, and a lock with it at 0
+    // left the lock screen dark until unlock: once locking starts iOS ignores
+    // the app's writes ("set 0.84, reads 0.00" in the field log, 2026-11-08)
+    // and keeps the 0 as the phone's brightness, and a lock cannot be seen
+    // coming. Only LCD models (SE, XR, 11) lose some saving; the user chose
+    // that trade.
+    //
+    // Offered whether or not VoiceOver is running: VoiceOver's own Screen
+    // Curtain is a separate switch that has to be found and flipped. With
+    // VoiceOver on the overlay is the only element on screen and its
+    // dismissal is a plain activation.
     @State private var curtainActive = false
-    @State private var brightnessBeforeCurtain: CGFloat = 1
-    /// Whether we are currently holding the screen's brightness at zero.
-    /// Tracked apart from `curtainActive` because the two have to part company
-    /// the moment the app stops being frontmost: the black overlay is ours to
-    /// keep, but the brightness belongs to the whole phone. See the
-    /// scene-phase handler.
-    @State private var brightnessHeldDown = false
-    /// Set when leaving the app took the curtain down: the brightness written
-    /// on the way out may have been dropped (iOS appears to ignore a change
-    /// made while the phone is locking — field-reported 2026-11-08 as "after
-    /// unlocking the screen is still dark"), so it is written again on return.
-    @State private var restoreBrightnessOnReturn = false
-    /// Until when, after coming back, a brightness that drops to near zero
-    /// by itself (with the curtain down) is put back. iOS restores its own
-    /// saved brightness when the display comes on after a lock — and the
-    /// saved value is the 0 the curtain set — possibly *after* our write on
-    /// `.active`. Field-reported 2026-11-08: leaving the app and Control
-    /// Center restored fine, lock + unlock stayed dark.
-    @State private var brightnessWatchUntil = Date.distantPast
     /// Whether this forwarding session has already raised the curtain by
     /// itself. Reset when forwarding stops, so `autoScreenCurtain` fires once
     /// per session and a reconnect never re-blacks a screen the user just
@@ -90,32 +79,7 @@ struct RootTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
             raiseCurtainAutomaticallyIfWanted()
         }
-        // The explicit lock signal (only with a passcode set). Treated like
-        // leaving the app, in case the scene phase is late or missing.
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.protectedDataWillBecomeUnavailableNotification
-        )) { _ in
-            logCurtain("locking")
-            endCurtainForLeaving("lock")
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.protectedDataDidBecomeAvailableNotification
-        )) { _ in
-            logCurtain("unlocked")
-            if restoreBrightnessOnReturn { restoreBrightnessAfterReturn("unlock") }
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIScreen.brightnessDidChangeNotification
-        )) { _ in
-            guard let screen else { return }
-            let now = screen.brightness
-            if Date() < brightnessWatchUntil { logCurtain("iOS reports brightness \(level(now))") }
-            guard Date() < brightnessWatchUntil, !curtainActive, now < 0.05,
-                  brightnessBeforeCurtain > now + 0.02 else { return }
-            writeBrightness("iOS lowered it to \(level(now))")
-        }
         .onChange(of: scenePhase) { _, phase in
-            logCurtain("phase \(phase)")
             switch phase {
             case .inactive:
                 // NOT a reason to stop. `.inactive` is Control Center,
@@ -130,21 +94,11 @@ struct RootTabView: View {
                     bridge.releaseHeldKeys()
                     CaptureView.requestForgetHeldKeys()
                 }
-                // Hand the brightness back here, not at `.background`.
-                // `.inactive` is where the user is looking at something that
-                // is NOT us — Control Center, the app switcher, the home
-                // screen mid-swipe — and those can last as long as they like
-                // without ever reaching `.background`, leaving a phone that is
-                // simply dark everywhere. It is also the last callback a
-                // force-quit from the switcher is sure to deliver. The curtain
-                // itself stays up: coming back re-blacks the screen and the
-                // session was never interrupted.
-                releaseBrightness()
+                // The curtain stays up: coming back finds it still there and
+                // the session was never interrupted.
             case .background:
                 // Actually gone. Capture is impossible from here, so stop
-                // forwarding rather than leave the remote holding a chord —
-                // and brightness is a system-wide setting that outlives the
-                // app, so never leave the user with a dark phone.
+                // forwarding rather than leave the remote holding a chord.
                 if bridge.forwardingEnabled {
                     bridge.forwardingEnabled = false
                 }
@@ -153,19 +107,10 @@ struct RootTabView: View {
                 // back should find the screen as it was before the curtain.
                 // (Control Center and other overlays are `.inactive` and keep
                 // it up.)
-                endCurtainForLeaving("background")
+                setCurtain(false)
             case .active:
                 // Whatever took the screen may have taken first responder too.
                 CaptureView.requestReclaim()
-                // Frontmost again, so the curtain that stayed up gets its
-                // brightness back down. Re-reads the current level first, so a
-                // brightness the user changed while they were away is what we
-                // restore to later.
-                if curtainActive { holdBrightnessDown(returning: true) }
-                // Back after the curtain was taken down by leaving: write the
-                // remembered level again, in case the write made while
-                // locking never landed.
-                if restoreBrightnessOnReturn { restoreBrightnessAfterReturn("active") }
             @unknown default:
                 break
             }
@@ -196,116 +141,11 @@ struct RootTabView: View {
     private func setCurtain(_ on: Bool) {
         guard curtainActive != on else { return }
         curtainActive = on
-        logCurtain(on ? "curtain up" : "curtain down")
-        if on {
-            holdBrightnessDown()
-        } else {
-            releaseBrightness()
-        }
         updateIdleTimer()
     }
 
-    /// Take the screen to zero, remembering what it was. Both halves are
-    /// idempotent on `brightnessHeldDown`, or a second call would record zero
-    /// as the level to restore to and the phone would never come back.
-    ///
-    /// - Parameter returning: re-darkening on the way back to `.active`,
-    ///   rather than raising the curtain. Then a near-zero reading is never
-    ///   remembered as "the user's level": right after an overlay or a lock
-    ///   the screen can still report the 0 we set, and restoring to that
-    ///   leaves the phone dark everywhere. Raising the curtain always
-    ///   remembers, so a genuinely dim screen comes back dim.
-    private func holdBrightnessDown(returning: Bool = false) {
-        guard !brightnessHeldDown, let screen else { return }
-        if !returning || screen.brightness > 0.05 { brightnessBeforeCurtain = screen.brightness }
-        logCurtain("darken, remembering \(level(brightnessBeforeCurtain))")
-        brightnessHeldDown = true
-        screen.brightness = 0
-    }
-
-    /// Give the brightness back. Safe to call when we are not holding it.
-    private func releaseBrightness() {
-        guard brightnessHeldDown, let screen else { return }
-        brightnessHeldDown = false
-        screen.brightness = brightnessBeforeCurtain
-        logCurtain("release: set \(level(brightnessBeforeCurtain)), reads \(level(screen.brightness))")
-    }
-
-    /// Locking the phone or leaving the app: take the curtain down and give
-    /// the brightness back, and remember to give it back again on return —
-    /// a write made while the display goes off may never land.
-    private func endCurtainForLeaving(_ reason: String) {
-        guard curtainActive || brightnessHeldDown else { return }
-        setCurtain(false)
-        writeBrightness("restore on \(reason)")
-        restoreBrightnessOnReturn = true
-    }
-
-    /// Back after leaving: write the remembered level now and twice more while
-    /// the display settles, and for a few seconds put it back if iOS lowers it
-    /// to near zero by itself.
-    ///
-    /// Every write here is **nudged** (see `writeBrightness`): the field log
-    /// of 2026-11-08 showed the write made while locking "reading" 1.00 and
-    /// the one on return "reading" 1.00 too, with the screen still dark. The
-    /// getter reports the last value set, not the panel, and a write equal to
-    /// that value appears to be dropped. The retries stop as soon as the
-    /// reading differs from what was set, i.e. the user changed it.
-    private func restoreBrightnessAfterReturn(_ reason: String) {
-        restoreBrightnessOnReturn = false
-        guard !curtainActive else { return }
-        writeBrightness("restore on \(reason)", nudge: true)
-        brightnessWatchUntil = Date().addingTimeInterval(5)
-        Task { @MainActor in
-            for delay in [0.3, 1.0, 2.5] {
-                try? await Task.sleep(for: .seconds(delay))
-                guard !curtainActive, let screen else { return }
-                let now = screen.brightness
-                if now < 0.05 || abs(now - brightnessBeforeCurtain) < 0.005 {
-                    writeBrightness("retry after \(delay)s, read \(level(now))", nudge: true)
-                } else {
-                    // Somewhere else, not near zero: the user moved it.
-                    logCurtain("retry after \(delay)s: reads \(level(now)), leaving it")
-                    return
-                }
-            }
-        }
-    }
-
-    /// Set the remembered level and log what the screen reports straight
-    /// after. With `nudge`, first set a value 0.02 away, so the real write is
-    /// always a change — UIKit seems to skip a write equal to its cached
-    /// value, and after a lock that cache no longer matches the panel.
-    private func writeBrightness(_ reason: String, nudge: Bool = false) {
-        guard let screen else {
-            logCurtain("\(reason): no screen")
-            return
-        }
-        let target = brightnessBeforeCurtain
-        if nudge {
-            screen.brightness = target > 0.5 ? target - 0.02 : target + 0.02
-        }
-        screen.brightness = target
-        logCurtain("\(reason)\(nudge ? " (nudged)" : ""): set \(level(target)), reads \(level(screen.brightness))")
-    }
-
-    private func level(_ value: CGFloat) -> String {
-        String(format: "%.2f", Double(value))
-    }
-
-    private func logCurtain(_ event: String) {
-        CaptureDiagnostics.shared.logCurtain(event)
-    }
-
-    /// The scene's screen; `UIScreen.main` is deprecated in scene-based apps.
-    private var screen: UIScreen? {
-        UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.screen }
-            .first
-    }
-
     /// The screen must stay awake while forwarding (capture dies with it) and
-    /// while curtained (brightness 0 must not auto-lock into a real suspend).
+    /// while curtained (an auto-lock would end the session).
     private func updateIdleTimer() {
         UIApplication.shared.isIdleTimerDisabled = bridge.forwardingEnabled || curtainActive
     }

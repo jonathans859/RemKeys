@@ -75,7 +75,7 @@ struct ContentView: View {
             }
             Section {
                 Text("A two-finger double tap anywhere toggles forwarding (on the Virtual Input tab it sends the built combination instead). A physical toggle shortcut can be recorded in Settings.")
-                Text("The screen curtain blacks out the display and drops brightness to zero to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on. Settings can raise it by itself as soon as a session connects with a keyboard attached. Locking the phone or leaving the app takes it down again.")
+                Text("The screen curtain blacks out the display to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on. Settings can raise it by itself as soon as a session connects with a keyboard attached. Locking the phone or leaving the app takes it down again.")
             } header: {
                 SectionHeader("Tips", systemImage: "lightbulb")
             }
@@ -141,7 +141,7 @@ struct ContentView: View {
                     // No accessibilityLabel override anywhere in this stack:
                     // Voice Control matches on the visible text, so a label
                     // and its button must not drift apart.
-                    .accessibilityHint("Blacks the screen out and drops brightness to zero to save battery. Keystrokes keep forwarding. Double-tap the screen to turn it back on.")
+                    .accessibilityHint("Blacks the screen out to save battery. Keystrokes keep forwarding. Double-tap the screen to turn it back on.")
                 }
             }
             .remKeysCard(active: isForwarding)
@@ -256,21 +256,6 @@ struct ContentView: View {
             if diagnostics.unmappedSeen > 0 {
                 LabeledContent("Unmapped key-downs") {
                     Text("\(diagnostics.unmappedSeen)")
-                }
-            }
-            if !diagnostics.curtainLog.isEmpty {
-                // A real button, not a long-press on the text: the rows are
-                // plain `Text`, which neither VoiceOver nor a context menu can
-                // copy (field request 2026-11-08 — the log arrived as
-                // screenshots).
-                Button("Copy curtain log") {
-                    UIPasteboard.general.string = diagnostics.curtainLog.reversed().joined(separator: "\n")
-                    postQueuedAnnouncement("Curtain log copied")
-                }
-                // Newest first: the end of a lock/unlock test is what matters.
-                ForEach(Array(diagnostics.curtainLog.reversed().enumerated()), id: \.offset) { _, line in
-                    Text(line)
-                        .font(.footnote.monospacedDigit())
                 }
             }
         } header: {

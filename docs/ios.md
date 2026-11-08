@@ -71,55 +71,30 @@ layer doing the stealing**. What went with it:
 
 ### Screen curtain
 
-Start-tab button, overlay in `RootTabView`: black overlay plus brightness 0, the
-battery saver for long sessions. Double-tap dismisses; the idle timer is held while
-forwarding *or* curtained, and capture keeps working underneath.
+Start-tab button, overlay in `RootTabView`: a full-screen black overlay, the battery
+saver for long sessions (on OLED iPhones black pixels are off). Double-tap dismisses;
+the idle timer is held while forwarding *or* curtained, and capture keeps working
+underneath. Overlays (Control Center, notifications) are `.inactive` and keep it up;
+`.background` (locking, home, switching apps) takes it down.
 
-- **The overlay and the brightness are held separately** (`curtainActive` vs
-  `brightnessHeldDown`). Brightness is a system-wide setting that outlives the app,
-  so it is given back at **`.inactive`** and taken down again on the return to
-  `.active`, while the overlay stays up throughout. Restoring only at `.background`
-  left the phone dark everywhere: `.inactive` can last as long as the user likes, may
-  never reach `.background`, and is the last callback a force-quit is sure to
-  deliver. Both helpers guard on `brightnessHeldDown`, or a second hold would record
-  0 as the level to restore to.
-- **Leaving the app ends the curtain** (`.background`: locking, home, switching
-  apps). It drops the overlay and writes the remembered brightness, then **writes it
-  again on the return to `.active`** (`restoreBrightnessOnReturn`). Field report
-  2026-11-08: after lock + unlock the screen stayed dark — most likely the write made
-  while locking was dropped, and the next hold then read the leftover 0 as the user's
-  level. Hence also: when re-darkening on return, **a reading of 0.05 or less is never
-  remembered** as the level to restore to (raising the curtain always remembers, so a
-  genuinely dim screen comes back dim). Overlays (Control Center, notifications) are `.inactive` and keep
-  the curtain up, as before.
-- **Lock + unlock needed more** (second field report, 2026-11-08: leaving the app and
-  Control Center were fine, lock + unlock stayed dark even back in the app). Likely
-  iOS restores its own saved brightness — the 0 the curtain set — when the display
-  comes on, after the app's write on `.active`. So on return
-  (`restoreBrightnessAfterReturn`) the level is written now and re-written at 0.3,
-  1 and 2.5 s if the screen still reads near zero, and for 5 s a
-  `brightnessDidChangeNotification` that drops it to near zero is answered with a
-  write (`brightnessWatchUntil`). The lock is also caught directly
-  (`protectedDataWillBecomeUnavailable`, passcode only) and the unlock
-  (`protectedDataDidBecomeAvailable`) triggers the same restore. Re-writes only ever
-  lift a near-zero screen, so they never fight a level the user just set.
-- **The log disproved that** (third report, same day): "restore on background: set
-  1.00, reads 1.00", then "restore on active: set 1.00, reads 1.00" a second later,
-  screen still dark, no lock/unlock lines (a 1 s lock never makes protected data
-  unavailable). `UIScreen.brightness` reports the last value *set*, not the panel,
-  and a write equal to that value appears to be dropped — so the write made while
-  locking (which never reached the panel) poisoned the one on return. Return writes
-  are now **nudged**: set 0.02 away, then the level, so the real write is always a
-  change; repeated at 0.3 and 1 s unless the reading moved (the user changed it).
-- **Curtain log** (Start tab info sheet, bottom of Diagnostics, newest first):
-  scene phases, lock/unlock, curtain up/down, and every brightness write with what
-  the screen read straight after (`CaptureDiagnostics.logCurtain`). If the screen
-  stays dark again, those lines say whether the writes didn't happen, didn't land,
-  or were undone.
+- **It never touches `UIScreen.brightness`.** It used to drop it to 0, and a lock
+  with the curtain up left the **lock screen** dark until unlock (field reports
+  2026-11-08). The on-device curtain log settled why, after three fixes that only
+  moved the symptom:
+  - Once locking starts, iOS ignores the app's writes: "set 0.84, reads 0.00" at
+    `.inactive`, at `.background` and on the brief `.active` the lock passes
+    through. The 0 stays as the phone's own brightness (Control Center showed 0).
+  - After unlock the app's restore lands at once, but the lock screen in between
+    shows the saved 0, and nothing the app does can change that: it isn't
+    frontmost, and a press of the side button can't be seen coming.
+  - `UIScreen.brightness` reports the last value *set*, not the panel, so "reads"
+    lines from a write that was ignored can still look fine.
+
+  So the brightness half was dropped (the user chose this). Only LCD models (SE, XR,
+  11) lose some saving.
 - **Offered with VoiceOver on too**: its own Screen Curtain is a different switch in
-  a different place and leaves the backlight on, and brightness 0 is the half that
-  saves the battery. The overlay is one labeled element with an accessibility action,
-  and the `TabView` under it is `.accessibilityHidden(curtainActive)`.
+  a different place. The overlay is one labeled element with an accessibility
+  action, and the `TabView` under it is `.accessibilityHidden(curtainActive)`.
 - **`autoScreenCurtain`** (off by default) raises the curtain the first time a
   session reaches the PC **with a hardware keyboard connected** (`GCKeyboard.coalesced`;
   field-requested 2026-11-08 — without a keyboard you are about to use Virtual
