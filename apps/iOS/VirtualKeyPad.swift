@@ -9,67 +9,58 @@ import BridgeCore
 /// pass straight through to the app with no activation step (instant direct
 /// interaction, piano-app style — field-chosen over `.requiresActivation`).
 ///
-/// **One shape, three zones wide, in every orientation** (rebuilt 2026-08-20).
-/// The pad used to offer key bands, a full 60-key PC keyboard, and a rule for
-/// choosing between them by screen aspect ratio. All of it went, because all
-/// of it was in service of a surface whose zones were 23–29 pt across: too
-/// narrow to aim at, so every key cost a search. See `VirtualKeys.columns` for
-/// why the replacement is three wide and nothing else.
-///
-/// The layout is two blocks:
-///
-/// - **The page**, filling the top: 3 × 3 (or 3 × 4 for the function keys),
-///   swapped by two-finger swipe left/right or from the tab's page control.
-/// - **The modifier block**, the bottom two rows, which is the same six keys
-///   at the same place forever — it does not move when the page changes, and
-///   it is what the thumb finds coming up off the bottom edge of the phone.
+/// **What it draws is a user-editable `Pad`** (since 2026-11): a rows ×
+/// columns grid, 1–4 wide and 1–6 tall, whose keys may span several cells of
+/// their row and whose empty cells are dimmed gaps. Pads are edited in
+/// Settings → Pads; the shipped defaults are the old pages with the six
+/// modifiers as their bottom two rows. Modifiers are ordinary keys now — the
+/// fixed modifier block went when pads became editable.
 ///
 /// Gestures, one set, no modes:
 ///
 /// - Drag to hear the key under the finger (interrupting announcement plus a
 ///   tick per boundary); lift on a key to send it, lift on a modifier to
-///   toggle it. Pressing a modifier that is on turns it off.
+///   toggle it. Pressing a modifier that is on turns it off. **A gap is
+///   silent** — no speech, no tick — and lifting on one sends nothing.
 /// - **Press and hold** (`virtualPadHoldEnabled`): after
 ///   `virtualPadHoldDelay` the key is pressed *down* on the PC and stays down
-///   until the finger lifts, so it repeats there — hold Backspace to eat a
-///   word, hold Down to keep scrolling. The Windows agent generates that
-///   repeat (`KeyRepeater`); Windows never repeats injected keys by itself.
-///   There is no second "latch the key on" stage any more: latching is what
-///   the modifier block is for, and every modifier now has a permanent zone.
-/// - Two-finger tap clears every modifier that is on. An extra finger landing
-///   mid-drag aborts the drag, so nothing fires.
+///   until the finger lifts, so it repeats there. The Windows agent generates
+///   that repeat (`KeyRepeater`); Windows never repeats injected keys itself.
+/// - Two-finger swipe left/right changes pad; two-finger tap clears every
+///   modifier that is on. An extra finger landing mid-drag aborts the drag.
 ///
-/// State shows as a **filled key**: plain grey off, half-strength tint on,
-/// solid tint down on the PC, with a thicker tinted border on both live
-/// states so it never rests on hue alone.
+/// State shows as a **filled key**: the key's own fill off, half-strength
+/// accent on, solid accent down on the PC, with a thicker border on both live
+/// states so it never rests on hue alone. A coloured key keeps its colour in
+/// the border while it is on.
 ///
 /// **One zone, one vibration** — and with `virtualPadRichHaptics` on, how hard
 /// it is *is* the key's state: light tick = off, firmer knock = turned on,
-/// hard knock = down on the PC. Encoding state as extra pulses was tried first
-/// and field-rejected (2026-08-10): pulses have to be counted and told apart,
-/// a single harder one is read instantly.
+/// hard knock = down on the PC (field-chosen 2026-08-10 over extra pulses).
 struct VirtualKeyPad: UIViewRepresentable {
     let settings: AppSettings
-    /// Which page the upper block shows. Owned by the tab, because the tab's
-    /// toolbar control changes it too.
+    /// The pads to page through — the visible ones, in order.
+    let pads: [Pad]
+    /// Which pad is shown. Owned by the tab, because the tab's toolbar
+    /// control changes it too.
     let pageIndex: Int
     /// Snapshot of the tab's latched modifiers — owned by the tab so Send's
     /// hint stays honest.
     let latchedKeys: Set<UInt16>
-    /// Move the page by ±1. The pad reports the gesture rather than owning the
-    /// page, so the toolbar control and the swipe can't disagree.
+    /// Move the pad by ±1. The pad reports the gesture rather than owning the
+    /// index, so the toolbar control and the swipe can't disagree.
     let onPageStep: (Int) -> Void
-    /// Latch a key on or off. Explicit rather than a toggle: the pad knows the
-    /// state it wants, and a toggle would race the SwiftUI update.
-    let onSetLatched: (VirtualKey, Bool) -> Void
+    /// Latch a modifier on or off. Explicit rather than a toggle: the pad
+    /// knows the state it wants, and a toggle would race the SwiftUI update.
+    let onSetLatched: (UInt16, Bool) -> Void
     let onClearLatched: () -> Void
-    let onSend: (VirtualKey) -> Void
+    let onSend: (PadKey) -> Void
     /// Press the key down on the PC and keep it down. Returns false when the
     /// connection can't carry it (the tab announces why), and the press is
     /// then simply spent — nothing is left looking held.
-    let onHoldBegin: (VirtualKey) -> Bool
+    let onHoldBegin: (PadKey) -> Bool
     /// Release a key put down by `onHoldBegin`.
-    let onHoldEnd: (VirtualKey) -> Void
+    let onHoldEnd: (PadKey) -> Void
 
     func makeUIView(context: Context) -> KeyPadUIView {
         let view = KeyPadUIView()
@@ -84,8 +75,7 @@ struct VirtualKeyPad: UIViewRepresentable {
     /// Fill whatever the tab gives us. Without this the representable is sized
     /// from `intrinsicContentSize` and *centred* inside the frame instead —
     /// which once left the pad a fixed-height strip floating in the middle of
-    /// the screen rather than the full-bleed pad the tab asks for. Zones are
-    /// aimed at by feel, so every point counts.
+    /// the screen. Zones are aimed at by feel, so every point counts.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: KeyPadUIView,
@@ -97,7 +87,6 @@ struct VirtualKeyPad: UIViewRepresentable {
     }
 
     private func configure(_ view: KeyPadUIView) {
-        view.extendedFKeys = settings.virtualPadExtendedFKeys
         view.holdEnabled = settings.virtualPadHoldEnabled
         view.holdDelay = settings.virtualPadHoldDelay
         view.speaksHoldStages = settings.virtualPadHoldSpeech
@@ -110,40 +99,30 @@ struct VirtualKeyPad: UIViewRepresentable {
         view.onHoldBegin = onHoldBegin
         view.onHoldEnd = onHoldEnd
         // Last, so the announcement it makes describes a fully configured pad.
-        view.pageIndex = pageIndex
+        view.setPads(pads, index: pageIndex)
     }
 }
 
-/// A zone address: which row of the whole pad (page rows first, then the
-/// modifier block) and which column.
-private struct PadZone: Equatable {
-    let row: Int
-    let column: Int
+/// What the finger is over: a key (by id — every cell of a wide key is the
+/// same target, so crossing between them is not a boundary) or a gap. All
+/// gaps are the same target: moving between two of them changes nothing.
+private enum PadTarget: Equatable {
+    case key(UUID)
+    case gap
 }
 
 final class KeyPadUIView: UIView {
     var onPageStep: ((Int) -> Void)?
-    var onSetLatched: ((VirtualKey, Bool) -> Void)?
+    var onSetLatched: ((UInt16, Bool) -> Void)?
     var onClearLatched: (() -> Void)?
-    var onSend: ((VirtualKey) -> Void)?
-    var onHoldBegin: ((VirtualKey) -> Bool)?
-    var onHoldEnd: ((VirtualKey) -> Void)?
+    var onSend: ((PadKey) -> Void)?
+    var onHoldBegin: ((PadKey) -> Bool)?
+    var onHoldEnd: ((PadKey) -> Void)?
 
-    var extendedFKeys = false {
-        didSet {
-            guard oldValue != extendedFKeys else { return }
-            rebuildZones(announcePage: false)
-        }
-    }
-
-    var pageIndex = 0 {
-        didSet {
-            guard oldValue != pageIndex else { return }
-            let announce = pageChangeCameFromSwipe
-            pageChangeCameFromSwipe = false
-            rebuildZones(announcePage: announce)
-        }
-    }
+    private var pads: [Pad] = []
+    private var pageIndex = 0
+    /// The pad on screen, as last built.
+    private var pad: Pad?
 
     /// Set while a two-finger swipe is asking for the page change it is about
     /// to be handed back. The toolbar's page control is an adjustable element,
@@ -170,14 +149,8 @@ final class KeyPadUIView: UIView {
         }
     }
 
-    /// Every row on the pad: the current page's rows, then the modifier
-    /// block's. Flattening the two blocks into one list keeps hit testing and
-    /// label handling single-path; only the geometry knows about the split.
-    private var rows: [[VirtualKey]] = []
-    /// How many of `rows` belong to the page. The rest are the modifier block.
-    private var pageRowCount = 0
-    private var pages: [PadPage] = []
-    private var labels: [[UILabel]] = []
+    private var keyLabels: [UUID: UILabel] = [:]
+    private var gapViews: [UIView] = []
     /// The size the zones were last computed for: a change means the finger is
     /// no longer over what it thought it was.
     private var lastLaidOutSize: CGSize?
@@ -192,9 +165,9 @@ final class KeyPadUIView: UIView {
     /// finger feels is one pulse getting harder — tick, knock, hard knock.
     private let stateThump = UIImpactFeedbackGenerator(style: .medium)
 
-    /// The single tracked finger and the zone it is over.
+    /// The single tracked finger and what it is over.
     private var trackedTouch: UITouch?
-    private var trackedZone: PadZone?
+    private var trackedTarget: PadTarget?
 
     // MARK: Press state
 
@@ -205,10 +178,10 @@ final class KeyPadUIView: UIView {
     }
 
     private var pressStage: PressStage = .spent
-    private var pressKey: VirtualKey?
+    private var pressKey: PadKey?
     private var holdTimer: Timer?
     /// The key currently down on the PC, for the label highlight.
-    private var heldVK: UInt16?
+    private var heldKeyID: UUID?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -228,20 +201,17 @@ final class KeyPadUIView: UIView {
         isAccessibilityElement = true
         accessibilityLabel = "Key pad"
         // Instant pass-through (field-requested, 2026-07-19): touching the
-        // pad is direct interaction immediately — no activation step, the
-        // classic piano-app behavior. `.requiresActivation` was tried first
-        // and rejected as an extra hop. silentOnTouch keeps VoiceOver quiet
-        // so the pad's own announcements are the only voice.
+        // pad is direct interaction immediately — no activation step.
+        // silentOnTouch keeps VoiceOver quiet so the pad's own announcements
+        // are the only voice.
         accessibilityTraits = .allowsDirectInteraction
         accessibilityDirectTouchOptions = [.silentOnTouch]
         updateAccessibilityHint()
-        rebuildZones(announcePage: false)
 
-        // Key borders are CGColors, which are resolved once and don't follow
-        // light/dark mode on their own — without this the outlines stay the
-        // old mode's colour until the pad is rebuilt.
+        // Borders are CGColors, which are resolved once and don't follow
+        // light/dark mode on their own.
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: KeyPadUIView, _) in
-            view.updateBorderColors()
+            view.refreshLabels()
         }
 
         let clearTap = UITapGestureRecognizer(target: self, action: #selector(handleClearTap))
@@ -268,7 +238,7 @@ final class KeyPadUIView: UIView {
     }
 
     private func updateAccessibilityHint() {
-        var hint = "Touches here work directly. Drag to hear the keys and lift on one to send it right away. The bottom two rows are the modifiers; lifting on one turns it on or off. Two-finger swipe left or right changes the keys above them, two-finger tap clears the modifiers."
+        var hint = "Touches here work directly. Drag to hear the keys and lift on one to send it right away; lifting on a modifier turns it on or off. Empty spaces are silent and send nothing. Two-finger swipe left or right changes the pad, two-finger tap clears the modifiers."
         if holdEnabled {
             hint += " Hold a key until it is pressed down on the PC, where it repeats until you lift."
         }
@@ -282,112 +252,108 @@ final class KeyPadUIView: UIView {
         if newWindow == nil { abortPress() }
     }
 
-    // MARK: Zones & labels (the drawn keys are a touch-user convenience;
-    // VoiceOver only ever sees the pad as one element)
+    // MARK: Building (the drawn keys are a touch-user convenience; VoiceOver
+    // only ever sees the pad as one element)
 
-    /// Rebuild the pad for the current page. The modifier block is appended
-    /// unchanged every time, which is what makes it the same six zones in the
-    /// same place on every page.
-    private func rebuildZones(announcePage: Bool) {
-        pages = VirtualKeys.pages(includeExtendedFKeys: extendedFKeys)
-        guard !pages.isEmpty else { return }
-        let page = pages[min(max(pageIndex, 0), pages.count - 1)]
-        let newRows = page.rows + VirtualKeys.modifierBlock
-        pageRowCount = page.rows.count
+    func setPads(_ newPads: [Pad], index: Int) {
+        pads = newPads
+        let clamped = newPads.isEmpty ? 0 : min(max(index, 0), newPads.count - 1)
+        let indexChanged = clamped != pageIndex
+        pageIndex = clamped
+        let announce = indexChanged && pageChangeCameFromSwipe
+        if indexChanged { pageChangeCameFromSwipe = false }
+        rebuild(announce: announce)
+    }
 
-        if newRows != rows {
-            abortPress()
-            rows = newRows
-            for label in labels.flatMap({ $0 }) { label.removeFromSuperview() }
-            labels = rows.map { row in
-                row.map { key in
-                    let label = UILabel()
-                    label.text = key.name
-                    label.adjustsFontSizeToFitWidth = true
-                    label.minimumScaleFactor = 0.5
-                    label.textAlignment = .center
-                    label.layer.cornerRadius = 8
-                    // Real values are set by `refreshLabels` on the next
-                    // pass; these just keep a fresh label from flashing
-                    // borderless.
-                    label.layer.borderWidth = 1.5
-                    label.layer.masksToBounds = true
-                    label.isAccessibilityElement = false
-                    addSubview(label)
-                    return label
+    private func rebuild(announce: Bool) {
+        let newPad = pads.isEmpty ? nil : pads[pageIndex]
+        guard newPad != pad else { return }
+        // The finger is on a zone that is about to mean something else, and a
+        // key held down on the PC has to be let go before its zone goes.
+        abortPress()
+        pad = newPad
+
+        for label in keyLabels.values { label.removeFromSuperview() }
+        for gap in gapViews { gap.removeFromSuperview() }
+        keyLabels = [:]
+        gapViews = []
+
+        if let pad {
+            for row in 0..<pad.rows {
+                for column in 0..<pad.columns where pad.key(atRow: row, column: column) == nil {
+                    let gap = UIView()
+                    gap.backgroundColor = .quaternarySystemFill
+                    gap.layer.cornerRadius = 8
+                    gap.isAccessibilityElement = false
+                    gap.tag = row * pad.columns + column
+                    addSubview(gap)
+                    gapViews.append(gap)
                 }
             }
-            setNeedsLayout()
+            for placed in pad.keys {
+                let label = UILabel()
+                label.text = placed.key.label
+                label.adjustsFontSizeToFitWidth = true
+                label.minimumScaleFactor = 0.5
+                label.numberOfLines = 2
+                label.textAlignment = .center
+                label.layer.cornerRadius = 8
+                label.layer.borderWidth = 1.5
+                label.layer.masksToBounds = true
+                label.isAccessibilityElement = false
+                addSubview(label)
+                keyLabels[placed.id] = label
+            }
         }
-        if announcePage { announce(page.title) }
+        setNeedsLayout()
+        if announce, let pad { self.announce(pad.title) }
     }
 
     /// Three visibly distinct key states. A **filled background** is the
     /// primary cue (field-requested 2026-08-10): tinted text alone was too
-    /// quiet to find at a glance.
+    /// quiet to find at a glance. Half strength for on and solid for down,
+    /// each with a thicker border, so the state survives a washed-out display
+    /// and does not rest on hue alone.
     ///
-    /// The washes used to be 20% and 45% tint, and 20% was still too quiet to
-    /// spot at a glance (field-reported 2026-08-20). They are now **half
-    /// strength for on and solid for down**, which is a much wider gap from a
-    /// plain grey key and from each other. A **thicker tinted border** rides
-    /// along with both, so the state survives a display that is washing the
-    /// colour out and does not rest on hue alone.
+    /// A key's own colour is its *resting* fill, kept light enough for the
+    /// ordinary label colour to stay readable on it. The live states override
+    /// the fill — the state matters more than the colour while it lasts — and
+    /// a coloured key keeps its colour as the border while it is on.
     private func refreshLabels() {
-        // NOT `UIColor.separator`: that is a hairline meant to divide rows of
-        // text, and against the pad's own fill it left the key outlines almost
-        // invisible (field-reported 2026-08-20). A translucent label colour
-        // adapts to light and dark the same way but lands far darker/lighter
-        // against the key.
+        guard let pad else { return }
+        // NOT `UIColor.separator`: that hairline left the keys looking
+        // borderless (field-reported 2026-08-20).
         let outline = UIColor.label.withAlphaComponent(0.45)
             .resolvedColor(with: traitCollection).cgColor
         let accent = tintColor.resolvedColor(with: traitCollection)
         // A solid accent key needs an outline that is *not* accent, or the
         // border disappears into the fill.
         let downOutline = UIColor.label.resolvedColor(with: traitCollection).cgColor
-        // Whichever of black/white actually contrasts with the accent, rather
-        // than always white: the dark-mode accent is a *light* violet, and
-        // white on it lands at about 3:1 — legal for large text and no more.
         let downText = accent.highestContrastForeground
-        for (rowIndex, row) in rows.enumerated() {
-            for (columnIndex, key) in row.enumerated() {
-                guard rowIndex < labels.count, columnIndex < labels[rowIndex].count else { continue }
-                let label = labels[rowIndex][columnIndex]
-                let down = key.vk == heldVK
-                let on = latchedKeys.contains(key.vk)
-                label.backgroundColor = down
-                    ? accent
-                    : (on ? accent.withAlphaComponent(0.5) : .tertiarySystemFill)
-                // The contrasting foreground on the solid fill, the ordinary
-                // label colour on the half wash — which stays readable in both
-                // light and dark mode, where a tinted label on a tinted fill
-                // would not.
-                label.textColor = down ? downText : .label
-                label.font = .systemFont(
-                    ofSize: labelPointSize,
-                    weight: on || down ? .semibold : .regular
-                )
-                label.layer.borderWidth = on || down ? 3 : 1.5
-                label.layer.borderColor = down
-                    ? downOutline
-                    : (on ? accent.cgColor : outline)
-            }
+        for placed in pad.keys {
+            guard let label = keyLabels[placed.id] else { continue }
+            let key = placed.key
+            let colour = key.color.uiColor?.resolvedColor(with: traitCollection)
+            let down = placed.id == heldKeyID
+            let on = key.togglesModifier && latchedKeys.contains(key.vk)
+            let resting = colour?.withAlphaComponent(PadKeyColor.restingAlpha) ?? .tertiarySystemFill
+            label.backgroundColor = down ? accent : (on ? accent.withAlphaComponent(0.5) : resting)
+            label.textColor = down ? downText : .label
+            label.font = .systemFont(ofSize: labelPointSize, weight: on || down ? .semibold : .regular)
+            label.layer.borderWidth = on || down ? 3 : 1.5
+            label.layer.borderColor = down
+                ? downOutline
+                : (on ? (colour ?? accent).cgColor : (colour?.cgColor ?? outline))
         }
     }
 
-    /// Borders are CGColors, which don't follow light/dark mode by themselves.
-    /// `refreshLabels` already resolves them against the current traits, so
-    /// re-running it is the whole fix.
-    private func updateBorderColors() {
-        refreshLabels()
-    }
-
     private var labelPointSize: CGFloat {
-        guard !rows.isEmpty, bounds.height > 0 else { return 15 }
-        return min(max(bounds.height / CGFloat(rows.count) * 0.28, 11), 22)
+        guard let pad, bounds.height > 0 else { return 15 }
+        return min(max(bounds.height / CGFloat(pad.rows) * 0.28, 11), 22)
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: CGFloat(max(rows.count, 1)) * 72)
+        CGSize(width: UIView.noIntrinsicMetric, height: CGFloat(pad?.rows ?? 1) * 72)
     }
 
     /// Gap between key rectangles, so the pad reads as keys rather than as a
@@ -395,29 +361,16 @@ final class KeyPadUIView: UIView {
     /// touch can land "between" two keys.
     private static let keyGap: CGFloat = 4
 
-    /// Share of the pad's height given to the modifier block.
-    ///
-    /// A fixed fraction rather than an equal share of all rows, and that is
-    /// the point: pages have three rows or four, so equal rows would shift the
-    /// modifiers up and down as the page changed. At a fixed fraction the six
-    /// modifier zones sit at exactly the same coordinates on every page, which
-    /// is the only reason muscle memory can form for them at all.
-    private static let modifierBlockFraction: CGFloat = 0.4
-
-    /// Where the page block ends and the modifier block begins.
-    private var blockSplit: CGFloat {
-        bounds.height * (1 - Self.modifierBlockFraction)
-    }
-
-    private func rowGeometry(_ index: Int) -> (y: CGFloat, height: CGFloat) {
-        let split = blockSplit
-        if index < pageRowCount {
-            let height = split / CGFloat(max(pageRowCount, 1))
-            return (CGFloat(index) * height, height)
-        }
-        let modifierRows = max(rows.count - pageRowCount, 1)
-        let height = (bounds.height - split) / CGFloat(modifierRows)
-        return (split + CGFloat(index - pageRowCount) * height, height)
+    private func cellFrame(row: Int, column: Int, span: Int, in pad: Pad) -> CGRect {
+        let rowHeight = bounds.height / CGFloat(pad.rows)
+        let columnWidth = bounds.width / CGFloat(pad.columns)
+        let gap = Self.keyGap
+        return CGRect(
+            x: CGFloat(column) * columnWidth + gap / 2,
+            y: CGFloat(row) * rowHeight + gap / 2,
+            width: max(CGFloat(span) * columnWidth - gap, 1),
+            height: max(rowHeight - gap, 1)
+        )
     }
 
     override func layoutSubviews() {
@@ -428,49 +381,24 @@ final class KeyPadUIView: UIView {
         if let lastLaidOutSize, lastLaidOutSize != bounds.size { abortPress() }
         lastLaidOutSize = bounds.size
 
-        if rows.isEmpty { rebuildZones(announcePage: false) }
-        guard !rows.isEmpty, bounds.width > 0, bounds.height > 0 else { return }
-
-        let gap = Self.keyGap
-        for (rowIndex, row) in rows.enumerated() {
-            let (y, rowHeight) = rowGeometry(rowIndex)
-            let columnWidth = bounds.width / CGFloat(row.count)
-            for columnIndex in row.indices {
-                labels[rowIndex][columnIndex].frame = CGRect(
-                    x: CGFloat(columnIndex) * columnWidth + gap / 2,
-                    y: y + gap / 2,
-                    width: max(columnWidth - gap, 1),
-                    height: max(rowHeight - gap, 1)
-                )
-            }
+        guard let pad, bounds.width > 0, bounds.height > 0 else { return }
+        for gap in gapViews {
+            gap.frame = cellFrame(row: gap.tag / pad.columns, column: gap.tag % pad.columns, span: 1, in: pad)
+        }
+        for placed in pad.keys {
+            keyLabels[placed.id]?.frame = cellFrame(row: placed.row, column: placed.column, span: placed.span, in: pad)
         }
         refreshLabels()
     }
 
     // MARK: Shared helpers
 
-    private func zone(at point: CGPoint) -> PadZone? {
-        guard !rows.isEmpty, bounds.contains(point) else { return nil }
-        let split = blockSplit
-        let rowIndex: Int
-        if point.y < split, pageRowCount > 0 {
-            let height = split / CGFloat(pageRowCount)
-            rowIndex = min(max(Int(point.y / height), 0), pageRowCount - 1)
-        } else {
-            let modifierRows = max(rows.count - pageRowCount, 1)
-            let height = (bounds.height - split) / CGFloat(modifierRows)
-            let offset = min(max(Int((point.y - split) / height), 0), modifierRows - 1)
-            rowIndex = pageRowCount + offset
-        }
-        let row = rows[rowIndex]
-        guard !row.isEmpty else { return nil }
-        let columnWidth = bounds.width / CGFloat(row.count)
-        let column = min(max(Int(point.x / columnWidth), 0), row.count - 1)
-        return PadZone(row: rowIndex, column: column)
-    }
-
-    private func key(at zone: PadZone) -> VirtualKey {
-        rows[zone.row][zone.column]
+    private func target(at point: CGPoint) -> (PadTarget, PadKey?)? {
+        guard let pad, bounds.contains(point), bounds.width > 0, bounds.height > 0 else { return nil }
+        let row = min(max(Int(point.y / (bounds.height / CGFloat(pad.rows))), 0), pad.rows - 1)
+        let column = min(max(Int(point.x / (bounds.width / CGFloat(pad.columns))), 0), pad.columns - 1)
+        guard let placed = pad.key(atRow: row, column: column) else { return (.gap, nil) }
+        return (.key(placed.id), placed.key)
     }
 
     /// Interrupting on purpose: while dragging, the newest key name must win
@@ -486,47 +414,37 @@ final class KeyPadUIView: UIView {
         announce(message)
     }
 
-    private func description(of key: VirtualKey) -> String {
-        let name = key.spokenName
-        if latchedKeys.contains(key.vk) { return "\(name), on" }
-        return VirtualKeys.modifierVKs.contains(key.vk) ? "\(name), off" : name
+    private func description(of key: PadKey) -> String {
+        guard key.togglesModifier else { return key.spokenLabel }
+        return "\(key.spokenLabel), \(latchedKeys.contains(key.vk) ? "on" : "off")"
     }
 
     /// The vibration for arriving on a key — **always exactly one**, and with
     /// rich haptics on, its *strength* is the key's state.
-    ///
-    /// - key off: the ordinary selection tick
-    /// - key on: a firmer single knock
-    /// - key down on the PC: a hard single knock
-    ///
-    /// Earlier versions added a *second* pulse for the state and a third for
-    /// crossing into another row. Field-rejected as unintuitive (2026-08-10):
-    /// several pulses per key have to be counted and told apart, while one
-    /// pulse that is simply harder is read instantly and needs no learning.
-    private func feedbackEntering(_ key: VirtualKey) {
+    private func feedbackEntering(_ key: PadKey, id: UUID) {
         guard richHaptics else {
             selectionTick.selectionChanged()
             return
         }
-        if key.vk == heldVK {
+        if id == heldKeyID {
             edgeThump.impactOccurred()
-        } else if latchedKeys.contains(key.vk) {
+        } else if key.togglesModifier && latchedKeys.contains(key.vk) {
             stateThump.impactOccurred()
         } else {
             selectionTick.selectionChanged()
         }
     }
 
-    /// Latch a key on/off through the parent. The local set is updated
+    /// Latch a modifier on/off through the parent. The local set is updated
     /// optimistically so a continuing drag reads the right state before
     /// SwiftUI's update pass comes around.
-    private func setLatched(_ key: VirtualKey, _ on: Bool) {
-        guard latchedKeys.contains(key.vk) != on else { return }
-        if on { latchedKeys.insert(key.vk) } else { latchedKeys.remove(key.vk) }
-        onSetLatched?(key, on)
+    private func setLatched(_ vk: UInt16, _ on: Bool) {
+        guard latchedKeys.contains(vk) != on else { return }
+        if on { latchedKeys.insert(vk) } else { latchedKeys.remove(vk) }
+        onSetLatched?(vk, on)
     }
 
-    private func send(_ key: VirtualKey) {
+    private func send(_ key: PadKey) {
         sendThump.impactOccurred()
         onSend?(key)
     }
@@ -541,25 +459,19 @@ final class KeyPadUIView: UIView {
     @objc private func handleNextPage() { stepPage(by: 1) }
     @objc private func handlePreviousPage() { stepPage(by: -1) }
 
-    /// Paging ends any press first: the finger is on a zone that is about to
-    /// mean a different key, and a key held down on the PC has to be let go
-    /// before its zone disappears.
+    /// Paging ends any press first: a key held down on the PC has to be let
+    /// go before its zone disappears.
     private func stepPage(by delta: Int) {
         abortPress()
-        guard pages.count > 1 else {
-            edgeThump.impactOccurred()
-            return
-        }
         let target = pageIndex + delta
-        guard pages.indices.contains(target) else {
+        guard pads.count > 1, pads.indices.contains(target) else {
             // A harder knock for "there is nothing past this" — the same edge
             // cue the pad has always used.
             edgeThump.impactOccurred()
             return
         }
         selectionTick.selectionChanged()
-        // The announcement rides on `pageIndex` being set, which happens when
-        // the tab hands the new value back.
+        // The announcement rides on the index being handed back.
         pageChangeCameFromSwipe = true
         onPageStep?(delta)
     }
@@ -569,7 +481,7 @@ final class KeyPadUIView: UIView {
     /// Start (or restart) the countdown for `key`. Any key still down on the
     /// PC from the previous zone is released first — sliding off a held key
     /// ends its hold exactly like lifting does.
-    private func startPress(on key: VirtualKey) {
+    private func startPress(on key: PadKey) {
         endHoldIfNeeded()
         cancelHoldTimer()
         pressKey = key
@@ -588,40 +500,36 @@ final class KeyPadUIView: UIView {
         guard pressStage == .pressing, let key = pressKey else { return }
         guard onHoldBegin?(key) == true else {
             // Refused (forwarding off, not connected): the tab already said
-            // why. The press is over — never leave a key looking held that
-            // never went down.
+            // why. Never leave a key looking held that never went down.
             pressStage = .spent
             return
         }
         pressStage = .held
-        heldVK = key.vk
+        heldKeyID = key.id
         refreshLabels()
         edgeThump.impactOccurred()
-        announceStage("\(key.spokenName) held down")
+        announceStage("\(key.spokenLabel) held down")
     }
 
     /// Release a key this press put down on the PC.
     private func endHoldIfNeeded() {
         guard pressStage == .held, let key = pressKey else { return }
         pressStage = .spent
-        heldVK = nil
+        heldKeyID = nil
         onHoldEnd?(key)
         refreshLabels()
         sendThump.impactOccurred()
-        announceStage("\(key.spokenName) released")
+        announceStage("\(key.spokenLabel) released")
     }
 
     /// A press that ended before the hold: modifiers toggle, other keys send.
     /// Pressing a modifier that is already on is how you turn it off.
-    private func shortPress(_ key: VirtualKey) {
-        if latchedKeys.contains(key.vk) {
-            setLatched(key, false)
+    private func shortPress(_ key: PadKey) {
+        if key.togglesModifier {
+            let on = !latchedKeys.contains(key.vk)
+            setLatched(key.vk, on)
             selectionTick.selectionChanged()
-            announce("\(key.spokenName) off")
-        } else if VirtualKeys.modifierVKs.contains(key.vk) {
-            setLatched(key, true)
-            selectionTick.selectionChanged()
-            announce("\(key.spokenName) on")
+            announce("\(key.spokenLabel) \(on ? "on" : "off")")
         } else {
             send(key)
         }
@@ -635,7 +543,7 @@ final class KeyPadUIView: UIView {
         pressStage = .spent
         pressKey = nil
         trackedTouch = nil
-        trackedZone = nil
+        trackedTarget = nil
     }
 
     private func cancelHoldTimer() {
@@ -661,20 +569,20 @@ final class KeyPadUIView: UIView {
         edgeThump.prepare()
         stateThump.prepare()
         trackedTouch = touch
-        updateTrackedZone(with: touch)
+        updateTracking(with: touch)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
         guard let touch = trackedTouch, touches.contains(touch) else { return }
-        updateTrackedZone(with: touch)
+        updateTracking(with: touch)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         guard let touch = trackedTouch, touches.contains(touch) else { return }
         // Catch a lift that landed in a zone the move events never reported.
-        updateTrackedZone(with: touch)
+        updateTracking(with: touch)
         cancelHoldTimer()
 
         switch pressStage {
@@ -689,7 +597,7 @@ final class KeyPadUIView: UIView {
         pressStage = .spent
         pressKey = nil
         trackedTouch = nil
-        trackedZone = nil
+        trackedTarget = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -698,23 +606,29 @@ final class KeyPadUIView: UIView {
         abortPress()
     }
 
-    private func updateTrackedZone(with touch: UITouch) {
-        let newZone = zone(at: touch.location(in: self))
-        guard newZone != trackedZone else { return }
-        trackedZone = newZone
-        guard let newZone else {
-            // The finger left the pad: end any hold and stop the countdown, so
-            // lifting outside sends nothing.
-            endHoldIfNeeded()
-            cancelHoldTimer()
-            pressStage = .spent
-            pressKey = nil
+    /// Ends whatever the finger was doing on its old target, so lifting on a
+    /// gap or outside the pad sends nothing and a hold never outlives its key.
+    private func releaseTrackedPress() {
+        endHoldIfNeeded()
+        cancelHoldTimer()
+        pressStage = .spent
+        pressKey = nil
+    }
+
+    private func updateTracking(with touch: UITouch) {
+        let found = target(at: touch.location(in: self))
+        let newTarget = found?.0
+        guard newTarget != trackedTarget else { return }
+        trackedTarget = newTarget
+        guard let found, case .key(let id) = found.0, let key = found.1 else {
+            // Off the pad, or onto a gap: silent by design — no tick, no
+            // speech — and nothing is sent on lift.
+            releaseTrackedPress()
             return
         }
-        let padKey = key(at: newZone)
-        feedbackEntering(padKey)
-        announce(description(of: padKey))
-        startPress(on: padKey)
+        feedbackEntering(key, id: id)
+        announce(description(of: key))
+        startPress(on: key)
     }
 }
 
@@ -724,15 +638,13 @@ private extension UIColor {
     /// Hardcoding white is fine while the accent is a dark blue and wrong the
     /// moment it isn't — the app's dark-mode accent is a light violet, where
     /// black is more than twice the contrast. Must be called on an already
-    /// resolved colour; a dynamic one reports the components of whichever
-    /// trait collection it happens to resolve against.
+    /// resolved colour.
     var highestContrastForeground: UIColor {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard getRed(&r, green: &g, blue: &b, alpha: &a) else { return .white }
         func linear(_ c: CGFloat) -> CGFloat {
             c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
         }
-        // WCAG relative luminance, then the two contrast ratios it implies.
         let l = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
         return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? .black : .white
     }

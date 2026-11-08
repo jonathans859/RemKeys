@@ -9,16 +9,34 @@ struct KeyBridgeApp: App {
 
     @State private var settings: AppSettings
     @State private var bridge: BridgeClient
+    @State private var padStore: PadStore
 
     init() {
         let settings = AppSettings()
         _settings = State(initialValue: settings)
         _bridge = State(initialValue: BridgeClient(settings: settings))
+
+        // Pads sync through the iCloud key-value store. Local storage stays the
+        // source of truth for reads, so this works offline and signed out (the
+        // store then simply does nothing). Two triggers, both needed: a merge
+        // now, because changes made while the app wasn't running never arrive
+        // as notifications, and the notification for the ones that come later.
+        let cloud = NSUbiquitousKeyValueStore.default
+        let padStore = PadStore(cloud: cloud)
+        _padStore = State(initialValue: padStore)
+        padStore.syncFromCloud()
+        NotificationCenter.default.addObserver(
+            forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
+            object: cloud,
+            queue: .main
+        ) { _ in
+            padStore.syncFromCloud()
+        }
     }
 
     var body: some Scene {
         WindowGroup {
-            RootTabView(settings: settings, bridge: bridge)
+            RootTabView(settings: settings, bridge: bridge, padStore: padStore)
         }
     }
 }

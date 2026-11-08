@@ -11,6 +11,7 @@ import BridgeCore
 struct RootTabView: View {
     let settings: AppSettings
     let bridge: BridgeClient
+    let padStore: PadStore
 
     private enum AppTab {
         case start, virtualInput, settings
@@ -49,11 +50,11 @@ struct RootTabView: View {
                     .tabItem { Label("Start", systemImage: "keyboard") }
                     .tag(AppTab.start)
 
-                VirtualInputView(bridge: bridge, settings: settings)
+                VirtualInputView(bridge: bridge, settings: settings, padStore: padStore)
                     .tabItem { Label("Virtual Input", systemImage: "hand.tap") }
                     .tag(AppTab.virtualInput)
 
-                SettingsView(settings: settings)
+                SettingsView(settings: settings, padStore: padStore)
                     .tabItem { Label("Settings", systemImage: "gearshape") }
                     .tag(AppTab.settings)
             }

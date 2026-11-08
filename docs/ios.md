@@ -96,48 +96,104 @@ forwarding *or* curtained, and capture keeps working underneath.
 ## Virtual Input tab (`VirtualInputView.swift`, `VirtualKeyPad.swift`)
 
 On-screen key sender, VoiceOver-first. Rebuilt small after the full PC-keyboard
-layout was field-rejected as "barely functional for a blind person". The concept in
-one sentence: **the pad carries the keys the iPhone's own keyboard doesn't have, the
-iPhone's keyboard carries the letters, and nothing on the pad is smaller than a
-thumb.**
+layout was field-rejected as "barely functional for a blind person", then (2026-11)
+made **user-editable**: the user builds their own pads in Settings → Pads. The
+concept still holds: **the pad carries the keys the iPhone's own keyboard doesn't
+have, the iPhone's keyboard carries the letters, and nothing on the pad should be
+smaller than a thumb.**
 
-The diagnosis, so it isn't re-litigated: the problem was never *which* keys were on
-the pad but zone size and addressability. In portrait a twelve-key band gives 29 pt
-zones and a 60-key keyboard 23 pt, against Apple's 44 pt minimum — a zone narrower
-than a fingertip can only be found by sweeping and listening, so adding keys made
-the pad slower. And "third band, fifth key" is a counting task.
+The diagnosis behind the small pad, so it isn't re-litigated: the problem was never
+*which* keys were on the pad but zone size and addressability. In portrait a
+twelve-key band gives 29 pt zones and a 60-key keyboard 23 pt, against Apple's
+44 pt minimum — a zone narrower than a fingertip can only be found by sweeping and
+listening. Three columns made every zone a corner, an edge middle or the centre.
+That is now the **default** rather than a rule: the user may build a 2 × 2 or a
+4 × 6, and the editor's limits (below) are what keep zones thumb-sized.
 
-### Layout
+### Pads (`BridgeCore`: `Pad`, `PadKey`, `KeyCatalog`, `DefaultPads`, `PadStore`)
 
-- **Three columns, always, in both orientations** (`VirtualKeys.columns`), ~116 pt
-  wide. Three is what makes every zone a corner, an edge middle or the centre — a
-  physical description rather than a count. Four columns grow interior zones that can
-  only be described by counting along.
-- **Two blocks.** The top is **one page at a time** (3×3, or 3×4 for function keys);
-  the bottom two rows are the **six modifiers, permanently** (Ctrl, Shift, Alt, Win,
-  AltGr, Caps Lock — `VirtualKeys.modifierBlock`). A modifier is the one thing you
-  need *together with* something else, so on a page every combination would cost two
-  page changes. The block gets a **fixed fraction of the height**
-  (`modifierBlockFraction`), not an equal share of rows — pages have three rows or
-  four, and never moving is the entire point of the modifiers.
-- **Pages**: Navigation, Editing, Function keys, plus F13–F24 when
-  `virtualPadExtendedFKeys` is on — an extra *page*, which costs the other pages
-  nothing, where it used to be a band that shrank every zone on screen. Two-finger
-  swipe left/right, or the **adjustable page control** in the toolbar (one element,
-  flick up/down). The pad reports the swipe (`onPageStep`) rather than owning the
-  page, so the two can't disagree.
-- **The Navigation page justifies the shape**: Up on the top edge, Down on the
-  bottom, Left and Right at the sides, Enter in the centre, Home/PgUp and End/PgDn in
-  the corners. The position of the key *is* its meaning.
-- **Rows divide their own width**, so not every row holds three keys. The Editing
-  page ends in two half-width zones (Menu, Enter) since Print Screen was dropped as
-  unused: a short row beats a dead corner, both halves are still bounded by a corner,
-  and Enter gets the biggest target on the pad. Print Screen is deliberately no
-  longer sendable from the pad.
-- **Letters are deliberately not on the pad** — the iOS keyboard, with Braille Screen
-  Input and dictation behind it, is already fast and already mastered. Letters go in
-  the text field, and single-letter screen-reader navigation is Caps Lock on the pad
+- **A pad is a rows × columns grid, 1–4 columns and 1–6 rows** (`Pad.columnRange`,
+  `rowRange`) — the field-chosen conservative range: past 4 columns a portrait
+  phone drops below 44 pt. Keys are `PlacedKey`s (row, column, **span**): a key may
+  cover several cells of its row, which is how the default Editing pad keeps a
+  double-width Enter. A cell no key covers is a **gap**: drawn dimmed, **silent**
+  under the finger (no speech, no tick — field choice), and lifting there sends
+  nothing.
+- **Every edit validates a candidate layout** (in bounds, no overlap) and keeps it
+  only if valid, so no sequence of edits can corrupt a pad; decoding is tolerant
+  (unknown colour → Default, an unreadable key drops only that key).
+- **A key sends one Windows key, optionally with fixed modifiers** (a chord such as
+  Ctrl+C, wrapped together with whatever modifiers are latched), under an optional
+  **custom label that is both shown and spoken** — so the visible and accessibility
+  labels never diverge. Colour comes from a **named palette** (`PadKeyColor`, mapped
+  to system colours in `VirtualKeys.swift`) so every colour has a spoken name.
+- **Modifiers are ordinary keys.** The fixed modifier block (and its
+  `modifierBlockFraction`) went with editable pads, by decision: a bare modifier key
+  toggles on lift (`PadKey.togglesModifier`), a modifier *with* fixed modifiers is a
+  chord and sends. Whether a latched modifier survives swiping to another pad is
+  **`virtualPadModifiersAcrossPads`**, on by default (the old behaviour, since the
+  block never moved).
+- **Defaults** (`DefaultPads`) are the old pages with the six modifiers as their
+  bottom two rows: Navigation 3 × 5, Editing 3 × 5 (Menu + double-width Enter),
+  Function keys 3 × 6, Extended function keys 3 × 6 **hidden** — seeded visible from
+  the retired `virtualPadExtendedFKeys` on upgrade. Equal row heights now, so the
+  modifiers sit a little differently on the 5- and 6-row pads; that is the accepted
+  cost of making them ordinary keys. Defaults only come back via **Restore default
+  pads**, never on an app update.
+- **The Navigation layout still justifies the default shape**: Up on the top edge,
+  Down on the bottom, Left and Right at the sides, Enter in the centre, Home/PgUp and
+  End/PgDn in the corners. The position of the key *is* its meaning.
+- **Paging**: the visible pads, in list order. Two-finger swipe left/right, or the
+  **adjustable pad control** in the toolbar (one element, flick up/down). The pad
+  reports the swipe (`onPageStep`) rather than owning the index, so the two can't
+  disagree. No visible pads → a "No pads to show" message pointing at Settings.
+- **Letters are not on the default pads** — the iOS keyboard, with Braille Screen
+  Input and dictation behind it, is already fast and already mastered. They *can* be
+  put on a pad now; single-letter screen-reader navigation is still best as Caps Lock
   + the letter typed once + sticky text.
+
+### Pad editor (`PadListView.swift`, `PadEditorView.swift`, `PadKeyEditor.swift`)
+
+Settings → Key pad → **Pads** → list → editor. Built from the user's spec: the keys
+are **normal buttons arranged as on the pad** (a SwiftUI `Grid`, `gridCellColumns`
+for spans) — the opposite of the live pad's single element, because here every key
+must be its own VoiceOver stop.
+
+- **Every operation is reachable without a special gesture**: tapping a key opens
+  its `Menu`; the same operations are VoiceOver custom actions on it; list rows also
+  have context menus, swipe actions and edit-mode reorder. Impossible actions are
+  **disabled in the menu and absent from the VoiceOver actions** (tried on a copy of
+  the pad first) rather than offered and refused.
+- **Moving has two ways, both announced**: Move up/down/left/right (swaps with the
+  neighbour; up/down only swaps with keys that fit inside this key's columns, a wider
+  one refuses with "A wider key is in the way"), and **Pick up → Place here**, during
+  which every cell is a one-tap drop target. After a move VoiceOver focus is put back
+  on the key that moved (`@AccessibilityFocusState`), not on whatever took its place.
+- Colour cycles via "Next/Previous colour" actions (rotor actions can't hold a
+  submenu); the menu has a full picker.
+- **Shrinking the grid asks first** when it would delete keys (`Pad.keysLost`); keys
+  that only cross the new right edge are narrowed, not deleted.
+- **Deleting a pad and Restore default pads confirm**, because both reach every
+  device through iCloud.
+
+### Sync (`PadStore`)
+
+UserDefaults is the source of truth for reads (key `virtualPads`), mirrored to the
+**iCloud key-value store** — entitlement on the **iOS target only**, generated by
+XcodeGen into `apps/iOS/RemKeys.generated.entitlements` (the Mac target must not
+gain an App-ID capability; see the CI skill's "no devices" trap). The rules, all
+covered by `PadStoreTests` with a two-device fake:
+
+- One key per pad (`pad.<uuid>`) plus `padOrder`; **newer `modified` wins**, per pad
+  and for the order, and a record is only written over an older one.
+- **Never-edited records are never pushed** (`Pad.neverEdited`), and the defaults
+  have **fixed UUIDs**, so a fresh install neither publishes its defaults over edited
+  ones nor shows every default twice.
+- Deletes without tombstones: `cloudKnownIDs` tells "deleted elsewhere" from
+  "created here, not pushed yet"; an untouched default missing from a newer remote
+  order was deleted elsewhere; `locallyDeleted` stops a late cloud copy resurrecting.
+- Restore stamps the defaults *now*, so it beats older edits on other devices.
+- Merge at launch **and** on `didChangeExternallyNotification` (`KeyBridgeApp`).
 
 ### Touch and feedback
 
@@ -146,10 +202,13 @@ the pad slower. And "third band, fifth key" is a counting task.
   `[.silentOnTouch]`, giving **instant pass-through with no activation step**
   (`.requiresActivation` was field-rejected as an extra hop). Drag announces the key
   under the finger (interrupting + haptic tick), lift sends it, lift on a modifier
-  toggles it, two-finger tap clears the modifiers, an extra finger mid-drag aborts.
+  toggles it, a gap is silent and sends nothing, two-finger tap clears the
+  modifiers, an extra finger mid-drag aborts.
 - State is a **filled background** — half-strength tint = on, solid tint = down on
-  the PC, both with a thicker tinted border — not tinted text, which was too quiet to
-  find at a glance. Outlines use **`label` at 45% alpha, not `UIColor.separator`**
+  the PC, both with a thicker border — not tinted text, which was too quiet to find
+  at a glance. A key's palette colour is its *resting* fill (38% alpha, so the label
+  colour stays readable) and its border; the live states override the fill and a
+  coloured key keeps its colour as the border while on. Outlines use **`label` at 45% alpha, not `UIColor.separator`**
   (a hairline meant to divide rows of text, which left the keys looking borderless).
   A key that is *down* takes a solid `label` border, or the border vanishes into its
   own fill.
@@ -185,9 +244,10 @@ the pad slower. And "third band, fifth key" is a counting task.
 
 ### Sending
 
-- Picks **Windows keys directly** (`VirtualKeys.swift`) — no `ModifierMapping`;
-  AltGr is just `VK_RMENU`. Which keys toggle instead of sending is a property of the
-  *key* (`VirtualKeys.modifierVKs`).
+- **Picks Windows keys directly** (`KeyCatalog`) — no `ModifierMapping`; AltGr is
+  just `VK_RMENU`. Which keys toggle instead of sending is a property of the *key*
+  (`PadKey.togglesModifier`). A pad key's wrap is latched ∪ its fixed modifiers, in
+  `KeyCatalog.modifiers` order, never the key itself.
 - Sending rides the same connection as forwarding. If forwarding is off, Send turns
   it on and asks the user to re-trigger — deliberately no queuing of the combo.
 - Text: **no modifiers → `char` unicode lines** (layout-proof, umlauts work);
@@ -232,7 +292,10 @@ VoiceOver read. What Send will deliver is now Send's accessibility hint
 ### Removed, and not to be reintroduced without a new reason
 
 The full PC keyboard layout and its per-layout key names (`pcKeyboardLayout`); the
-bands arrangement and its aspect-ratio rule (`virtualPadLayout`); slider gestures
+bands arrangement and its aspect-ratio rule (`virtualPadLayout`); the fixed
+three-column rule, the permanent modifier block and the F13–F24 toggle
+(`virtualPadExtendedFKeys`) — not *removed* so much as made the user's choice, by
+the 2026-11 editable pads; slider gestures
 (`virtualPadSliderMode` — the fallback for zones too small to hit, which is the
 problem the three-column grid solves); the two-stage hold's latch delay
 (`virtualPadLatchDelay`); the pad-options menu; and the **orientation pin**

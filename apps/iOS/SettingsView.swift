@@ -2,7 +2,8 @@ import SwiftUI
 import BridgeCore
 
 /// The set-and-forget half of the app: modifier mapping, the optional physical
-/// toggle shortcut, and the key pad's behaviour.
+/// toggle shortcut, and the key pad's behaviour — including the pad editor
+/// (Pads → `PadListView` → `PadEditorView`).
 ///
 /// **The rows here do not explain themselves.** Every section used to carry a
 /// paragraph of footer saying what its controls were for, which turned a
@@ -15,6 +16,7 @@ import BridgeCore
 /// where a control would be genuinely ambiguous without one.
 struct SettingsView: View {
     let settings: AppSettings
+    let padStore: PadStore
     @State private var isRecordingShortcut = false
     @State private var showInfo = false
 
@@ -65,14 +67,17 @@ struct SettingsView: View {
                 SectionHeader("Screen curtain", systemImage: "moon.stars")
             }
             Section {
-                Text("The pad is three zones wide and two blocks tall: one page of keys on top — \(pageCountLabel) — and the six modifiers permanently across the bottom two rows, where they never move. Two-finger swipe left or right on the pad changes the page; the page control at the top left of the Virtual Input screen does the same and can be flicked up or down.")
-                Text(settings.virtualPadExtendedFKeys
-                     ? "F13 to F24 are available as a further page. The other pages are unaffected — an extra page costs no room."
-                     : "F13 to F24 are hidden. Adding them makes one more page and takes nothing away from the others.")
+                Text(padStore.visiblePads.isEmpty
+                     ? "No pad is shown on Virtual Input right now. Open Pads to show one or add a new one."
+                     : "The Virtual Input tab shows one pad at a time — \(pageCountLabel) — and two-finger swipe left or right changes between them.")
+                Text("Pads opens the editor. Each pad is a grid of up to \(Pad.columnRange.upperBound) columns and \(Pad.rowRange.upperBound) rows; every key is a button there, laid out as on the pad, with its actions in a menu and as VoiceOver actions: edit what it sends, its name and colour, make it wider, move it, or pick it up and place it somewhere else. Empty spaces are dimmed on the pad and send nothing. Pads sync through iCloud, and Restore default pads brings back the four that ship with the app.")
+                Text(settings.virtualPadModifiersAcrossPads
+                     ? "A modifier you turn on stays on when you swipe to another pad, even one that doesn't show it. Two-finger tap clears them."
+                     : "Swiping to another pad turns every modifier off, so one can never be on without its key on screen.")
                 Text(settings.virtualPadRichHaptics
                      ? "Vibrations report state by how hard they are: the usual light tick for a key that is off, a firmer knock for one that is turned on, and a hard knock for a key held down on the PC. Always one vibration per key."
                      : "Vibrations are plain: the same light tick for every key, whatever its state.")
-                Text("Letters, digits and punctuation are deliberately not on the pad — they go in the text field, typed with the iPhone's own keyboard, which is faster than anything a three-wide pad could offer.")
+                Text("Letters and digits can go on a pad, but the text field on the Virtual Input tab is usually faster for them: it is the iPhone's own keyboard.")
             } header: {
                 SectionHeader("Key pad", systemImage: "square.grid.3x3.fill")
             }
@@ -200,11 +205,18 @@ struct SettingsView: View {
 
     private var keyPadSection: some View {
         Section {
-            Toggle("Include F13 to F24", isOn: Binding(
-                get: { settings.virtualPadExtendedFKeys },
-                set: { settings.virtualPadExtendedFKeys = $0 }
+            NavigationLink {
+                PadListView(store: padStore)
+            } label: {
+                LabeledContent("Pads", value: "\(padStore.visiblePads.count) of \(padStore.pads.count) shown")
+            }
+            .accessibilityHint("Add, remove, reorder and edit the pads of the Virtual Input tab")
+
+            Toggle("Modifiers stay on across pads", isOn: Binding(
+                get: { settings.virtualPadModifiersAcrossPads },
+                set: { settings.virtualPadModifiersAcrossPads = $0 }
             ))
-            .accessibilityHint("Adds F13 to F24 as one more page on the key pad. The other pages keep their size.")
+            .accessibilityHint("On: a modifier you turn on stays on when you swipe to another pad. Off: changing pads turns every modifier off.")
 
             Toggle("Vibrations report key state", isOn: Binding(
                 get: { settings.virtualPadRichHaptics },
@@ -304,13 +316,10 @@ struct SettingsView: View {
         value.wrappedValue = min(max(stepped, range.lowerBound), range.upperBound)
     }
 
-    /// Names the pad's pages for the info sheet, so it never lists a page
-    /// that isn't there.
+    /// Names the visible pads for the info sheet, so it never lists one that
+    /// isn't there.
     private var pageCountLabel: String {
-        let titles = VirtualKeys.pages(includeExtendedFKeys: settings.virtualPadExtendedFKeys)
-            .map(\.title)
-        guard let last = titles.last, titles.count > 1 else { return titles.first ?? "" }
-        return titles.dropLast().joined(separator: ", ") + " and " + last
+        VirtualKeys.spokenList(padStore.visiblePads.map(\.title))
     }
 
     private func secondsLabel(_ seconds: Double) -> String {

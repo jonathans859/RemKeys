@@ -18,7 +18,7 @@ sent a build with nothing new in it (see `docs/ci-cd.md`).
 | Component | Path | Role |
 |---|---|---|
 | **BridgeCore** | `BridgeCore/` | Shared Swift package: wire format, Windows VK constants, settings, network client. Used by both apps. |
-| **iOS app** | `apps/iOS/` | SwiftUI app, three tabs: Start (captures an external keyboard, forwards while foreground), Virtual Input (on-screen key sender), Settings. |
+| **iOS app** | `apps/iOS/` | SwiftUI app, three tabs: Start (captures an external keyboard, forwards while foreground), Virtual Input (on-screen key sender, user-editable pads synced via iCloud), Settings. |
 | **macOS app** | `apps/macOS/` | Menu-bar (`LSUIElement`) app; system-wide capture via `CGEventTap` + `IOHIDManager`. |
 | **Windows agent** | `windows-agent/` | C#/.NET 8 worker. Listens on TCP, replays keystrokes via `SendInput`. |
 

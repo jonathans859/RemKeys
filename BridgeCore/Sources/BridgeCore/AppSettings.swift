@@ -96,12 +96,13 @@ public final class AppSettings {
 
     // MARK: Virtual input (iOS)
 
-    /// Whether the key pad offers F13–F24 as a further page. Off by default,
-    /// since F13+ is rarely needed — but turning it on costs the other pages
-    /// nothing. It used to add a *band*, which shrank every zone on screen;
-    /// the 2026-08-20 rebuild made it one more page instead.
-    public var virtualPadExtendedFKeys: Bool {
-        didSet { defaults.set(virtualPadExtendedFKeys, forKey: Keys.virtualPadExtendedFKeys) }
+    /// Whether a modifier turned on at the pad stays on when the pad is
+    /// swiped to another one. On by default — that is how the pad always
+    /// behaved, back when the modifiers were a fixed block that never moved.
+    /// Off: changing pads clears them, so a modifier can't be on while no key
+    /// on screen shows it.
+    public var virtualPadModifiersAcrossPads: Bool {
+        didSet { defaults.set(virtualPadModifiersAcrossPads, forKey: Keys.virtualPadModifiersAcrossPads) }
     }
 
     /// Whether the pad's vibrations carry more than "you crossed a boundary".
@@ -266,7 +267,7 @@ public final class AppSettings {
         self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.autoScreenCurtain = defaults.bool(forKey: Keys.autoScreenCurtain)
-        self.virtualPadExtendedFKeys = defaults.bool(forKey: Keys.virtualPadExtendedFKeys)
+        self.virtualPadModifiersAcrossPads = defaults.object(forKey: Keys.virtualPadModifiersAcrossPads) as? Bool ?? true
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
         self.virtualInputLiveTyping = defaults.bool(forKey: Keys.virtualInputLiveTyping)
         self.virtualPadRichHaptics = defaults.object(forKey: Keys.virtualPadRichHaptics) as? Bool ?? true
@@ -320,7 +321,10 @@ public final class AppSettings {
         // "interfaceOrientationLock" and "virtualPadLatchDelay" — all of them
         // belonged to arrangements the 2026-08-20 rebuild removed.
         static let autoScreenCurtain = "autoScreenCurtain"
-        static let virtualPadExtendedFKeys = "virtualPadExtendedFKeys"
+        // "virtualPadExtendedFKeys" (the F13–F24 page toggle) is retired too:
+        // F13–F24 is a pad now, and `PadStore` reads the old value once to
+        // decide whether that pad starts visible.
+        static let virtualPadModifiersAcrossPads = "virtualPadModifiersAcrossPads"
         static let virtualInputKeepText = "virtualInputKeepText"
         static let virtualInputLiveTyping = "virtualInputLiveTyping"
         static let virtualPadHoldEnabled = "virtualPadHoldEnabled"

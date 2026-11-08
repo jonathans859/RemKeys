@@ -53,6 +53,15 @@ targets:
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    # iCloud key-value storage, for syncing the Virtual Input pads between
+    # the user's devices (PadStore). iOS target only: the Mac app has no pads,
+    # and an App-ID capability on the Mac target breaks its archive ("no
+    # devices from which to generate a provisioning profile"). Generated, like
+    # the Info.plist, so the file is not committed.
+    entitlements:
+      path: apps/iOS/RemKeys.generated.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)$(CFBundleIdentifier)
     info:
       path: apps/iOS/Info.generated.plist
       properties:

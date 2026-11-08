@@ -21,12 +21,12 @@ import BridgeCore
 /// - The **direct-touch key pad** (`VirtualKeyPad`) IS the key interface: one
 ///   accessibility element whose raw touches bypass VoiceOver's gesture
 ///   round-trip entirely. Drag to hear, lift to send, lift on a modifier to
-///   toggle it, hold to press a key down on the PC until you lift. Three zones
-///   wide: a page of nine (or twelve) keys on top, the six modifiers welded to
-///   the bottom edge underneath, never moving.
-/// - **Pages** — Navigation, Editing, Function keys — change by two-finger
-///   swipe on the pad or from the adjustable page control in the toolbar. Two
-///   ways in: one fast, one discoverable.
+///   toggle it, hold to press a key down on the PC until you lift.
+/// - **Pads** are the user's own (`PadStore`, edited in Settings → Pads): any
+///   grid up to 4 × 6, keys that span cells, gaps, colours, fixed chords. The
+///   defaults are the old Navigation, Editing and Function-key pages with the
+///   modifiers as their bottom rows. They change by two-finger swipe on the
+///   pad or from the adjustable page control in the toolbar.
 /// - Plain text is typed into a normal text field and sent through the
 ///   layout-independent unicode path, so it types verbatim on any PC layout;
 ///   when modifiers are held it switches to US-position keys, because
@@ -52,6 +52,7 @@ import BridgeCore
 struct VirtualInputView: View {
     let bridge: BridgeClient
     let settings: AppSettings
+    let padStore: PadStore
 
     /// Posted by the root magic-tap handler while this tab is frontmost.
     static let sendRequested = Notification.Name("KeyBridge.virtualInputSendRequested")
@@ -59,12 +60,12 @@ struct VirtualInputView: View {
     /// The modifiers currently turned on. Only modifiers can be on — holding
     /// a key now presses it down on the PC rather than latching it — so this
     /// is a plain set of VKs and the send order comes from
-    /// `VirtualKeys.modifiers`.
+    /// `KeyCatalog.modifiers`.
     @State private var latchedVKs: Set<UInt16> = []
     /// The key the pad is holding *down* on the PC right now, plus the keys
     /// pressed around it, so the release lets go of exactly what it pressed.
-    @State private var heldKey: VirtualKey?
-    @State private var holdWrap: [VirtualKey] = []
+    @State private var heldKey: PadKey?
+    @State private var holdWrap: [UInt16] = []
     @State private var pageIndex = 0
     @State private var text = ""
     /// What live typing has already put on the PC. Every change to `text` is
@@ -80,14 +81,13 @@ struct VirtualInputView: View {
     /// takes almost the whole screen, and what is left cannot hold a pad.
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
-    private var pages: [PadPage] {
-        VirtualKeys.pages(includeExtendedFKeys: settings.virtualPadExtendedFKeys)
-    }
+    private var pages: [Pad] { padStore.visiblePads }
 
     private var liveTypingOn: Bool { settings.virtualInputLiveTyping }
 
-    private var currentPage: PadPage {
+    private var currentPage: Pad? {
         let all = pages
+        guard !all.isEmpty else { return nil }
         return all[min(max(pageIndex, 0), all.count - 1)]
     }
 
@@ -129,10 +129,15 @@ struct VirtualInputView: View {
         .onReceive(NotificationCenter.default.publisher(for: Self.sendRequested)) { _ in
             send()
         }
-        // Turning off the F13–F24 page while it is the one on screen would
-        // otherwise leave the index past the end.
-        .onChange(of: settings.virtualPadExtendedFKeys) { _, _ in
-            pageIndex = min(pageIndex, pages.count - 1)
+        // Hiding or deleting the pad on screen (in Settings, or by a sync
+        // from another device) would otherwise leave the index past the end.
+        .onChange(of: pages.count) { _, count in
+            pageIndex = min(pageIndex, max(count - 1, 0))
+        }
+        // `virtualPadModifiersAcrossPads` off: a modifier must not stay on
+        // after the pad that showed it is gone from the screen.
+        .onChange(of: currentPage?.id) { _, _ in
+            if !settings.virtualPadModifiersAcrossPads { latchedVKs.removeAll() }
         }
         // Turning the phone sideways takes the text field away with the rest
         // of the typing controls; the focus state has to follow, or the field
@@ -151,15 +156,15 @@ struct VirtualInputView: View {
     /// and the pad's own two-finger swipe is the fast path once the pages are
     /// known.
     private var pageControl: some View {
-        Text(currentPage.title)
+        Text(currentPage?.title ?? "No pads")
             .font(.subheadline.weight(.medium))
             .lineLimit(1)
             .contentShape(Rectangle())
             .onTapGesture { stepPage(by: 1) }
             .accessibilityElement()
-            .accessibilityLabel("Key page")
-            .accessibilityValue(currentPage.title)
-            .accessibilityHint("Chooses which keys fill the top of the pad. The modifiers below them never change. A two-finger swipe left or right on the pad does the same.")
+            .accessibilityLabel("Pad")
+            .accessibilityValue(currentPage?.title ?? "No pads")
+            .accessibilityHint("Chooses which pad of keys is shown. A two-finger swipe left or right on the pad does the same. Pads are edited in Settings.")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { stepPage(by: 1) }
             .accessibilityAdjustableAction { direction in
@@ -235,7 +240,7 @@ struct VirtualInputView: View {
                 }
                 .onSubmit {
                     guard settings.virtualInputLiveTyping else { return }
-                    sendImmediate(VirtualKey(name: "Enter", vk: VK.return))
+                    sendImmediate(PadKey(vk: VK.return))
                     // Return dismisses the keyboard by default, which would
                     // end the typing session after one line.
                     textFieldFocused = true
@@ -339,17 +344,41 @@ struct VirtualInputView: View {
 
     /// The pad drives the modifiers and tints the ones that are on; Send reads
     /// the same state for its hint. Pad sends always wrap in them.
+    @ViewBuilder
     private var pad: some View {
+        if pages.isEmpty {
+            // Every pad hidden or deleted. Not a dead end: say where they are.
+            VStack(spacing: 8) {
+                Image(systemName: "square.grid.3x3")
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("No pads to show")
+                    .font(.headline)
+                Text("Show or add a pad in Settings, under Pads.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .accessibilityElement(children: .combine)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            keyPad
+        }
+    }
+
+    private var keyPad: some View {
         VirtualKeyPad(
             settings: settings,
+            pads: pages,
             pageIndex: pageIndex,
             latchedKeys: latchedVKs,
             onPageStep: { delta in
                 let target = pageIndex + delta
                 if pages.indices.contains(target) { pageIndex = target }
             },
-            onSetLatched: { key, on in
-                if on { latchedVKs.insert(key.vk) } else { latchedVKs.remove(key.vk) }
+            onSetLatched: { vk, on in
+                if on { latchedVKs.insert(vk) } else { latchedVKs.remove(vk) }
             },
             onClearLatched: { latchedVKs.removeAll() },
             onSend: { key in sendImmediate(key) },
@@ -367,19 +396,21 @@ struct VirtualInputView: View {
     private var infoSheet: some View {
         InfoSheet(title: "Virtual Input") {
             Section {
-                Text("The pad is three zones wide, so every zone is a corner, the middle of an edge, or the centre — something a finger can find without counting along a row. Touches on it act immediately; VoiceOver gestures are bypassed. Drag to hear the key under your finger, with a tick at each boundary, and lift to send it at once. Landing a second finger cancels the drag, so nothing is sent.")
-                Text("The bottom two rows are always the six modifiers — Control, Shift, Alt, Windows, AltGr, Caps Lock — in that order, and they stay exactly there whichever keys are above them. Lift on one to turn it on or off. Two-finger tap anywhere on the pad turns them all off.")
+                Text("Touches on the pad act immediately; VoiceOver gestures are bypassed. Drag to hear the key under your finger, with a tick at each boundary, and lift to send it at once. Empty spaces on a pad are dimmed and silent, and lifting on one sends nothing. Landing a second finger cancels the drag, so nothing is sent.")
+                Text("Modifiers — Control, Shift, Alt, Windows, AltGr, Caps Lock — are keys like any other, wherever a pad puts them; the shipped pads have them as their bottom two rows. Lift on one to turn it on or off. Two-finger tap anywhere on the pad turns them all off.")
             } header: {
                 SectionHeader("Key pad", systemImage: "square.grid.3x3.fill")
             }
             Section {
-                Text("Everything above the modifiers is one page at a time: \(pageList). Two-finger swipe left for the next page, right for the previous one; a harder vibration means there is no page that way. The page control at the top left does the same — flick up or down on it with VoiceOver.")
-                Text("On the Navigation page the arrows are laid out as they mean: Up along the top edge, Down along the bottom, Left and Right at the sides, with Enter in the middle. The corners are Home and Page Up above, End and Page Down below.")
-                if !settings.virtualPadExtendedFKeys {
-                    Text("F13 to F24 can be added as a further page under Key pad in Settings. It costs nothing to the other pages.")
-                }
+                Text(pages.isEmpty
+                     ? "No pad is shown right now."
+                     : "One pad is shown at a time: \(pageList). Two-finger swipe left for the next pad, right for the previous one; a harder vibration means there is no pad that way. The pad control at the top left does the same — flick up or down on it with VoiceOver.")
+                Text("Pads are yours to change in Settings, under Pads: add, remove, hide or reorder them, change their rows and columns, and choose what each key sends, its name and its colour. A key can also send a fixed combination, such as Control + C. Pads sync between your devices through iCloud.")
+                Text(settings.virtualPadModifiersAcrossPads
+                     ? "Modifiers you turn on stay on when you change pads."
+                     : "Changing pads turns every modifier off.")
             } header: {
-                SectionHeader("Pages", systemImage: "rectangle.stack.fill")
+                SectionHeader("Pads", systemImage: "rectangle.stack.fill")
             }
             Section {
                 Text("Letters, digits and punctuation are not on the pad. They go in the text field instead, typed with the iPhone's own keyboard — which is faster than any keyboard we could draw on glass, and which Braille Screen Input and dictation already work with.")
@@ -396,7 +427,7 @@ struct VirtualInputView: View {
                 SectionHeader("Letters and text", systemImage: "textformat")
             }
             Section {
-                Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
+                Text("Modifiers you turn on stay on and wrap every key you send, until you press them again, clear them, or press Send. A key that sends a fixed combination adds its own modifiers to the ones that are on. To hear what is active, move to the Send button at the bottom: its hint spells out the whole combination it would deliver.")
                 Text("Caps Lock counts as a modifier here because that is what it is on the PC when a screen reader is running — NVDA's desktop layout uses it as the screen-reader key. Turn it on, then send a key, and the PC gets Caps Lock plus that key. To flip the lock itself instead, hold the Caps Lock zone until it is pressed down, then lift.")
             } header: {
                 SectionHeader("Modifiers", systemImage: "option")
@@ -435,17 +466,21 @@ struct VirtualInputView: View {
     /// The page names, spoken as a list: "Navigation, Editing and Function
     /// keys".
     private var pageList: String {
-        let titles = pages.map(\.title)
-        guard let last = titles.last, titles.count > 1 else { return titles.first ?? "" }
-        return titles.dropLast().joined(separator: ", ") + " and " + last
+        VirtualKeys.spokenList(pages.map(\.title))
     }
 
     // MARK: Combination state
 
     /// What gets pressed around whatever is sent, in the canonical order the
     /// modifier block shows them.
-    private var wrapKeys: [VirtualKey] {
-        VirtualKeys.modifiers.filter { latchedVKs.contains($0.vk) }
+    private var wrapKeys: [CatalogKey] {
+        KeyCatalog.modifiers.filter { latchedVKs.contains($0.vk) }
+    }
+
+    /// What goes down around one pad key: the modifiers that are on plus the
+    /// key's own fixed ones, in canonical order, never the key itself.
+    private func wrap(for key: PadKey) -> [UInt16] {
+        KeyCatalog.orderedModifiers(latchedVKs.union(key.modifiers)).filter { $0 != key.vk }
     }
 
     private var hasSomethingToSend: Bool {
@@ -467,16 +502,16 @@ struct VirtualInputView: View {
     /// resets; modifiers only clear via Send, pressing them again, or the
     /// pad's clear gesture. A failure doesn't flip forwarding on — it just
     /// says the key was not sent.
-    private func sendImmediate(_ key: VirtualKey) {
+    private func sendImmediate(_ key: PadKey) {
         guard bridge.forwardingEnabled else {
-            announce("\(key.spokenName) not sent. Forwarding is off.")
+            announce("\(key.spokenLabel) not sent. Forwarding is off.")
             return
         }
         guard bridge.status.isConnected else {
-            announce("\(key.spokenName) not sent. \(bridge.status.announcement)")
+            announce("\(key.spokenLabel) not sent. \(bridge.status.announcement)")
             return
         }
-        let wrap = wrapKeys.map(\.vk)
+        let wrap = wrap(for: key)
         for vk in wrap { bridge.sendKey(vk: vk, pressed: true) }
         tap(key.vk)
         for vk in wrap.reversed() { bridge.sendKey(vk: vk, pressed: false) }
@@ -490,17 +525,17 @@ struct VirtualInputView: View {
     /// itself excluded, since a modifier can be on and then held. Returns
     /// false when nothing was sent, so the pad doesn't claim a key is down
     /// that never went out.
-    private func beginHold(_ key: VirtualKey) -> Bool {
+    private func beginHold(_ key: PadKey) -> Bool {
         guard bridge.forwardingEnabled else {
-            announce("\(key.spokenName) not held down. Forwarding is off.")
+            announce("\(key.spokenLabel) not held down. Forwarding is off.")
             return false
         }
         guard bridge.status.isConnected else {
-            announce("\(key.spokenName) not held down. \(bridge.status.announcement)")
+            announce("\(key.spokenLabel) not held down. \(bridge.status.announcement)")
             return false
         }
-        let wrap = wrapKeys.filter { $0.vk != key.vk }
-        for modifier in wrap { bridge.sendKey(vk: modifier.vk, pressed: true) }
+        let wrap = wrap(for: key)
+        for vk in wrap { bridge.sendKey(vk: vk, pressed: true) }
         holdWrap = wrap
         heldKey = key
         bridge.sendKey(vk: key.vk, pressed: true)
@@ -510,10 +545,10 @@ struct VirtualInputView: View {
     /// Let go of a held key and the wrap that went down with it. Releasing in
     /// reverse is the same discipline the tap path uses, so the PC never sees
     /// a modifier outlive the key it was modifying.
-    private func endHold(_ key: VirtualKey) {
-        guard heldKey?.vk == key.vk else { return }
+    private func endHold(_ key: PadKey) {
+        guard heldKey?.id == key.id else { return }
         bridge.sendKey(vk: key.vk, pressed: false)
-        for modifier in holdWrap.reversed() { bridge.sendKey(vk: modifier.vk, pressed: false) }
+        for vk in holdWrap.reversed() { bridge.sendKey(vk: vk, pressed: false) }
         heldKey = nil
         holdWrap = []
     }
