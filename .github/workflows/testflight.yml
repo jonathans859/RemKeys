@@ -22,7 +22,9 @@ on:
       # itself lives in jonathans859/apple-ci and is exercised there.
       - 'apps/iOS/**'
       - 'BridgeCore/**'
-      - 'project.yml'
+      # The iOS app builds from project-ios.yml alone; project.yml only adds
+      # the Mac app, so a Mac-only spec edit no longer mints an iOS build.
+      - 'project-ios.yml'
       # Package tests never reach the app binary.
       - '!BridgeCore/Tests/**'
   workflow_dispatch:
@@ -51,5 +53,6 @@ jobs:
       project: KeyBridge.xcodeproj
       scheme: KeyBridge-iOS
       app-id: "6791947815"
-      xcodegen-spec: project.yml
+      # iOS-only spec: never resolves Sparkle, which only the Mac app links.
+      xcodegen-spec: project-ios.yml
       artifact-name: RemKeys-ipa

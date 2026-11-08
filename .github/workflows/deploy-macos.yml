@@ -21,6 +21,8 @@ on:
       - 'apps/macOS/**'
       - 'BridgeCore/**'
       - 'project.yml'
+      # Holds the shared settings project.yml includes.
+      - 'project-ios.yml'
       - 'fastlane/**'
       - 'Gemfile'
       - '.github/workflows/deploy-macos.yml'
@@ -138,7 +140,7 @@ jobs:
           # Release notes: the Mac-relevant commits of this push. `before` is
           # all zeros on a first push and absent on a manual run.
           if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            git log --format=%s "$BEFORE..$GITHUB_SHA" -- apps/macOS BridgeCore project.yml > "$RUNNER_TEMP/notes.txt"
+            git log --format=%s "$BEFORE..$GITHUB_SHA" -- apps/macOS BridgeCore project.yml project-ios.yml > "$RUNNER_TEMP/notes.txt"
           fi
           [ -s "$RUNNER_TEMP/notes.txt" ] || git log -1 --format=%s > "$RUNNER_TEMP/notes.txt"
 

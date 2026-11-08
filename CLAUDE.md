@@ -14,7 +14,7 @@ Per-component notes (read the one you're working in):
 A commit that changes only the Mac app or the Windows agent but still touches
 `BridgeCore/` ends its message with `[skip testflight]`, so iOS testers aren't
 sent a build with nothing new in it. Likewise a commit that changes only the iOS
-app (or the Windows agent) but touches `BridgeCore/` or `project.yml` ends with
+app (or the Windows agent) but touches `BridgeCore/` or `project-ios.yml` ends with
 `[skip macos]`, because every Mac build from main is published as a Sparkle
 update to installed copies (see `docs/ci-cd.md`).
 
@@ -120,7 +120,9 @@ Apple apps (needs a Mac + Xcode 16+):
 
 ```sh
 brew install xcodegen
-xcodegen generate           # writes KeyBridge.xcodeproj (not committed)
+xcodegen generate           # writes KeyBridge.xcodeproj (not committed), both apps
+                            # (project.yml includes project-ios.yml, which TestFlight
+                            # builds from alone so iOS never resolves Sparkle)
 open KeyBridge.xcodeproj    # schemes: KeyBridge-iOS, KeyBridge-macOS
 cd BridgeCore && swift test # core unit tests
 ```

@@ -10,9 +10,18 @@
   minutes. Actions minutes are a real constraint here — don't add macOS jobs
   casually.
 - **Continuous per-platform deploys**, path-filtered so each fires only when its
-  own platform or a shared input (`BridgeCore/**`, `project.yml`, `fastlane/**`)
-  changed. The macOS and Windows deploys also fire on Release publish and
+  own platform or a shared input (`BridgeCore/**`, `project-ios.yml`,
+  `fastlane/**`; `project.yml` for the Mac only) changed. The macOS and Windows deploys also fire on Release publish and
   attach their asset to the Release.
+  - **Two XcodeGen specs.** `project-ios.yml` is the iOS app alone plus
+    everything shared (name, options, settings, BridgeCore, `MARKETING_VERSION`).
+    `project.yml` includes it and adds Sparkle and the Mac app. TestFlight
+    generates from `project-ios.yml`, so the iOS build never resolves Sparkle: on
+    2026-11-08 a GitHub release-download outage failed every iOS archive at
+    "Could not resolve package dependencies" for a package iOS doesn't link.
+    Shared settings stay literally in `project-ios.yml`, because apple-ci greps
+    `MARKETING_VERSION` out of the spec it is given and doesn't follow includes.
+    Locally, plain `xcodegen generate` (`project.yml`) still gives both apps.
   - `testflight.yml` — push to main → TestFlight upload (internal testers via a
     group with automatic distribution). Runs on `macos-26`: App Store Connect's
     SDK floor applies to uploads only, so `ci.yml` stays on the stabler
@@ -28,7 +37,7 @@
     don't use it on a push that also carries an iOS change.
   - **`[skip macos]` is the mirror image, for `deploy-macos.yml`.** Put it on
     iOS-only (or Windows-only) commits that still touch `BridgeCore` or
-    `project.yml`. It matters more than the TestFlight one: every build from main
+    `project-ios.yml`. It matters more than the TestFlight one: every build from main
     is published as a Sparkle update, so a needless build offers every installed
     Mac copy an update, and the relaunch ends a forwarding session. Same rules:
     last commit of the push, and never on a push that also carries a Mac change.
@@ -55,7 +64,7 @@ once there rather than in each repo. It uploads with `asc`, so the iOS path need
 no Ruby.
 
 Build number = `<commit count>.0.<run attempt>`, which reaches the bundle only
-because `project.yml` maps `CFBundleVersion: $(CURRENT_PROJECT_VERSION)` into the
+because `project-ios.yml` maps `CFBundleVersion: $(CURRENT_PROJECT_VERSION)` into the
 generated Info.plist. Without that mapping XcodeGen emits a literal `1.0`/`1` and
 Xcode renumbers at export — which is what this app shipped for months (`1.0 (63)`
 against a project saying 1.0.0). Re-running a build on the same commit fails the
