@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import GameController
 import BridgeCore
 
 /// App root: Start (status + physical capture), Virtual Input (on-screen key
@@ -37,6 +38,11 @@ struct RootTabView: View {
     /// keep, but the brightness belongs to the whole phone. See the
     /// scene-phase handler.
     @State private var brightnessHeldDown = false
+    /// Set when leaving the app took the curtain down: the brightness written
+    /// on the way out may have been dropped (iOS appears to ignore a change
+    /// made while the phone is locking — field-reported 2026-11-08 as "after
+    /// unlocking the screen is still dark"), so it is written again on return.
+    @State private var restoreBrightnessOnReturn = false
     /// Whether this forwarding session has already raised the curtain by
     /// itself. Reset when forwarding stops, so `autoScreenCurtain` fires once
     /// per session and a reconnect never re-blacks a screen the user just
@@ -74,6 +80,9 @@ struct RootTabView: View {
         .onAppear {
             wireUpBridge()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
+            raiseCurtainAutomaticallyIfWanted()
+        }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .inactive:
@@ -107,7 +116,16 @@ struct RootTabView: View {
                 if bridge.forwardingEnabled {
                     bridge.forwardingEnabled = false
                 }
-                setCurtain(false)
+                // Locking the phone or leaving the app ends the curtain, not
+                // just the session: the app is no longer in use, so coming
+                // back should find the screen as it was before the curtain.
+                // (Control Center and other overlays are `.inactive` and keep
+                // it up.)
+                if curtainActive || brightnessHeldDown {
+                    setCurtain(false)
+                    screen?.brightness = brightnessBeforeCurtain
+                    restoreBrightnessOnReturn = true
+                }
             case .active:
                 // Whatever took the screen may have taken first responder too.
                 CaptureView.requestReclaim()
@@ -115,7 +133,14 @@ struct RootTabView: View {
                 // brightness back down. Re-reads the current level first, so a
                 // brightness the user changed while they were away is what we
                 // restore to later.
-                if curtainActive { holdBrightnessDown() }
+                if curtainActive { holdBrightnessDown(returning: true) }
+                // Back after the curtain was taken down by leaving: write the
+                // remembered level again, in case the write made while
+                // locking never landed.
+                if restoreBrightnessOnReturn {
+                    restoreBrightnessOnReturn = false
+                    if !curtainActive { screen?.brightness = brightnessBeforeCurtain }
+                }
             @unknown default:
                 break
             }
@@ -157,9 +182,16 @@ struct RootTabView: View {
     /// Take the screen to zero, remembering what it was. Both halves are
     /// idempotent on `brightnessHeldDown`, or a second call would record zero
     /// as the level to restore to and the phone would never come back.
-    private func holdBrightnessDown() {
+    ///
+    /// - Parameter returning: re-darkening on the way back to `.active`,
+    ///   rather than raising the curtain. Then a near-zero reading is never
+    ///   remembered as "the user's level": right after an overlay or a lock
+    ///   the screen can still report the 0 we set, and restoring to that
+    ///   leaves the phone dark everywhere. Raising the curtain always
+    ///   remembers, so a genuinely dim screen comes back dim.
+    private func holdBrightnessDown(returning: Bool = false) {
         guard !brightnessHeldDown, let screen else { return }
-        brightnessBeforeCurtain = screen.brightness
+        if !returning || screen.brightness > 0.05 { brightnessBeforeCurtain = screen.brightness }
         brightnessHeldDown = true
         screen.brightness = 0
     }
@@ -184,15 +216,19 @@ struct RootTabView: View {
         UIApplication.shared.isIdleTimerDisabled = bridge.forwardingEnabled || curtainActive
     }
 
-    /// `autoScreenCurtain`: the session has reached the PC, so black the
-    /// screen without being asked. Once per session (see `curtainAutoRaised`),
-    /// and only from the Start tab — connecting from Virtual Input means the
-    /// user is about to touch the key pad, and a curtain over the pad would
-    /// take away the very thing they are using.
+    /// `autoScreenCurtain`: the session has reached the PC **and a hardware
+    /// keyboard is connected**, so black the screen without being asked.
+    /// Without a keyboard the session is about the Virtual Input pad, which a
+    /// curtain would cover (field-requested 2026-11-08). Once per session (see
+    /// `curtainAutoRaised`), and only from the Start tab — connecting from
+    /// Virtual Input means the user is about to touch the key pad. A keyboard
+    /// that connects later in the session raises it then.
     private func raiseCurtainAutomaticallyIfWanted() {
         guard settings.autoScreenCurtain,
               !curtainAutoRaised,
               !curtainActive,
+              bridge.status.isConnected,
+              GCKeyboard.coalesced != nil,
               selectedTab == .start else { return }
         curtainAutoRaised = true
         setCurtain(true)

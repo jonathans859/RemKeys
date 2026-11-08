@@ -10,8 +10,8 @@ import BridgeCore
 /// interaction, piano-app style — field-chosen over `.requiresActivation`).
 ///
 /// **What it draws is a user-editable `Pad`** (since 2026-11): a rows ×
-/// columns grid, 1–4 wide and 1–6 tall, whose keys may span several cells of
-/// their row and whose empty cells are dimmed gaps. Pads are edited in
+/// columns grid, 1–4 wide and 1–6 tall, whose keys are rectangles spanning
+/// any number of columns and rows, and whose empty cells are dimmed gaps. Pads are edited in
 /// Settings → Pads; the shipped defaults are the old pages with the six
 /// modifiers as their bottom two rows. Modifiers are ordinary keys now — the
 /// fixed modifier block went when pads became editable.
@@ -29,10 +29,11 @@ import BridgeCore
 /// - Two-finger swipe left/right changes pad; two-finger tap clears every
 ///   modifier that is on. An extra finger landing mid-drag aborts the drag.
 ///
-/// State shows as a **filled key**: the key's own fill off, half-strength
-/// accent on, solid accent down on the PC, with a thicker border on both live
-/// states so it never rests on hue alone. A coloured key keeps its colour in
-/// the border while it is on.
+/// State shows as a **filled key**: the key's own fill off (a coloured key is
+/// its colour at full strength), half-strength accent on, solid accent down on
+/// the PC, with a thicker border on both live states so it never rests on hue
+/// alone. A coloured key keeps its colour in the border while it is on. Keys
+/// can span several columns and rows.
 ///
 /// **One zone, one vibration** — and with `virtualPadRichHaptics` on, how hard
 /// it is *is* the key's state: light tick = off, firmer knock = turned on,
@@ -315,10 +316,10 @@ final class KeyPadUIView: UIView {
     /// each with a thicker border, so the state survives a washed-out display
     /// and does not rest on hue alone.
     ///
-    /// A key's own colour is its *resting* fill, kept light enough for the
-    /// ordinary label colour to stay readable on it. The live states override
-    /// the fill — the state matters more than the colour while it lasts — and
-    /// a coloured key keeps its colour as the border while it is on.
+    /// A key's own colour is its *resting* fill, at full strength, with black
+    /// or white text by contrast. The live states override the fill — the
+    /// state matters more than the colour while it lasts — and a coloured key
+    /// keeps its colour as the border while it is on.
     private func refreshLabels() {
         guard let pad else { return }
         // NOT `UIColor.separator`: that hairline left the keys looking
@@ -336,14 +337,16 @@ final class KeyPadUIView: UIView {
             let colour = key.color.uiColor?.resolvedColor(with: traitCollection)
             let down = placed.id == heldKeyID
             let on = key.togglesModifier && latchedKeys.contains(key.vk)
-            let resting = colour?.withAlphaComponent(PadKeyColor.restingAlpha) ?? .tertiarySystemFill
+            let resting = key.color.restingFill.resolvedColor(with: traitCollection)
             label.backgroundColor = down ? accent : (on ? accent.withAlphaComponent(0.5) : resting)
-            label.textColor = down ? downText : .label
+            label.textColor = down
+                ? downText
+                : (on ? .label : key.color.restingText.resolvedColor(with: traitCollection))
             label.font = .systemFont(ofSize: labelPointSize, weight: on || down ? .semibold : .regular)
             label.layer.borderWidth = on || down ? 3 : 1.5
             label.layer.borderColor = down
                 ? downOutline
-                : (on ? (colour ?? accent).cgColor : (colour?.cgColor ?? outline))
+                : (on ? (colour ?? accent).cgColor : outline)
         }
     }
 
@@ -361,15 +364,15 @@ final class KeyPadUIView: UIView {
     /// touch can land "between" two keys.
     private static let keyGap: CGFloat = 4
 
-    private func cellFrame(row: Int, column: Int, span: Int, in pad: Pad) -> CGRect {
+    private func cellFrame(row: Int, column: Int, columnSpan: Int = 1, rowSpan: Int = 1, in pad: Pad) -> CGRect {
         let rowHeight = bounds.height / CGFloat(pad.rows)
         let columnWidth = bounds.width / CGFloat(pad.columns)
         let gap = Self.keyGap
         return CGRect(
             x: CGFloat(column) * columnWidth + gap / 2,
             y: CGFloat(row) * rowHeight + gap / 2,
-            width: max(CGFloat(span) * columnWidth - gap, 1),
-            height: max(rowHeight - gap, 1)
+            width: max(CGFloat(columnSpan) * columnWidth - gap, 1),
+            height: max(CGFloat(rowSpan) * rowHeight - gap, 1)
         )
     }
 
@@ -383,10 +386,13 @@ final class KeyPadUIView: UIView {
 
         guard let pad, bounds.width > 0, bounds.height > 0 else { return }
         for gap in gapViews {
-            gap.frame = cellFrame(row: gap.tag / pad.columns, column: gap.tag % pad.columns, span: 1, in: pad)
+            gap.frame = cellFrame(row: gap.tag / pad.columns, column: gap.tag % pad.columns, in: pad)
         }
         for placed in pad.keys {
-            keyLabels[placed.id]?.frame = cellFrame(row: placed.row, column: placed.column, span: placed.span, in: pad)
+            keyLabels[placed.id]?.frame = cellFrame(
+                row: placed.row, column: placed.column,
+                columnSpan: placed.columnSpan, rowSpan: placed.rowSpan, in: pad
+            )
         }
         refreshLabels()
     }
@@ -629,23 +635,5 @@ final class KeyPadUIView: UIView {
         feedbackEntering(key, id: id)
         announce(description(of: key))
         startPress(on: key)
-    }
-}
-
-private extension UIColor {
-    /// Black or white, whichever contrasts more with this colour.
-    ///
-    /// Hardcoding white is fine while the accent is a dark blue and wrong the
-    /// moment it isn't — the app's dark-mode accent is a light violet, where
-    /// black is more than twice the contrast. Must be called on an already
-    /// resolved colour.
-    var highestContrastForeground: UIColor {
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        guard getRed(&r, green: &g, blue: &b, alpha: &a) else { return .white }
-        func linear(_ c: CGFloat) -> CGFloat {
-            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
-        }
-        let l = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-        return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? .black : .white
     }
 }

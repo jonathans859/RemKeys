@@ -75,7 +75,7 @@ struct ContentView: View {
             }
             Section {
                 Text("A two-finger double tap anywhere toggles forwarding (on the Virtual Input tab it sends the built combination instead). A physical toggle shortcut can be recorded in Settings.")
-                Text("The screen curtain blacks out the display and drops brightness to zero to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on. Settings can raise it by itself as soon as a session connects.")
+                Text("The screen curtain blacks out the display and drops brightness to zero to save battery on long sessions — forwarding keeps running. Double-tap the screen to turn it back on. Settings can raise it by itself as soon as a session connects with a keyboard attached. Locking the phone or leaving the app takes it down again.")
             } header: {
                 SectionHeader("Tips", systemImage: "lightbulb")
             }

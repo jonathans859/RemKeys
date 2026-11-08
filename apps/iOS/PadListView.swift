@@ -1,12 +1,17 @@
 import SwiftUI
 import BridgeCore
 
-/// Settings → Pads: the list of pads in swipe order. Every operation is
-/// reachable three ways — VoiceOver actions on the row, a context menu, and
-/// (for delete and reorder) the list's own edit mode — so none depends on a
-/// gesture only some users can make.
+/// Settings → Pads: the list of pads in swipe order.
+///
+/// **VoiceOver gets exactly one set of actions per row: the named
+/// `accessibilityActions`.** Swipe actions are exposed to VoiceOver by
+/// themselves, and with a context menu on the same row items showed up two
+/// and three times ("Hide" three times, "Delete" twice — field-reported
+/// 2026-11-08). So while VoiceOver runs, the swipe and context-menu builders
+/// are left empty; touch users get the same operations there instead.
 struct PadListView: View {
     let store: PadStore
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
 
     @State private var confirmRestore = false
     @State private var pendingDelete: Pad?
@@ -23,12 +28,19 @@ struct PadListView: View {
                         row(pad)
                     }
                     .accessibilityActions { rowActions(pad) }
-                    .contextMenu { rowActions(pad) }
+                    // Empty while VoiceOver runs — see the note on the type.
+                    .contextMenu {
+                        if !voiceOverEnabled { rowActions(pad) }
+                    }
                     .swipeActions(edge: .trailing) {
-                        Button("Delete", role: .destructive) { pendingDelete = pad }
+                        if !voiceOverEnabled {
+                            Button("Delete", role: .destructive) { pendingDelete = pad }
+                        }
                     }
                     .swipeActions(edge: .leading) {
-                        Button(pad.isVisible ? "Hide" : "Show") { toggleVisible(pad) }
+                        if !voiceOverEnabled {
+                            Button(pad.isVisible ? "Hide" : "Show") { toggleVisible(pad) }
+                        }
                     }
                 }
                 .onMove { store.move(fromOffsets: $0, toOffset: $1) }

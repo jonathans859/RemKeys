@@ -63,7 +63,7 @@ public enum DefaultPads {
         for (row, entries) in layout.enumerated() {
             var column = 0
             for (vk, span) in entries {
-                placed.append(PlacedKey(key: PadKey(vk: vk), row: row, column: column, span: span))
+                placed.append(PlacedKey(key: PadKey(vk: vk), row: row, column: column, columnSpan: span))
                 column += span
             }
         }

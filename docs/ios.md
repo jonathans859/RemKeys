@@ -83,12 +83,24 @@ forwarding *or* curtained, and capture keeps working underneath.
   never reach `.background`, and is the last callback a force-quit is sure to
   deliver. Both helpers guard on `brightnessHeldDown`, or a second hold would record
   0 as the level to restore to.
+- **Leaving the app ends the curtain** (`.background`: locking, home, switching
+  apps). It drops the overlay and writes the remembered brightness, then **writes it
+  again on the return to `.active`** (`restoreBrightnessOnReturn`). Field report
+  2026-11-08: after lock + unlock the screen stayed dark — most likely the write made
+  while locking was dropped, and the next hold then read the leftover 0 as the user's
+  level. Hence also: when re-darkening on return, **a reading of 0.05 or less is never
+  remembered** as the level to restore to (raising the curtain always remembers, so a
+  genuinely dim screen comes back dim). Overlays (Control Center, notifications) are `.inactive` and keep
+  the curtain up, as before.
 - **Offered with VoiceOver on too**: its own Screen Curtain is a different switch in
   a different place and leaves the backlight on, and brightness 0 is the half that
   saves the battery. The overlay is one labeled element with an accessibility action,
   and the `TabView` under it is `.accessibilityHidden(curtainActive)`.
 - **`autoScreenCurtain`** (off by default) raises the curtain the first time a
-  session reaches the PC — **once per session** (`curtainAutoRaised`, reset when
+  session reaches the PC **with a hardware keyboard connected** (`GCKeyboard.coalesced`;
+  field-requested 2026-11-08 — without a keyboard you are about to use Virtual
+  Input). A keyboard connecting later in the session raises it then
+  (`GCKeyboardDidConnect`). **Once per session** (`curtainAutoRaised`, reset when
   forwarding stops) so a reconnect never re-blacks a screen the user just asked to
   see, and **only from the Start tab**, since connecting from Virtual Input means the
   user is about to touch the pad.
@@ -114,9 +126,11 @@ That is now the **default** rather than a rule: the user may build a 2 × 2 or a
 
 - **A pad is a rows × columns grid, 1–4 columns and 1–6 rows** (`Pad.columnRange`,
   `rowRange`) — the field-chosen conservative range: past 4 columns a portrait
-  phone drops below 44 pt. Keys are `PlacedKey`s (row, column, **span**): a key may
-  cover several cells of its row, which is how the default Editing pad keeps a
-  double-width Enter. A cell no key covers is a **gap**: drawn dimmed, **silent**
+  phone drops below 44 pt. Keys are `PlacedKey`s — a **rectangle**: row, column,
+  `columnSpan`, `rowSpan` (field-requested 2026-11-08: span "in any direction", not
+  only along a row). That is how the default Editing pad keeps a double-width Enter;
+  a 1 × 3 tall key works the same way. The JSON keeps the width under its old name
+  `span`, and a record without `rowSpan` reads as one row tall. A cell no key covers is a **gap**: drawn dimmed, **silent**
   under the finger (no speech, no tick — field choice), and lifting there sends
   nothing.
 - **Every edit validates a candidate layout** (in bounds, no overlap) and keeps it
@@ -126,7 +140,10 @@ That is now the **default** rather than a rule: the user may build a 2 × 2 or a
   Ctrl+C, wrapped together with whatever modifiers are latched), under an optional
   **custom label that is both shown and spoken** — so the visible and accessibility
   labels never diverge. Colour comes from a **named palette** (`PadKeyColor`, mapped
-  to system colours in `VirtualKeys.swift`) so every colour has a spoken name.
+  to system colours in `VirtualKeys.swift`) so every colour has a spoken name. The
+  fill is the colour at **full strength** with black or white text by WCAG contrast
+  (`restingText`); a 38% wash was field-rejected (2026-11-08) as too grey to tell the
+  colours apart.
 - **Modifiers are ordinary keys.** The fixed modifier block (and its
   `modifierBlockFraction`) went with editable pads, by decision: a bare modifier key
   toggles on lift (`PadKey.togglesModifier`), a modifier *with* fixed modifiers is a
@@ -155,18 +172,29 @@ That is now the **default** rather than a rule: the user may build a 2 × 2 or a
 ### Pad editor (`PadListView.swift`, `PadEditorView.swift`, `PadKeyEditor.swift`)
 
 Settings → Key pad → **Pads** → list → editor. Built from the user's spec: the keys
-are **normal buttons arranged as on the pad** (a SwiftUI `Grid`, `gridCellColumns`
-for spans) — the opposite of the live pad's single element, because here every key
+are **normal buttons arranged as on the pad** (a small custom `Layout`,
+`PadGridLayout`, because SwiftUI's `Grid` spans columns but not rows) — the opposite of the live pad's single element, because here every key
 must be its own VoiceOver stop.
 
+- **VoiceOver hears exactly one list of actions** (field-reported 2026-11-08: "Hide"
+  three times, "Delete" twice). Swipe actions are exposed to VoiceOver by themselves,
+  and a context menu or `Menu` beside named actions duplicated them. So while
+  VoiceOver runs (`accessibilityVoiceOverEnabled`), list rows leave their swipe and
+  context-menu builders empty, and editor cells are plain buttons (double tap = edit
+  key / add key) instead of `Menu`s. Touch users keep the menus and swipes.
 - **Every operation is reachable without a special gesture**: tapping a key opens
   its `Menu`; the same operations are VoiceOver custom actions on it; list rows also
   have context menus, swipe actions and edit-mode reorder. Impossible actions are
   **disabled in the menu and absent from the VoiceOver actions** (tried on a copy of
   the pad first) rather than offered and refused.
+- **Resizing works from every edge**: Extend left/right/up/down and Shrink from
+  left/right/top/bottom (a "Size" submenu; flat VoiceOver actions, only the ones that
+  fit), announcing the new size and top-left cell. The key sheet has Width and
+  Height steppers.
 - **Moving has two ways, both announced**: Move up/down/left/right (swaps with the
-  neighbour; up/down only swaps with keys that fit inside this key's columns, a wider
-  one refuses with "A wider key is in the way"), and **Pick up → Place here**, during
+  neighbours on that side, which must fit within this key's extent across the move —
+  its rows for a sideways move, its columns for an up/down one; a bigger one refuses
+  with "A bigger key is in the way"), and **Pick up → Place here**, during
   which every cell is a one-tap drop target. After a move VoiceOver focus is put back
   on the key that moved (`@AccessibilityFocusState`), not on whatever took its place.
 - Colour cycles via "Next/Previous colour" actions (rotor actions can't hold a
@@ -206,8 +234,8 @@ covered by `PadStoreTests` with a two-device fake:
   modifiers, an extra finger mid-drag aborts.
 - State is a **filled background** — half-strength tint = on, solid tint = down on
   the PC, both with a thicker border — not tinted text, which was too quiet to find
-  at a glance. A key's palette colour is its *resting* fill (38% alpha, so the label
-  colour stays readable) and its border; the live states override the fill and a
+  at a glance. A key's palette colour is its *resting* fill at full strength, with
+  contrast-picked black or white text; the live states override the fill and a
   coloured key keeps its colour as the border while on. Outlines use **`label` at 45% alpha, not `UIColor.separator`**
   (a hairline meant to divide rows of text, which left the keys looking borderless).
   A key that is *down* takes a solid `label` border, or the border vanishes into its

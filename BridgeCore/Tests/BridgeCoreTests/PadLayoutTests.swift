@@ -10,7 +10,7 @@ final class PadLayoutTests: XCTestCase {
         let pad = Pad(title: "T", rows: 2, columns: 3, keys: [
             PlacedKey(key: a, row: 0, column: 0),
             PlacedKey(key: b, row: 0, column: 1),
-            PlacedKey(key: c, row: 1, column: 0, span: 2),
+            PlacedKey(key: c, row: 1, column: 0, columnSpan: 2),
         ])
         return (pad, a.id, b.id, c.id)
     }
@@ -24,7 +24,7 @@ final class PadLayoutTests: XCTestCase {
 
     func testInitDropsOverlappingAndOutOfBoundsKeys() {
         let pad = Pad(title: "T", rows: 1, columns: 2, keys: [
-            PlacedKey(key: key(VK.a), row: 0, column: 0, span: 2),
+            PlacedKey(key: key(VK.a), row: 0, column: 0, columnSpan: 2),
             PlacedKey(key: key(VK.b), row: 0, column: 1),
             PlacedKey(key: key(VK.c), row: 3, column: 0),
         ])
@@ -86,7 +86,7 @@ final class PadLayoutTests: XCTestCase {
 
     func testSpanGrowsRightThenLeft() {
         var (pad, _, b, _) = sample()
-        XCTAssertEqual(pad.maxSpan(of: b), 2)
+        XCTAssertEqual(pad.maxColumnSpan(of: b), 2)
         XCTAssertNil(pad.setSpan(b, to: 2))
         XCTAssertEqual(pad.placed(b)?.columnRange, 1..<3)
         XCTAssertEqual(pad.setSpan(b, to: 3), .noRoom)
@@ -105,7 +105,7 @@ final class PadLayoutTests: XCTestCase {
         XCTAssertEqual(pad.keysLost(rows: 2, columns: 1), 1)
         pad.resize(rows: 2, columns: 1)
         XCTAssertEqual(pad.keys.count, 2)
-        XCTAssertEqual(pad.placed(c)?.span, 1)
+        XCTAssertEqual(pad.placed(c)?.columnSpan, 1)
     }
 
     func testCodableRoundTripAndTolerance() throws {
@@ -148,7 +148,7 @@ final class PadLayoutTests: XCTestCase {
         XCTAssertEqual(nav.key(atRow: 3, column: 0)?.key.vk, VK.control)
         XCTAssertEqual(nav.key(atRow: 4, column: 2)?.key.vk, VK.capital)
         XCTAssertEqual(pads[1].key(atRow: 2, column: 2)?.key.vk, VK.return)
-        XCTAssertEqual(pads[1].key(atRow: 2, column: 1)?.span, 2)
+        XCTAssertEqual(pads[1].key(atRow: 2, column: 1)?.columnSpan, 2)
         XCTAssertEqual(pads[2].rows, 6)
         XCTAssertEqual(pads[3].key(atRow: 3, column: 2)?.key.vk, VK.f24)
         XCTAssertTrue(pads.allSatisfy { $0.modified == Pad.neverEdited })
@@ -160,5 +160,93 @@ final class PadLayoutTests: XCTestCase {
         }
         XCTAssertEqual(KeyCatalog.name(for: VK.f13), "F13")
         XCTAssertEqual(KeyCatalog.name(for: VK.z), "Z")
+    }
+
+    // MARK: Keys spanning rows
+
+    /// 3 × 3 with a 1 × 2 tall key T in column 0, rows 0–1, and A at (0, 1).
+    private func tall() -> (Pad, t: UUID, a: UUID) {
+        let t = key(VK.t), a = key(VK.a)
+        let pad = Pad(title: "T", rows: 3, columns: 3, keys: [
+            PlacedKey(key: t, row: 0, column: 0, rowSpan: 2),
+            PlacedKey(key: a, row: 0, column: 1),
+        ])
+        return (pad, t.id, a.id)
+    }
+
+    func testTallKeyCoversItsRows() {
+        let (pad, t, _) = tall()
+        XCTAssertEqual(pad.key(atRow: 1, column: 0)?.id, t)
+        XCTAssertNil(pad.key(atRow: 2, column: 0))
+        XCTAssertEqual(pad.maxRowSpan(of: t), 3)
+        XCTAssertEqual(pad.maxColumnSpan(of: t), 1, "A blocks column 1 in row 0")
+    }
+
+    func testExtendAndShrinkFromEveryEdge() {
+        var (pad, t, a) = tall()
+        XCTAssertEqual(pad.extend(t, .up), .edge)
+        XCTAssertEqual(pad.extend(t, .right), .noRoom, "A is in the way")
+        XCTAssertNil(pad.extend(t, .down))
+        XCTAssertEqual(pad.placed(t)?.rowRange, 0..<3)
+        XCTAssertNil(pad.shrink(t, from: .up))
+        XCTAssertEqual(pad.placed(t)?.rowRange, 1..<3)
+        XCTAssertNil(pad.extend(t, .right))
+        XCTAssertEqual(pad.placed(t)?.columnRange, 0..<2)
+        XCTAssertNil(pad.shrink(t, from: .left))
+        XCTAssertEqual(pad.placed(t)?.columnRange, 1..<2)
+        XCTAssertNil(pad.extend(a, .left))
+        XCTAssertEqual(pad.placed(a)?.columnRange, 0..<2)
+        XCTAssertEqual(pad.shrink(a, from: .up), .noRoom, "one cell tall already")
+    }
+
+    func testTallKeyMovesSidewaysSwappingWithKeysInsideItsRows() {
+        var (pad, t, a) = tall()
+        // A is only in row 0 of T's two rows, so it fits inside: swap.
+        XCTAssertNil(pad.move(t, .right))
+        XCTAssertEqual(pad.placed(t)?.column, 1)
+        XCTAssertEqual(pad.placed(a)?.column, 0)
+        // A (one tall) can't move right into T, which is taller than A.
+        XCTAssertEqual(pad.move(a, .right), .blocked)
+        // T moves down into the free row.
+        XCTAssertNil(pad.move(t, .down))
+        XCTAssertEqual(pad.placed(t)?.rowRange, 1..<3)
+        XCTAssertEqual(pad.move(t, .down), .edge)
+    }
+
+    func testMoveUpPastATallerKeyLinesItUpBehind() {
+        // B is 1 × 2 tall at rows 0–1 of column 0; W (one cell) at row 2.
+        let b = key(VK.b), w = key(VK.w)
+        var pad = Pad(title: "T", rows: 3, columns: 1, keys: [
+            PlacedKey(key: b, row: 0, column: 0, rowSpan: 2),
+            PlacedKey(key: w, row: 2, column: 0),
+        ])
+        XCTAssertNil(pad.move(w.id, .up))
+        XCTAssertEqual(pad.placed(w.id)?.row, 0)
+        XCTAssertEqual(pad.placed(b.id)?.rowRange, 1..<3)
+    }
+
+    func testSetSizeShiftsUpAndLeftOnlyAsFarAsNeeded() {
+        var pad = Pad(title: "T", rows: 3, columns: 3, keys: [
+            PlacedKey(key: key(VK.a), row: 2, column: 2),
+        ])
+        let id = pad.keys[0].id
+        XCTAssertNil(pad.setSize(id, columns: 2, rows: 3))
+        XCTAssertEqual(pad.placed(id)?.rowRange, 0..<3)
+        XCTAssertEqual(pad.placed(id)?.columnRange, 1..<3)
+    }
+
+    func testResizeTrimsRowSpan() {
+        var (pad, t, _) = tall()
+        pad.resize(rows: 1, columns: 3)
+        XCTAssertEqual(pad.placed(t)?.rowSpan, 1)
+    }
+
+    func testOldRecordsWithoutRowSpanDecodeAsOneRowTall() throws {
+        let json = #"{"id":"\#(UUID().uuidString)","title":"X","rows":2,"columns":2,"isVisible":true,"modified":0,"keys":[{"row":0,"column":0,"span":2,"key":{"id":"\#(UUID().uuidString)","vk":65,"modifiers":[],"color":"red"}}]}"#
+        let pad = try JSONDecoder().decode(Pad.self, from: Data(json.utf8))
+        XCTAssertEqual(pad.keys.first?.columnSpan, 2)
+        XCTAssertEqual(pad.keys.first?.rowSpan, 1)
+        let (tallPad, _, _) = tall()
+        XCTAssertEqual(try JSONDecoder().decode(Pad.self, from: JSONEncoder().encode(tallPad)), tallPad)
     }
 }

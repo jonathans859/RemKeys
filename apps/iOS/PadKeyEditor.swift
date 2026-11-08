@@ -3,34 +3,39 @@ import BridgeCore
 
 /// The sheet for adding or editing one key: which Windows key it sends, any
 /// modifiers pressed with it every time (a fixed chord such as Ctrl+C), its
-/// name, colour and width.
+/// name, colour, width and height.
 struct PadKeyEditor: View {
     let title: String
-    let initialSpan: Int
-    let maxSpan: Int
-    let onSave: (PadKey, Int) -> Void
+    let maxColumns: Int
+    let maxRows: Int
+    /// The key, its width and its height in cells.
+    let onSave: (PadKey, Int, Int) -> Void
     let onDelete: (() -> Void)?
 
     @State private var key: PadKey
-    @State private var span: Int
+    @State private var columns: Int
+    @State private var rows: Int
     @State private var labelText: String
     @Environment(\.dismiss) private var dismiss
 
     init(
         title: String,
         initial: PadKey,
-        initialSpan: Int,
-        maxSpan: Int,
-        onSave: @escaping (PadKey, Int) -> Void,
+        initialColumns: Int,
+        initialRows: Int,
+        maxColumns: Int,
+        maxRows: Int,
+        onSave: @escaping (PadKey, Int, Int) -> Void,
         onDelete: (() -> Void)?
     ) {
         self.title = title
-        self.initialSpan = initialSpan
-        self.maxSpan = max(maxSpan, 1)
+        self.maxColumns = max(maxColumns, 1)
+        self.maxRows = max(maxRows, 1)
         self.onSave = onSave
         self.onDelete = onDelete
         _key = State(initialValue: initial)
-        _span = State(initialValue: min(initialSpan, max(maxSpan, 1)))
+        _columns = State(initialValue: min(initialColumns, max(maxColumns, 1)))
+        _rows = State(initialValue: min(initialRows, max(maxRows, 1)))
         _labelText = State(initialValue: initial.customLabel ?? "")
     }
 
@@ -92,9 +97,13 @@ struct PadKeyEditor: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    if maxSpan > 1 {
-                        Stepper("Width: \(span) \(span == 1 ? "column" : "columns")", value: $span, in: 1...maxSpan)
-                            .accessibilityHint("How many columns of its row the key covers. At most \(maxSpan) here.")
+                    if maxColumns > 1 {
+                        Stepper("Width: \(columns) \(columns == 1 ? "column" : "columns")", value: $columns, in: 1...maxColumns)
+                            .accessibilityHint("How many columns the key covers. At most \(maxColumns) here.")
+                    }
+                    if maxRows > 1 {
+                        Stepper("Height: \(rows) \(rows == 1 ? "row" : "rows")", value: $rows, in: 1...maxRows)
+                            .accessibilityHint("How many rows the key covers. At most \(maxRows) here.")
                     }
                 } header: {
                     SectionHeader("Look", systemImage: "paintpalette")
@@ -117,7 +126,7 @@ struct PadKeyEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        onSave(result, span)
+                        onSave(result, columns, rows)
                         dismiss()
                     }
                 }

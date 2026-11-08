@@ -19,6 +19,13 @@ struct PadEditorView: View {
     @State private var keySheet: KeySheet?
     @State private var pendingResize: PendingResize?
     @AccessibilityFocusState private var focusedKey: UUID?
+    /// While VoiceOver runs a cell is a plain button, never a `Menu`: the
+    /// named actions are then the only list of operations it hears (a menu
+    /// next to them was a second, duplicating source — field-reported
+    /// 2026-11-08).
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    /// One grid row's height in the editor; grows with Dynamic Type.
+    @ScaledMetric private var rowHeight: CGFloat = 56
 
     private struct KeySheet: Identifiable {
         /// nil: adding a new key at `row`/`column`.
@@ -105,6 +112,8 @@ struct PadEditorView: View {
 
     // MARK: Grid
 
+    /// Every key, plus every cell no key covers, in reading order of their
+    /// top-left cell — which is also the VoiceOver order.
     private enum Cell: Identifiable {
         case key(PlacedKey)
         case gap(row: Int, column: Int)
@@ -116,36 +125,35 @@ struct PadEditorView: View {
             }
         }
 
-        var span: Int {
-            if case .key(let placed) = self { return placed.span }
-            return 1
+        var frame: PadCellFrame {
+            switch self {
+            case .key(let p): return PadCellFrame(row: p.row, column: p.column, columnSpan: p.columnSpan, rowSpan: p.rowSpan)
+            case .gap(let row, let column): return PadCellFrame(row: row, column: column, columnSpan: 1, rowSpan: 1)
+            }
         }
     }
 
-    private func cells(inRow row: Int, of pad: Pad) -> [Cell] {
+    private func cells(of pad: Pad) -> [Cell] {
         var result: [Cell] = []
-        var column = 0
-        while column < pad.columns {
-            if let placed = pad.key(atRow: row, column: column) {
-                result.append(.key(placed))
-                column = placed.columnRange.upperBound
-            } else {
-                result.append(.gap(row: row, column: column))
-                column += 1
+        for row in 0..<pad.rows {
+            for column in 0..<pad.columns {
+                if let placed = pad.key(atRow: row, column: column) {
+                    if placed.row == row && placed.column == column { result.append(.key(placed)) }
+                } else {
+                    result.append(.gap(row: row, column: column))
+                }
             }
         }
         return result
     }
 
+    /// A custom layout rather than SwiftUI's `Grid`, which can span columns
+    /// but not rows.
     private func grid(_ pad: Pad) -> some View {
-        Grid(horizontalSpacing: 6, verticalSpacing: 6) {
-            ForEach(0..<pad.rows, id: \.self) { row in
-                GridRow {
-                    ForEach(cells(inRow: row, of: pad)) { cell in
-                        cellView(cell, pad)
-                            .gridCellColumns(cell.span)
-                    }
-                }
+        PadGridLayout(rows: pad.rows, columns: pad.columns, rowHeight: rowHeight) {
+            ForEach(cells(of: pad)) { cell in
+                cellView(cell, pad)
+                    .layoutValue(key: PadCellPosition.self, value: cell.frame)
             }
         }
     }
@@ -169,6 +177,11 @@ struct PadEditorView: View {
                 Button {
                     if isPicked { cancelPickUp() } else { place(at: placed.row, placed.column, pad) }
                 } label: { face }
+            } else if voiceOverEnabled {
+                // Double tap edits; everything else is in the actions rotor.
+                Button {
+                    keySheet = KeySheet(keyID: placed.id, row: placed.row, column: placed.column)
+                } label: { face }
             } else {
                 Menu {
                     keyMenu(placed, pad)
@@ -179,7 +192,7 @@ struct PadEditorView: View {
         .accessibilityLabel(placed.key.label)
         .accessibilityValue(keyValue(placed, pad))
         .accessibilityHint(pickedUp == nil
-            ? "Shows what you can do with this key"
+            ? "Opens the key's settings. Swipe up or down for more actions."
             : (isPicked ? "Cancels the move" : "Swaps the picked-up key with this one"))
         .accessibilityActions {
             if pickedUp == nil { keyAccessibilityActions(placed, pad) }
@@ -192,6 +205,8 @@ struct PadEditorView: View {
         return Group {
             if pickedUp != nil {
                 Button { place(at: row, column, pad) } label: { face }
+            } else if voiceOverEnabled {
+                Button { keySheet = KeySheet(keyID: nil, row: row, column: column) } label: { face }
             } else {
                 Menu {
                     Button("Add key…") { keySheet = KeySheet(keyID: nil, row: row, column: column) }
@@ -206,7 +221,8 @@ struct PadEditorView: View {
 
     private func keyValue(_ placed: PlacedKey, _ pad: Pad) -> String {
         var parts = ["Row \(placed.row + 1), column \(placed.column + 1)"]
-        if placed.span > 1 { parts.append("\(placed.span) columns wide") }
+        if placed.columnSpan > 1 { parts.append("\(placed.columnSpan) columns wide") }
+        if placed.rowSpan > 1 { parts.append("\(placed.rowSpan) rows tall") }
         if placed.key.color != .standard { parts.append(placed.key.color.displayName) }
         // What it sends, whenever the label doesn't already say so: a custom
         // name ("Copy"), or an abbreviation ("Ctrl+C").
@@ -238,11 +254,19 @@ struct PadEditorView: View {
             }
         }
         .pickerStyle(.menu)
-        Section {
-            Button("Wider") { setSpan(placed, placed.span + 1) }
-                .disabled(!can(pad) { $0.setSpan(placed.id, to: placed.span + 1) })
-            Button("Narrower") { setSpan(placed, placed.span - 1) }
-                .disabled(placed.span <= 1)
+        Menu("Size") {
+            Section {
+                ForEach(PadDirection.allCases, id: \.self) { edge in
+                    Button(extendTitle(edge)) { resizeKey(placed, edge, grow: true) }
+                        .disabled(!can(pad) { $0.extend(placed.id, edge) })
+                }
+            }
+            Section {
+                ForEach(PadDirection.allCases, id: \.self) { edge in
+                    Button(shrinkTitle(edge)) { resizeKey(placed, edge, grow: false) }
+                        .disabled(!can(pad) { $0.shrink(placed.id, from: edge) })
+                }
+            }
         }
         Section {
             ForEach(PadDirection.allCases, id: \.self) { direction in
@@ -263,11 +287,15 @@ struct PadEditorView: View {
             }
         }
         Button("Pick up to move") { pickUp(placed) }
-        if can(pad, { $0.setSpan(placed.id, to: placed.span + 1) }) {
-            Button("Wider") { setSpan(placed, placed.span + 1) }
+        ForEach(PadDirection.allCases, id: \.self) { edge in
+            if can(pad, { $0.extend(placed.id, edge) }) {
+                Button(extendTitle(edge)) { resizeKey(placed, edge, grow: true) }
+            }
         }
-        if placed.span > 1 {
-            Button("Narrower") { setSpan(placed, placed.span - 1) }
+        ForEach(PadDirection.allCases, id: \.self) { edge in
+            if can(pad, { $0.shrink(placed.id, from: edge) }) {
+                Button(shrinkTitle(edge)) { resizeKey(placed, edge, grow: false) }
+            }
         }
         Button("Next colour") { stepColor(of: placed, by: 1) }
         Button("Previous colour") { stepColor(of: placed, by: -1) }
@@ -281,6 +309,44 @@ struct PadEditorView: View {
         case .left: return "Move left"
         case .right: return "Move right"
         }
+    }
+
+    private func extendTitle(_ edge: PadDirection) -> String {
+        switch edge {
+        case .up: return "Extend up"
+        case .down: return "Extend down"
+        case .left: return "Extend left"
+        case .right: return "Extend right"
+        }
+    }
+
+    private func shrinkTitle(_ edge: PadDirection) -> String {
+        switch edge {
+        case .up: return "Shrink from top"
+        case .down: return "Shrink from bottom"
+        case .left: return "Shrink from left"
+        case .right: return "Shrink from right"
+        }
+    }
+
+    /// Grow or shrink one edge, then say the new size and where the key now
+    /// starts — extending up or left moves its top-left cell.
+    private func resizeKey(_ placed: PlacedKey, _ edge: PadDirection, grow: Bool) {
+        let refusal: PadEditRefusal? = store.edit(padID) { pad in
+            grow ? pad.extend(placed.id, edge) : pad.shrink(placed.id, from: edge)
+        } ?? .notFound
+        if let refusal {
+            postQueuedAnnouncement(refusal.announcement)
+        } else if let now = store.pad(padID)?.placed(placed.id) {
+            postQueuedAnnouncement(sizeDescription(now))
+        }
+        focusedKey = placed.id
+    }
+
+    private func sizeDescription(_ placed: PlacedKey) -> String {
+        let wide = "\(placed.columnSpan) \(placed.columnSpan == 1 ? "column" : "columns") wide"
+        let tall = "\(placed.rowSpan) \(placed.rowSpan == 1 ? "row" : "rows") tall"
+        return "\(wide), \(tall), from row \(placed.row + 1), column \(placed.column + 1)"
     }
 
     private func move(_ placed: PlacedKey, _ direction: PadDirection) {
@@ -305,15 +371,6 @@ struct PadEditorView: View {
         let refusal: PadEditRefusal? = store.edit(padID) { $0.place(id, atRow: row, column: column) } ?? .notFound
         if refusal == nil { pickedUp = nil }
         announcePosition(of: id, refusal: refusal, verb: "Placed")
-    }
-
-    private func setSpan(_ placed: PlacedKey, _ span: Int) {
-        let refusal: PadEditRefusal? = store.edit(padID) { $0.setSpan(placed.id, to: span) } ?? .notFound
-        if let refusal {
-            postQueuedAnnouncement(refusal.announcement)
-        } else {
-            postQueuedAnnouncement("\(span) \(span == 1 ? "column" : "columns") wide")
-        }
     }
 
     private func setColor(_ colour: PadKeyColor, of placed: PlacedKey) {
@@ -368,31 +425,93 @@ struct PadEditorView: View {
 
     private func keyEditor(_ sheet: KeySheet, _ pad: Pad) -> some View {
         let existing = sheet.keyID.flatMap { pad.placed($0) }
-        // Room a new key could grow into: the run of gaps from its cell.
-        let newMaxSpan: Int = {
-            var span = 0
-            while sheet.column + span < pad.columns,
-                  pad.key(atRow: sheet.row, column: sheet.column + span) == nil { span += 1 }
-            return max(span, 1)
+        // Room a new key could grow into from its cell: rightward along its
+        // row, downward along its column. A size needing both is checked on
+        // save.
+        let newMaxColumns: Int = {
+            var n = 0
+            while sheet.column + n < pad.columns, pad.key(atRow: sheet.row, column: sheet.column + n) == nil { n += 1 }
+            return max(n, 1)
+        }()
+        let newMaxRows: Int = {
+            var n = 0
+            while sheet.row + n < pad.rows, pad.key(atRow: sheet.row + n, column: sheet.column) == nil { n += 1 }
+            return max(n, 1)
         }()
         return PadKeyEditor(
             title: existing == nil ? "Add key" : "Edit key",
             initial: existing?.key ?? PadKey(vk: VK.return),
-            initialSpan: existing?.span ?? 1,
-            maxSpan: existing.map { pad.maxSpan(of: $0.id) } ?? newMaxSpan,
-            onSave: { key, span in
+            initialColumns: existing?.columnSpan ?? 1,
+            initialRows: existing?.rowSpan ?? 1,
+            maxColumns: existing.map { pad.maxColumnSpan(of: $0.id) } ?? newMaxColumns,
+            maxRows: existing.map { pad.maxRowSpan(of: $0.id) } ?? newMaxRows,
+            onSave: { key, columns, rows in
                 if let existing {
-                    store.edit(padID) { pad in
+                    let refusal: PadEditRefusal? = store.edit(padID) { pad in
                         pad.updateKey(key)
-                        _ = pad.setSpan(existing.id, to: span)
-                    }
+                        return pad.setSize(existing.id, columns: columns, rows: rows)
+                    } ?? .notFound
+                    if refusal != nil { postQueuedAnnouncement("Key saved. That size doesn't fit here, so it kept its old size.") }
                 } else {
-                    store.edit(padID) { $0.add(key, row: sheet.row, column: sheet.column, span: span) }
+                    let refusal: PadEditRefusal? = store.edit(padID) {
+                        $0.add(key, row: sheet.row, column: sheet.column, columnSpan: columns, rowSpan: rows)
+                    } ?? .notFound
+                    if refusal != nil {
+                        // The width and the height each fit, together they don't.
+                        store.edit(padID) { $0.add(key, row: sheet.row, column: sheet.column) }
+                        postQueuedAnnouncement("That size doesn't fit here, so the key was added as one cell.")
+                    }
                     focusedKey = key.id
                 }
             },
             onDelete: existing.map { placed in { remove(placed) } }
         )
+    }
+}
+
+/// Where a cell sits in the editor's grid.
+struct PadCellFrame: Equatable {
+    let row: Int
+    let column: Int
+    let columnSpan: Int
+    let rowSpan: Int
+}
+
+private struct PadCellPosition: LayoutValueKey {
+    static let defaultValue = PadCellFrame(row: 0, column: 0, columnSpan: 1, rowSpan: 1)
+}
+
+/// Places each cell at its row and column, spanning as many of each as it
+/// covers. Columns share the width equally; rows are a fixed height.
+private struct PadGridLayout: Layout {
+    let rows: Int
+    let columns: Int
+    let rowHeight: CGFloat
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(
+            width: proposal.width ?? 320,
+            height: CGFloat(rows) * rowHeight + CGFloat(max(rows - 1, 0)) * spacing
+        )
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let columnWidth = (bounds.width - CGFloat(max(columns - 1, 0)) * spacing) / CGFloat(max(columns, 1))
+        for subview in subviews {
+            let f = subview[PadCellPosition.self]
+            let size = CGSize(
+                width: CGFloat(f.columnSpan) * columnWidth + CGFloat(f.columnSpan - 1) * spacing,
+                height: CGFloat(f.rowSpan) * rowHeight + CGFloat(f.rowSpan - 1) * spacing
+            )
+            subview.place(
+                at: CGPoint(
+                    x: bounds.minX + CGFloat(f.column) * (columnWidth + spacing),
+                    y: bounds.minY + CGFloat(f.row) * (rowHeight + spacing)
+                ),
+                proposal: ProposedViewSize(size)
+            )
+        }
     }
 }
 
@@ -409,15 +528,15 @@ private struct KeyFace: View {
     var body: some View {
         Text(text)
             .font(isGap ? .subheadline : .body)
-            .foregroundStyle(isGap ? .secondary : .primary)
+            .foregroundStyle(isGap ? Color.secondary : Color(uiColor: color.restingText))
             .lineLimit(2)
             .minimumScaleFactor(0.6)
             .multilineTextAlignment(.center)
             .padding(4)
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isGap ? Color(uiColor: .quaternarySystemFill) : color.restingFill)
+                    .fill(isGap ? Color(uiColor: .quaternarySystemFill) : Color(uiColor: color.restingFill))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -431,7 +550,7 @@ private struct KeyFace: View {
 
     private var border: Color {
         if isGap { return Color(uiColor: .label).opacity(0.2) }
-        if let ui = color.uiColor { return Color(uiColor: ui) }
+        // A full-strength fill needs an outline that isn't its own colour.
         return Color(uiColor: .label).opacity(0.45)
     }
 }

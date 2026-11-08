@@ -56,13 +56,12 @@ public final class AppSettings {
     // MARK: Screen curtain (iOS)
 
     /// Whether the screen curtain is raised by itself the first time a
-    /// forwarding session reaches the Windows PC. Off by default.
-    ///
-    /// The curtain is the battery saver for a long session, and a session
-    /// almost always starts the same way: press Start, wait for "Connected",
-    /// press Screen curtain. This removes the third press. It only ever fires
-    /// once per session, so dismissing the curtain to look at the screen is
-    /// not undone by the next reconnect.
+    /// forwarding session reaches the Windows PC **with a hardware keyboard
+    /// connected** (iOS checks the keyboard; this is just the switch). Off by
+    /// default. Without a keyboard the session is about the Virtual Input pad,
+    /// which a curtain would cover. Only ever fires once per session, so
+    /// dismissing the curtain to look at the screen is not undone by the next
+    /// reconnect.
     public var autoScreenCurtain: Bool {
         didSet { defaults.set(autoScreenCurtain, forKey: Keys.autoScreenCurtain) }
     }

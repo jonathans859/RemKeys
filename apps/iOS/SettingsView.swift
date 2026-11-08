@@ -61,8 +61,9 @@ struct SettingsView: View {
             Section {
                 Text("The curtain blacks the display out and takes the brightness to zero, which is where most of a long session's battery goes. Forwarding keeps running underneath it, and a double tap turns the screen back on.")
                 Text(settings.autoScreenCurtain
-                     ? "It is raised for you as soon as a session connects, so starting a session is one press. It happens once per session — dismiss it and it stays down until you start forwarding again — and never while you are on the Virtual Input tab, where it would cover the key pad."
-                     : "It is raised only when you press Screen curtain on the Start tab. Turn the setting on to have it raised for you the moment a session connects.")
+                     ? "It is raised for you as soon as a session connects with a hardware keyboard attached, so starting a session is one press. Without a keyboard it stays down, since you will most likely use the Virtual Input pad; a keyboard connected later in the session raises it then. It happens once per session — dismiss it and it stays down until you start forwarding again — and never while you are on the Virtual Input tab."
+                     : "It is raised only when you press Screen curtain on the Start tab. Turn the setting on to have it raised for you when a session connects with a hardware keyboard attached.")
+                Text("Locking the phone or leaving the app takes the curtain down and gives the brightness back, so you come back to a normal screen. Control Center and notifications leave it up.")
             } header: {
                 SectionHeader("Screen curtain", systemImage: "moon.stars")
             }
@@ -193,11 +194,11 @@ struct SettingsView: View {
     /// set-and-forget half — whether a session raises it without being asked.
     private var screenCurtainSection: some View {
         Section {
-            Toggle("Raise the curtain on connecting", isOn: Binding(
+            Toggle("Raise the curtain when a keyboard is connected", isOn: Binding(
                 get: { settings.autoScreenCurtain },
                 set: { settings.autoScreenCurtain = $0 }
             ))
-            .accessibilityHint("On: the screen goes black by itself as soon as a forwarding session reaches the PC. Off: raise it with the Screen curtain button on the Start tab.")
+            .accessibilityHint("On: once a forwarding session reaches the PC and a hardware keyboard is connected, the screen goes black by itself. Without a keyboard it stays on, for the Virtual Input pad. Off: raise it with the Screen curtain button on the Start tab.")
         } header: {
             SectionHeader("Screen curtain", systemImage: "moon.stars")
         }
