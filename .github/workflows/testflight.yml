@@ -44,9 +44,7 @@ jobs:
     # the macOS/Windows deploys still run. Manual runs have no head commit and
     # always build.
     if: ${{ !contains(github.event.head_commit.message, '[skip testflight]') }}
-    # TEMPORARY: pinned to apple-ci 64f7f23 (asc cache + download retry) until
-    # the v1 tag is moved onto it; then this goes back to @v1.
-    uses: jonathans859/apple-ci/.github/workflows/testflight.yml@64f7f2303c2d96b7dd3b4d8628a1b18c669ca8ed
+    uses: jonathans859/apple-ci/.github/workflows/testflight.yml@v1
     secrets: inherit
     with:
       platform: ios
