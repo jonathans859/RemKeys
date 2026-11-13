@@ -127,4 +127,47 @@ final class AppSettingsTests: XCTestCase {
             accuracy: 0.0001
         )
     }
+
+    /// Fresh installs get what the pad always did; every gesture is present.
+    func testPadGesturesDefaultToTheOldBehaviour() {
+        let defaults = UserDefaults(suiteName: "AppSettingsGestureDefaults")!
+        defaults.removePersistentDomain(forName: "AppSettingsGestureDefaults")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(settings.virtualPadGestures.count, PadGesture.allCases.count)
+        XCTAssertEqual(settings.gestureAction(for: .twoFingerSwipeLeft), .nextPad)
+        XCTAssertEqual(settings.gestureAction(for: .twoFingerSwipeRight), .previousPad)
+        XCTAssertEqual(settings.gestureAction(for: .twoFingerTap), .clearModifiers)
+        XCTAssertEqual(settings.gestureAction(for: .threeFingerSwipeUp), .nothing)
+        XCTAssertEqual(settings.virtualPadMultiFingerGrace, 0)
+    }
+
+    /// An unassigned default must stay unassigned, and a send-key action keeps
+    /// its chord.
+    func testPadGesturesPersist() {
+        let defaults = UserDefaults(suiteName: "AppSettingsGesturePersist")!
+        defaults.removePersistentDomain(forName: "AppSettingsGesturePersist")
+
+        let settings = AppSettings(defaults: defaults)
+        settings.virtualPadGestures[.twoFingerTap] = .nothing
+        settings.virtualPadGestures[.twistRight] = .sendKey(vk: VK.tab, modifiers: [VK.menu])
+        settings.virtualPadMultiFingerGrace = 5
+
+        let reloaded = AppSettings(defaults: defaults)
+        XCTAssertEqual(reloaded.gestureAction(for: .twoFingerTap), .nothing)
+        XCTAssertEqual(
+            reloaded.gestureAction(for: .twistRight),
+            .sendKey(vk: VK.tab, modifiers: [VK.menu])
+        )
+        XCTAssertEqual(reloaded.gestureAction(for: .twoFingerSwipeLeft), .nextPad)
+        XCTAssertEqual(reloaded.virtualPadMultiFingerGrace, 0.3, "clamped to the range")
+    }
+
+    /// A kind written by a newer version reads as Nothing, not as a failure
+    /// that drops every other gesture.
+    func testUnknownGestureActionKindDecodesAsNone() throws {
+        let json = #"{"kind":"launchRocket","vk":9,"modifiers":[]}"#
+        let action = try JSONDecoder().decode(PadGestureAction.self, from: Data(json.utf8))
+        XCTAssertEqual(action.kind, .nothing)
+    }
 }

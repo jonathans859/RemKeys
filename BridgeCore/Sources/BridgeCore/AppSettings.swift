@@ -118,6 +118,58 @@ public final class AppSettings {
         didSet { defaults.set(virtualPadRichHaptics, forKey: Keys.virtualPadRichHaptics) }
     }
 
+    /// What each multi-finger gesture on the pad does (Settings → Key pad →
+    /// Gestures). Every gesture is present; unassigned ones map to `.nothing`.
+    /// Defaults are what the pad did before this was configurable — see
+    /// `PadGestureDefaults`. Stored as one JSON object keyed by gesture, and
+    /// merged over the defaults on load, so a gesture added in a later version
+    /// arrives with its default instead of being missing.
+    public var virtualPadGestures: [PadGesture: PadGestureAction] {
+        didSet { persistGestures() }
+    }
+
+    public func gestureAction(for gesture: PadGesture) -> PadGestureAction {
+        virtualPadGestures[gesture] ?? .nothing
+    }
+
+    private func persistGestures() {
+        let byName = Dictionary(uniqueKeysWithValues: virtualPadGestures.map { ($0.key.rawValue, $0.value) })
+        if let data = try? JSONEncoder().encode(byName) {
+            defaults.set(data, forKey: Keys.virtualPadGestures)
+        }
+    }
+
+    private static func loadGestures(_ defaults: UserDefaults) -> [PadGesture: PadGestureAction] {
+        var result = Dictionary(uniqueKeysWithValues: PadGesture.allCases.map {
+            ($0, PadGestureDefaults.actions[$0] ?? .nothing)
+        })
+        if let data = defaults.data(forKey: Keys.virtualPadGestures),
+           let stored = try? JSONDecoder().decode([String: PadGestureAction].self, from: data) {
+            for (name, action) in stored {
+                if let gesture = PadGesture(rawValue: name) { result[gesture] = action }
+            }
+        }
+        return result
+    }
+
+    /// Seconds the pad waits after the first finger lands before treating it
+    /// as a one-finger touch. A second finger arriving inside that window turns
+    /// the whole touch into a multi-finger gesture and nothing is spoken or
+    /// sent — including a first finger that already lifted (a brush just before
+    /// a swipe). 0 = off: the pad reacts at once, as it always did. Clamped,
+    /// hence a computed property over storage (see `virtualPadHoldDelay`).
+    public var virtualPadMultiFingerGrace: Double {
+        get { multiFingerGraceStorage }
+        set {
+            multiFingerGraceStorage = Self.clamp(newValue, Self.multiFingerGraceRange)
+            defaults.set(multiFingerGraceStorage, forKey: Keys.virtualPadMultiFingerGrace)
+        }
+    }
+
+    private var multiFingerGraceStorage: Double
+
+    public static let multiFingerGraceRange: ClosedRange<Double> = 0...0.3
+
     /// Whether pressing and holding a key-pad zone presses that key *down* on
     /// the PC — where it stays until the finger lifts, so the agent's key
     /// repeat runs. On by default. Turning it off restores the plain "lift
@@ -279,6 +331,11 @@ public final class AppSettings {
             Self.holdDelayRange
         )
         self.virtualPadHoldSpeech = defaults.object(forKey: Keys.virtualPadHoldSpeech) as? Bool ?? true
+        self.virtualPadGestures = Self.loadGestures(defaults)
+        self.multiFingerGraceStorage = Self.clamp(
+            defaults.object(forKey: Keys.virtualPadMultiFingerGrace) as? Double ?? 0,
+            Self.multiFingerGraceRange
+        )
         // Defaults to true: `bool(forKey:)` can't express that, so read the raw
         // object and fall back only when nothing was ever stored.
         self.forwardFunctionKeyRow = defaults.object(forKey: Keys.forwardFunctionKeyRow) as? Bool ?? true
@@ -333,6 +390,8 @@ public final class AppSettings {
         static let virtualPadHoldDelay = "virtualPadHoldFromTouch"
         static let virtualPadHoldSpeech = "virtualPadHoldSpeech"
         static let virtualPadRichHaptics = "virtualPadRichHaptics"
+        static let virtualPadGestures = "virtualPadGestures"
+        static let virtualPadMultiFingerGrace = "virtualPadMultiFingerGrace"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
         static let ignorePointerWhileForwarding = "ignorePointerWhileForwarding"
     }

@@ -164,7 +164,7 @@ struct VirtualInputView: View {
             .accessibilityElement()
             .accessibilityLabel("Pad")
             .accessibilityValue(currentPage?.title ?? "No pads")
-            .accessibilityHint("Chooses which pad of keys is shown. A two-finger swipe left or right on the pad does the same. Pads are edited in Settings.")
+            .accessibilityHint("Chooses which pad of keys is shown. Pads and the pad's gestures are set up in Settings.")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { stepPage(by: 1) }
             .accessibilityAdjustableAction { direction in
@@ -393,18 +393,48 @@ struct VirtualInputView: View {
     /// Explains the tab as it currently behaves — the text follows the pages
     /// that exist and the hold and haptics settings, so it never describes
     /// something the pad isn't doing right now.
+    /// "Two-finger swipe left for the next pad, two-finger swipe right for the
+    /// previous one; …" — whatever is assigned, or nothing.
+    private var pagingGestureText: String {
+        let next = VirtualKeys.gestures(doing: .nextPad, in: settings)
+        let previous = VirtualKeys.gestures(doing: .previousPad, in: settings)
+        let parts = [next.map { "\($0) for the next pad" }, previous.map { "\($0) for the previous one" }]
+            .compactMap { $0 }
+        guard !parts.isEmpty else { return "" }
+        let sentence = parts.joined(separator: ", ")
+        return sentence.prefix(1).uppercased() + sentence.dropFirst()
+            + "; a harder vibration means there is no pad that way. "
+    }
+
+    /// Every assigned pad gesture, plus the wait-for-more-fingers window when
+    /// it is on. Set up in Settings → Key pad → Gestures.
+    private var gestureSummary: String {
+        let lines = PadGesture.allCases.compactMap { gesture -> String? in
+            let assigned = settings.gestureAction(for: gesture)
+            return assigned.kind == .nothing ? nil : "\(gesture.displayName): \(assigned.spokenDescription.lowercased())"
+        }
+        var text = lines.isEmpty
+            ? "No gestures are assigned on the pad."
+            : "Gestures on the pad — \(lines.joined(separator: "; "))."
+        if settings.virtualPadMultiFingerGrace > 0 {
+            text += " The pad waits \(PadGesturesView.graceDescription(settings.virtualPadMultiFingerGrace)) after a finger lands before it speaks or sends, so a second finger arriving late still makes a gesture."
+        }
+        return text + " Change them in Settings, under Gestures."
+    }
+
     private var infoSheet: some View {
         InfoSheet(title: "Virtual Input") {
             Section {
                 Text("Touches on the pad act immediately; VoiceOver gestures are bypassed. Drag to hear the key under your finger, with a tick at each boundary, and lift to send it at once. Empty spaces on a pad are dimmed and silent, and lifting on one sends nothing. Landing a second finger cancels the drag, so nothing is sent.")
-                Text("Modifiers — Control, Shift, Alt, Windows, AltGr, Caps Lock — are keys like any other, wherever a pad puts them; the shipped pads have them as their bottom two rows. Lift on one to turn it on or off. Two-finger tap anywhere on the pad turns them all off.")
+                Text("Modifiers — Control, Shift, Alt, Windows, AltGr, Caps Lock — are keys like any other, wherever a pad puts them; the shipped pads have them as their bottom two rows. Lift on one to turn it on or off." + (VirtualKeys.gestures(doing: .clearModifiers, in: settings).map { " A \($0) anywhere on the pad turns them all off." } ?? ""))
+                Text(gestureSummary)
             } header: {
                 SectionHeader("Key pad", systemImage: "square.grid.3x3.fill")
             }
             Section {
                 Text(pages.isEmpty
                      ? "No pad is shown right now."
-                     : "One pad is shown at a time: \(pageList). Two-finger swipe left for the next pad, right for the previous one; a harder vibration means there is no pad that way. The pad control at the top left does the same — flick up or down on it with VoiceOver.")
+                     : "One pad is shown at a time: \(pageList). \(pagingGestureText)The pad control at the top left changes it too — flick up or down on it with VoiceOver.")
                 Text("Pads are yours to change in Settings, under Pads: add, remove, hide or reorder them, change their rows and columns, and choose what each key sends, its name and its colour. A key can also send a fixed combination, such as Control + C. Pads sync between your devices through iCloud.")
                 Text(settings.virtualPadModifiersAcrossPads
                      ? "Modifiers you turn on stay on when you change pads."

@@ -159,10 +159,43 @@ That is now the **default** rather than a rule: the user may build a 2 × 2 or a
 - **The Navigation layout still justifies the default shape**: Up on the top edge,
   Down on the bottom, Left and Right at the sides, Enter in the centre, Home/PgUp and
   End/PgDn in the corners. The position of the key *is* its meaning.
-- **Paging**: the visible pads, in list order. Two-finger swipe left/right, or the
-  **adjustable pad control** in the toolbar (one element, flick up/down). The pad
-  reports the swipe (`onPageStep`) rather than owning the index, so the two can't
-  disagree. No visible pads → a "No pads to show" message pointing at Settings.
+- **Paging**: the visible pads, in list order. Whatever gesture is assigned Next/
+  Previous pad (default two-finger swipe left/right), or the **adjustable pad
+  control** in the toolbar (one element, flick up/down). The pad reports the step
+  (`onPageStep`) rather than owning the index, so the two can't disagree. No
+  visible pads → a "No pads to show" message pointing at Settings.
+
+### Pad gestures (`PadGestures.swift` in BridgeCore, `PadGesturesView.swift`)
+
+Settings → Key pad → **Gestures** (field-requested 2026-11-13). Each multi-finger
+gesture maps to Nothing / Next pad / Previous pad / Clear modifiers / **Send a key**
+(any catalog key plus fixed modifiers, sent down the pad's own path: latched
+modifiers wrap it, a bare modifier toggles, and the key name is announced since
+nothing was spoken before it).
+
+- Gestures: two- and three-finger swipes ×4 directions, two- and three-finger
+  single/double/triple taps, and a **two-finger twist** left/right — the
+  rotor motion, one step per 36°, repeating while the twist goes on and stepping
+  back when it turns back. **No one-finger gestures**: one finger is how keys are
+  found, and a flick is indistinguishable from a fast drag that ends on a key.
+- Defaults = the old fixed set (two-finger swipe left/right pages, two-finger tap
+  clears). Stored as one JSON map merged over the defaults, so a gesture added later
+  arrives with its default; an unknown action kind decodes as Nothing.
+- **Only assigned gestures get a recognizer**, and a tap requires only the
+  *assigned* longer taps with the same fingers to fail — an unused double tap costs
+  the single tap no wait. All recognizers: `cancelsTouchesInView = false` (the hold
+  machine needs real touch ends) and `delaysTouchesEnded = false` (lift-to-send
+  must not wait for a two-finger recognizer to give up).
+- **Wait for more fingers** (`virtualPadMultiFingerGrace`, 0–300 ms, off by
+  default) answers "with two fingers I hit a key before the swipe registers": the
+  first finger stays silent for the window; a second finger inside it aborts
+  everything, **including a first finger that already lifted** (its key is held in
+  `pendingLiftKey` until the window ends). A tap that finishes inside the window is
+  announced and acted on when it ends. Off by default because it delays every
+  key's first announcement.
+- **Unverified on device**: whether VoiceOver passes three-finger gestures (its own
+  scroll / speak-screen / screen-curtain chords) and the two-finger twist (its
+  rotor) through to an `.allowsDirectInteraction` element. Nothing documents it.
 - **Letters are not on the default pads** — the iOS keyboard, with Braille Screen
   Input and dictation behind it, is already fast and already mastered. They *can* be
   put on a pad now; single-letter screen-reader navigation is still best as Caps Lock
@@ -229,8 +262,8 @@ covered by `PadStoreTests` with a two-device fake:
   `[.silentOnTouch]`, giving **instant pass-through with no activation step**
   (`.requiresActivation` was field-rejected as an extra hop). Drag announces the key
   under the finger (interrupting + haptic tick), lift sends it, lift on a modifier
-  toggles it, a gap is silent and sends nothing, two-finger tap clears the
-  modifiers, an extra finger mid-drag aborts.
+  toggles it, a gap is silent and sends nothing, an extra finger mid-drag aborts.
+  Multi-finger gestures are configurable — see "Pad gestures" above.
 - State is a **filled background** — half-strength tint = on, solid tint = down on
   the PC, both with a thicker border — not tinted text, which was too quiet to find
   at a glance. A key's palette colour is its *resting* fill at full strength, with
@@ -366,7 +399,10 @@ explanation for every control printed next to it.
   places: the info sheet, which describes the settings *as currently set*, and each
   control's VoiceOver hint, which costs a sighted user no screen space. Exactly one
   footer survives — "Shift and Control always map straight across", because four
-  pickers give no hint that two modifiers are deliberately missing. Don't reintroduce
+  pickers give no hint that two modifiers are deliberately missing — plus its
+  second line, "Switching a keyboard between Mac and Windows mode swaps Option and
+  Command" (user-requested 2026-11-13: multi-OS boards swap the HID usages in
+  firmware, so mappings set in one mode look swapped in the other). Don't reintroduce
   the others; that is the change, not an oversight.
 - All titles are **`.navigationBarTitleDisplayMode(.inline)`** (three tabs plus
   `InfoSheet`): the default large title costs ~50 points and overlapped the

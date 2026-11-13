@@ -7,6 +7,16 @@ import BridgeCore
 /// `DefaultPads`), where it is unit-tested; this file holds only what needs
 /// UIKit or is shared wording.
 enum VirtualKeys {
+    /// "two-finger swipe left and two-finger twist right", or nil — the pad
+    /// gestures currently assigned to `kind`, worded for the middle of a
+    /// sentence, so info text describes the pad as configured.
+    static func gestures(doing kind: PadGestureAction.Kind, in settings: AppSettings) -> String? {
+        let names = PadGesture.allCases
+            .filter { settings.gestureAction(for: $0).kind == kind }
+            .map { $0.displayName.lowercased() }
+        return names.isEmpty ? nil : spokenList(names)
+    }
+
     /// Spoken form of a hold timing: "0.6 seconds", "1 second". Used by both
     /// the Settings slider and the info sheet, which must agree word for word
     /// — they describe the same number to the same user.

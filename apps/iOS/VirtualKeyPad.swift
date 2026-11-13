@@ -26,8 +26,18 @@ import BridgeCore
 ///   `virtualPadHoldDelay` the key is pressed *down* on the PC and stays down
 ///   until the finger lifts, so it repeats there. The Windows agent generates
 ///   that repeat (`KeyRepeater`); Windows never repeats injected keys itself.
-/// - Two-finger swipe left/right changes pad; two-finger tap clears every
-///   modifier that is on. An extra finger landing mid-drag aborts the drag.
+/// - **Multi-finger gestures are the user's** (Settings → Key pad → Gestures,
+///   `AppSettings.virtualPadGestures`): two- and three-finger swipes in four
+///   directions, two- and three-finger single/double/triple taps, and a
+///   two-finger twist left/right like VoiceOver's rotor (one step per ~36°,
+///   repeating while the twist continues). Defaults are the old fixed set:
+///   two-finger swipe left/right pages, two-finger tap clears the modifiers.
+///   Only assigned gestures get a recognizer, so an unused double tap costs a
+///   single tap no waiting. An extra finger landing mid-drag aborts the drag.
+/// - **Wait for more fingers** (`virtualPadMultiFingerGrace`, off by default):
+///   the first finger is held silent for that long, so a second finger landing
+///   a beat late turns the touch into a gesture before any key is spoken or
+///   sent — including a first finger that brushed and already lifted.
 ///
 /// State shows as a **filled key**: the key's own fill off (a coloured key is
 /// its colour at full strength), half-strength accent on, solid accent down on
@@ -92,6 +102,8 @@ struct VirtualKeyPad: UIViewRepresentable {
         view.holdDelay = settings.virtualPadHoldDelay
         view.speaksHoldStages = settings.virtualPadHoldSpeech
         view.richHaptics = settings.virtualPadRichHaptics
+        view.multiFingerGrace = settings.virtualPadMultiFingerGrace
+        view.gestureActions = settings.virtualPadGestures
         view.latchedKeys = latchedKeys
         view.onPageStep = onPageStep
         view.onSetLatched = onSetLatched
@@ -142,6 +154,36 @@ final class KeyPadUIView: UIView {
     var holdDelay: TimeInterval = 0.8
     var speaksHoldStages = true
     var richHaptics = true
+    /// Seconds a first finger stays silent waiting for a second; 0 = off.
+    var multiFingerGrace: TimeInterval = 0
+
+    /// What each multi-finger gesture does. Changing it rebuilds the
+    /// recognizers, since only assigned gestures get one.
+    var gestureActions: [PadGesture: PadGestureAction] = [:] {
+        didSet {
+            guard oldValue != gestureActions else { return }
+            installGestureRecognizers()
+            updateAccessibilityHint()
+        }
+    }
+
+    private var installedRecognizers: [UIGestureRecognizer] = []
+    private var recognizerGestures: [ObjectIdentifier: PadGesture] = [:]
+    /// Twist steps already acted on in the current twist, signed (+ = right).
+    private var twistStepsTaken = 0
+    /// One rotor-like step. Small enough to repeat comfortably within one
+    /// wrist turn, big enough that two fingers landing at a slant don't fire.
+    private static let twistStep: CGFloat = .pi / 5
+
+    // MARK: Multi-finger grace
+
+    private var settleTimer: Timer?
+    /// The first finger is inside the grace window: tracked, but nothing has
+    /// been spoken, felt or started for it yet.
+    private var settling = false
+    /// A finger that lifted inside the window. Its key goes out when the
+    /// window ends, unless another finger lands first.
+    private var pendingLiftKey: PadKey?
 
     var latchedKeys: Set<UInt16> = [] {
         didSet {
@@ -215,33 +257,84 @@ final class KeyPadUIView: UIView {
             view.refreshLabels()
         }
 
-        let clearTap = UITapGestureRecognizer(target: self, action: #selector(handleClearTap))
-        clearTap.numberOfTouchesRequired = 2
-        addGestureRecognizer(clearTap)
+        installGestureRecognizers()
+    }
 
-        // Paging. Two fingers, so a one-finger drag across the pad — which is
-        // how every key is found — can never be mistaken for it.
-        let paging: [(UISwipeGestureRecognizer.Direction, Selector)] = [
-            (.left, #selector(handleNextPage)),
-            (.right, #selector(handlePreviousPage)),
-        ]
-        for (direction, selector) in paging {
-            let swipe = UISwipeGestureRecognizer(target: self, action: selector)
-            swipe.direction = direction
-            swipe.numberOfTouchesRequired = 2
+    /// One recognizer per *assigned* gesture. Every gesture uses at least two
+    /// fingers, so a one-finger drag across the pad — which is how every key
+    /// is found — can never be mistaken for one.
+    private func installGestureRecognizers() {
+        for recognizer in installedRecognizers { removeGestureRecognizer(recognizer) }
+        installedRecognizers = []
+        recognizerGestures = [:]
+
+        func add(_ recognizer: UIGestureRecognizer, for gesture: PadGesture?) {
             // The hold machine runs off raw touches; it needs the touch to END
-            // rather than be cancelled out from under it when this recognizes,
-            // or a key held down on the PC could be released late, or not at
-            // all.
-            swipe.cancelsTouchesInView = false
-            addGestureRecognizer(swipe)
+            // rather than be cancelled out from under it when a gesture
+            // recognizes, or a key held down on the PC could be released late,
+            // or not at all. And lift-to-send must not wait for a two-finger
+            // recognizer to give up on a one-finger touch.
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesEnded = false
+            addGestureRecognizer(recognizer)
+            installedRecognizers.append(recognizer)
+            if let gesture { recognizerGestures[ObjectIdentifier(recognizer)] = gesture }
+        }
+
+        // fingers → tap count → recognizer, to chain the failure requirements.
+        var taps: [Int: [Int: UITapGestureRecognizer]] = [:]
+        for gesture in PadGesture.allCases where action(for: gesture).kind != .nothing {
+            switch gesture.kind {
+            case .swipe(let direction):
+                let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleGesture(_:)))
+                let swipeDirection: UISwipeGestureRecognizer.Direction = switch direction {
+                case .up: .up
+                case .down: .down
+                case .left: .left
+                case .right: .right
+                }
+                swipe.direction = swipeDirection
+                swipe.numberOfTouchesRequired = gesture.fingers
+                add(swipe, for: gesture)
+            case .tap(let count):
+                let tap = UITapGestureRecognizer(target: self, action: #selector(handleGesture(_:)))
+                tap.numberOfTouchesRequired = gesture.fingers
+                tap.numberOfTapsRequired = count
+                add(tap, for: gesture)
+                taps[gesture.fingers, default: [:]][count] = tap
+            case .twist:
+                break
+            }
+        }
+        // A tap waits for the longer taps with the same fingers to fail —
+        // only those actually assigned, so the wait is paid only when needed.
+        for byCount in taps.values {
+            for (count, tap) in byCount {
+                for (longerCount, longer) in byCount where longerCount > count {
+                    tap.require(toFail: longer)
+                }
+            }
+        }
+        if action(for: .twistLeft).kind != .nothing || action(for: .twistRight).kind != .nothing {
+            add(UIRotationGestureRecognizer(target: self, action: #selector(handleTwist(_:))), for: nil)
         }
     }
 
+    private func action(for gesture: PadGesture) -> PadGestureAction {
+        gestureActions[gesture] ?? .nothing
+    }
+
     private func updateAccessibilityHint() {
-        var hint = "Touches here work directly. Drag to hear the keys and lift on one to send it right away; lifting on a modifier turns it on or off. Empty spaces are silent and send nothing. Two-finger swipe left or right changes the pad, two-finger tap clears the modifiers."
+        var hint = "Touches here work directly. Drag to hear the keys and lift on one to send it right away; lifting on a modifier turns it on or off. Empty spaces are silent and send nothing."
         if holdEnabled {
             hint += " Hold a key until it is pressed down on the PC, where it repeats until you lift."
+        }
+        let gestureLines = PadGesture.allCases.compactMap { gesture -> String? in
+            let assigned = action(for: gesture)
+            return assigned.kind == .nothing ? nil : "\(gesture.displayName): \(assigned.spokenDescription)"
+        }
+        if !gestureLines.isEmpty {
+            hint += " " + gestureLines.joined(separator: ". ") + "."
         }
         accessibilityHint = hint
     }
@@ -455,15 +548,65 @@ final class KeyPadUIView: UIView {
         onSend?(key)
     }
 
-    @objc private func handleClearTap() {
+    private func clearModifiers() {
         onClearLatched?()
         latchedKeys.removeAll()
         selectionTick.selectionChanged()
         announce("Modifiers cleared")
     }
 
-    @objc private func handleNextPage() { stepPage(by: 1) }
-    @objc private func handlePreviousPage() { stepPage(by: -1) }
+    // MARK: Gestures
+
+    @objc private func handleGesture(_ recognizer: UIGestureRecognizer) {
+        guard recognizer.state == .ended,
+              let gesture = recognizerGestures[ObjectIdentifier(recognizer)] else { return }
+        performGesture(gesture)
+    }
+
+    /// Rotor-style: one step per `twistStep` of rotation, repeating while the
+    /// twist continues, and turning back steps back. UIKit's rotation is
+    /// positive clockwise, which is "right".
+    @objc private func handleTwist(_ recognizer: UIRotationGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            twistStepsTaken = 0
+        case .changed:
+            let steps = Int((recognizer.rotation / Self.twistStep).rounded(.towardZero))
+            while twistStepsTaken < steps {
+                twistStepsTaken += 1
+                performGesture(.twistRight)
+            }
+            while twistStepsTaken > steps {
+                twistStepsTaken -= 1
+                performGesture(.twistLeft)
+            }
+        default:
+            break
+        }
+    }
+
+    private func performGesture(_ gesture: PadGesture) {
+        let assigned = action(for: gesture)
+        switch assigned.kind {
+        case .nothing:
+            return
+        case .nextPad:
+            stepPage(by: 1)
+        case .previousPad:
+            stepPage(by: -1)
+        case .clearModifiers:
+            abortPress()
+            clearModifiers()
+        case .sendKey:
+            guard let key = assigned.padKey else { return }
+            abortPress()
+            // Unlike a pad key, nothing was spoken before this one went out,
+            // so say what was sent. A failure announcement from the tab comes
+            // after and interrupts it.
+            if !key.togglesModifier { announce(key.spokenLabel) }
+            shortPress(key)
+        }
+    }
 
     /// Paging ends any press first: a key held down on the PC has to be let
     /// go before its zone disappears.
@@ -550,6 +693,7 @@ final class KeyPadUIView: UIView {
         pressKey = nil
         trackedTouch = nil
         trackedTarget = nil
+        cancelSettle()
     }
 
     private func cancelHoldTimer() {
@@ -557,11 +701,39 @@ final class KeyPadUIView: UIView {
         holdTimer = nil
     }
 
+    // MARK: Multi-finger grace window
+
+    private func cancelSettle() {
+        settleTimer?.invalidate()
+        settleTimer = nil
+        settling = false
+        pendingLiftKey = nil
+    }
+
+    /// No second finger came: the touch is a one-finger touch after all.
+    private func settleEnded() {
+        settleTimer = nil
+        guard settling else { return }
+        settling = false
+        if let key = pendingLiftKey {
+            // A quick tap that finished inside the window: nothing was said
+            // for it yet, so say it now, then act exactly as a lift would.
+            pendingLiftKey = nil
+            if !key.togglesModifier { announce(key.spokenLabel) }
+            shortPress(key)
+        } else if let touch = trackedTouch {
+            updateTracking(with: touch)
+        }
+    }
+
     // MARK: Raw touch tracking (direct touch delivers touches straight here;
     // this is where the latency win comes from)
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
+        // A finger lifted inside the grace window and another lands before it
+        // ended: a staggered multi-finger touch, so the lifted one never acts.
+        if pendingLiftKey != nil { cancelSettle() }
         let isFirstFinger = trackedTouch == nil && touches.count == 1 && event?.allTouches?.count == 1
         guard isFirstFinger, let touch = touches.first else {
             // A second finger joined (a two-finger tap or a page swipe): the
@@ -575,18 +747,37 @@ final class KeyPadUIView: UIView {
         edgeThump.prepare()
         stateThump.prepare()
         trackedTouch = touch
-        updateTracking(with: touch)
+        guard multiFingerGrace > 0 else {
+            updateTracking(with: touch)
+            return
+        }
+        // Stay silent until the window shows this is really one finger.
+        settling = true
+        let timer = Timer(timeInterval: multiFingerGrace, repeats: false) { [weak self] _ in
+            self?.settleEnded()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        settleTimer = timer
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesMoved(touches, with: event)
-        guard let touch = trackedTouch, touches.contains(touch) else { return }
+        guard !settling, let touch = trackedTouch, touches.contains(touch) else { return }
         updateTracking(with: touch)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesEnded(touches, with: event)
         guard let touch = trackedTouch, touches.contains(touch) else { return }
+        if settling {
+            // Lifted inside the window: remember the key under the lift and
+            // let the window decide whether it was a brush before a gesture.
+            pendingLiftKey = target(at: touch.location(in: self))?.1
+            trackedTouch = nil
+            trackedTarget = nil
+            if pendingLiftKey == nil { cancelSettle() }
+            return
+        }
         // Catch a lift that landed in a zone the move events never reported.
         updateTracking(with: touch)
         cancelHoldTimer()

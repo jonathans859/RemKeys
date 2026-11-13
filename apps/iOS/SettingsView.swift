@@ -70,10 +70,11 @@ struct SettingsView: View {
             Section {
                 Text(padStore.visiblePads.isEmpty
                      ? "No pad is shown on Virtual Input right now. Open Pads to show one or add a new one."
-                     : "The Virtual Input tab shows one pad at a time — \(pageCountLabel) — and two-finger swipe left or right changes between them.")
+                     : "The Virtual Input tab shows one pad at a time — \(pageCountLabel)." + (VirtualKeys.gestures(doing: .nextPad, in: settings).map { " A \($0) moves to the next one." } ?? ""))
+                Text("Gestures sets what two- and three-finger swipes, taps and twists do on the pad: change pad, clear the modifiers, or send any key, with modifiers if you like — Alt + Tab on a twist, say. Wait for more fingers holds a touch silent for a moment, so a second finger landing a beat late still makes a gesture instead of sending the first finger's key.")
                 Text("Pads opens the editor. Each pad is a grid of up to \(Pad.columnRange.upperBound) columns and \(Pad.rowRange.upperBound) rows; every key is a button there, laid out as on the pad, with its actions in a menu and as VoiceOver actions: edit what it sends, its name and colour, make it wider, move it, or pick it up and place it somewhere else. Empty spaces are dimmed on the pad and send nothing. Pads sync through iCloud, and Restore default pads brings back the four that ship with the app.")
                 Text(settings.virtualPadModifiersAcrossPads
-                     ? "A modifier you turn on stays on when you swipe to another pad, even one that doesn't show it. Two-finger tap clears them."
+                     ? "A modifier you turn on stays on when you change to another pad, even one that doesn't show it."
                      : "Swiping to another pad turns every modifier off, so one can never be on without its key on screen.")
                 Text(settings.virtualPadRichHaptics
                      ? "Vibrations report state by how hard they are: the usual light tick for a key that is off, a firmer knock for one that is turned on, and a hard knock for a key held down on the PC. Always one vibration per key."
@@ -186,7 +187,8 @@ struct SettingsView: View {
             // The one footer worth its space on this screen: without it the
             // section looks like it covers every modifier, and the reason two
             // of them are missing is not guessable from four pickers.
-            Text("Shift and Control always map straight across.")
+            // Field-found 2026-11: multi-OS boards swap the codes themselves.
+            Text("Shift and Control always map straight across.\nSwitching a keyboard between Mac and Windows mode swaps Option and Command.")
         }
     }
 
@@ -212,6 +214,13 @@ struct SettingsView: View {
                 LabeledContent("Pads", value: "\(padStore.visiblePads.count) of \(padStore.pads.count) shown")
             }
             .accessibilityHint("Add, remove, reorder and edit the pads of the Virtual Input tab")
+
+            NavigationLink {
+                PadGesturesView(settings: settings)
+            } label: {
+                LabeledContent("Gestures", value: "\(assignedGestureCount) assigned")
+            }
+            .accessibilityHint("Chooses what two- and three-finger swipes, taps and twists do on the pad")
 
             Toggle("Modifiers stay on across pads", isOn: Binding(
                 get: { settings.virtualPadModifiersAcrossPads },
@@ -321,6 +330,10 @@ struct SettingsView: View {
     /// isn't there.
     private var pageCountLabel: String {
         VirtualKeys.spokenList(padStore.visiblePads.map(\.title))
+    }
+
+    private var assignedGestureCount: Int {
+        PadGesture.allCases.filter { settings.gestureAction(for: $0).kind != .nothing }.count
     }
 
     private func secondsLabel(_ seconds: Double) -> String {
