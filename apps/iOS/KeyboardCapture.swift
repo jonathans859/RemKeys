@@ -355,7 +355,8 @@ final class CaptureView: UIView {
     /// Returns true when the key was ours to take — i.e. forwarding is on and
     /// the key maps to a Windows VK — regardless of whether this particular
     /// report was the one that emitted, so a de-duplicated press is still kept
-    /// away from the system.
+    /// away from the system. A release whose press was never forwarded is
+    /// not ours (false) and is not sent.
     @discardableResult
     private func report(_ usage: UIKeyboardHIDUsage, pressed: Bool, from source: KeySource) -> Bool {
         guard let bridge, bridge.forwardingEnabled else {
@@ -375,6 +376,14 @@ final class CaptureView: UIView {
             if pressed { diagnostics.unmappedSeen += 1 }
             return false
         }
+
+        // A release with no forwarded press: the key went down while
+        // forwarding was off (e.g. the toggle shortcut's own modifiers, which
+        // straddle the flip) or before held keys were forgotten and flushed.
+        // The PC never saw that down, and a lone Alt up focuses the menu bar
+        // in many Windows apps. Not ours to take either: the system had the
+        // down, so it gets the up.
+        if !pressed, sourcesHoldingKey[usage] == nil { return false }
 
         var holders = sourcesHoldingKey[usage] ?? []
         if pressed {

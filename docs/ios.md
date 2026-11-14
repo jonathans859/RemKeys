@@ -14,7 +14,10 @@ Shared architecture and the accessibility rules: [`../CLAUDE.md`](../CLAUDE.md).
   silently never firing on real devices (SDL #6465).
   `CaptureView.report(_:pressed:from:)` merges them by counting **holders per HID
   usage**: down on the first source to report it, up when the last lets go. So a key
-  both see is forwarded once, and a dead `GCKeyboard` changes nothing. `GCKeyCode`
+  both see is forwarded once, and a dead `GCKeyboard` changes nothing. A release
+  whose press was never forwarded (held while forwarding was off, e.g. the toggle
+  shortcut's own modifiers) is dropped, not sent: a lone Alt up focuses the
+  Windows menu bar. `GCKeyCode`
   raw values *are* HID usages, so both resolve through the same `HIDToVK` table.
 - Two gates the HID source needs and the responder chain gave for free: it forwards
   only while the capture view is first responder (it is delivered app-wide, so
