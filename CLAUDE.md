@@ -47,7 +47,8 @@ either direction.
   `key <vk> pressed=<0|1>` (one physical key transition; `<vk>` is a decimal
   Windows virtual-key code) and `char <codepoint>` (one Unicode character,
   injected as a down+up pair via `KEYEVENTF_UNICODE`, layout-independent — used
-  by the iOS virtual-input tab for plain text). Defined in
+  by the iOS virtual-input tab for plain text), plus the bare line `alive` (the
+  held-key lease, rule 4 below). Defined in
   `BridgeCore/Sources/BridgeCore/KeyEvent.swift`; the C# mirror is
   `windows-agent/WireProtocol.cs` — keep them in sync.
 - **Complete, explicit key mapping tables**, not a "common subset":
@@ -82,7 +83,7 @@ A phone that loses cellular mid-session sends no FIN and no RST, so nothing abou
 the socket looks wrong at either end. That produced the worst failure mode: the
 agent parked in the dead session's read, the OS completing the phone's *new*
 handshake into the listen backlog by itself so the phone showed "Connected", and
-no keystroke arriving until the agent was restarted. Three rules, none redundant:
+no keystroke arriving until the agent was restarted. Four rules, none redundant:
 
 1. **The newest peer wins** — the agent accepts continuously and drops the older
    session. This is the one that makes recovery instant.
@@ -92,6 +93,12 @@ no keystroke arriving until the agent was restarted. Three rules, none redundant
 3. **The client rebuilds rather than waits** — `viabilityUpdateHandler` and a
    prolonged `.waiting` both schedule a reconnect; a stale `NWConnection` is
    never nursed.
+4. **A held key is a lease, not a state.** The agent generates key repeat itself,
+   so a stall used to mean typing the held letter until the delayed key-up got
+   through. The client says `alive` on connect and every 100 ms while it holds any
+   key. The agent pauses repeat after 350 ms of silence and releases everything
+   after 1500 ms (`PeerLease.cs`). The Mac app no longer forwards macOS's own
+   repeats, which arrived as a burst after a stall.
 
 A working Tailscale link hides interface changes from `NWConnection` (the socket
 sits on the tunnel interface), which is why Wi-Fi↔cellular switching always

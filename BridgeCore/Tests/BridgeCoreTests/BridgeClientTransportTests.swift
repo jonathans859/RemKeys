@@ -10,6 +10,7 @@ final class BridgeClientTransportTests: XCTestCase {
     private var settings: AppSettings!
     private var factory: FakeTransportFactory!
     private var sleeper: ManualSleeper!
+    private var heartbeats: ManualSleeper!
     private var client: BridgeClient!
     private var statuses: [BridgeClient.ConnectionStatus] = []
 
@@ -21,19 +22,25 @@ final class BridgeClientTransportTests: XCTestCase {
         settings.targetPort = 5391
         factory = FakeTransportFactory()
         sleeper = ManualSleeper()
-        let factory = factory!, sleeper = sleeper!
+        heartbeats = ManualSleeper()
+        let factory = factory!, sleeper = sleeper!, heartbeats = heartbeats!
         client = BridgeClient(settings: settings,
                               transportFactory: { factory.make(host: $0, port: $1) },
-                              sleep: { try await sleeper.sleep($0) })
+                              sleep: { try await sleeper.sleep($0) },
+                              heartbeatSleep: { try await heartbeats.sleep($0) })
         statuses = []
         client.statusDidChange = { [unowned self] status, _ in statuses.append(status) }
     }
 
-    /// Turn forwarding on and bring the first connection up.
+    /// Turn forwarding on and bring the first connection up. The `alive`
+    /// announcement every ready connection opens with is checked once, then
+    /// dropped from `sent` so the other tests read only what they did.
     private func connectReady() -> FakeTransport {
         client.forwardingEnabled = true
         let transport = factory.latest!
         transport.deliver(.ready)
+        XCTAssertEqual(transport.sent, ["alive"])
+        transport.clearSent()
         return transport
     }
 
@@ -239,7 +246,7 @@ final class BridgeClientTransportTests: XCTestCase {
         // The agent's new session holds nothing; a lone Alt up would focus
         // the menu bar.
         XCTAssertFalse(client.sendKey(vk: VK.menu, pressed: false))
-        XCTAssertTrue(second.sent.isEmpty)
+        XCTAssertEqual(second.sent, ["alive"])
         XCTAssertEqual(first.sent, ["key 18 pressed=1"])
     }
 
@@ -250,5 +257,72 @@ final class BridgeClientTransportTests: XCTestCase {
         transport.sendError = FakeSendError()
         client.sendKey(vk: VK.a, pressed: true)
         XCTAssertEqual(cues, 1)
+    }
+
+    // MARK: Held-key lease
+
+    func testReadyConnectionAnnouncesTheLease() {
+        client.forwardingEnabled = true
+        let transport = factory.latest!
+        XCTAssertTrue(transport.sent.isEmpty)
+        transport.deliver(.ready)
+        XCTAssertEqual(transport.sent, ["alive"])
+    }
+
+    func testNoHeartbeatWhileNothingIsHeld() async {
+        let transport = connectReady()
+        client.sendKey(vk: VK.a, pressed: true)
+        client.sendKey(vk: VK.a, pressed: false)
+        await settle()
+        await heartbeats.fireAll()
+        XCTAssertEqual(transport.sent, ["key 65 pressed=1", "key 65 pressed=0"])
+        XCTAssertEqual(heartbeats.pending, 0)
+    }
+
+    func testHeldKeyBeatsEveryIntervalUntilReleased() async {
+        let transport = connectReady()
+        client.sendKey(vk: VK.back, pressed: true)
+        await settle()
+        XCTAssertEqual(heartbeats.requested, [Heartbeat.interval])
+        await heartbeats.fireAll()
+        await heartbeats.fireAll()
+        XCTAssertEqual(transport.sent, ["key 8 pressed=1", "alive", "alive"])
+
+        client.sendKey(vk: VK.back, pressed: false)
+        await heartbeats.fireAll()
+        XCTAssertEqual(transport.sent.last, "key 8 pressed=0")
+        XCTAssertEqual(heartbeats.pending, 0)
+    }
+
+    func testOverlappingHoldsShareOneHeartbeat() async {
+        let transport = connectReady()
+        client.sendKey(vk: VK.shift, pressed: true)
+        client.sendKey(vk: VK.a, pressed: true)
+        await settle()
+        XCTAssertEqual(heartbeats.pending, 1)
+        // Releasing one key keeps the beat going for the other.
+        client.sendKey(vk: VK.a, pressed: false)
+        await heartbeats.fireAll()
+        XCTAssertEqual(transport.sent.last, "alive")
+        XCTAssertEqual(heartbeats.pending, 1)
+    }
+
+    func testReconnectStopsTheHeartbeat() async {
+        let first = connectReady()
+        client.sendKey(vk: VK.a, pressed: true)
+        await settle()
+        client.connect()
+        await heartbeats.fireAll()
+        XCTAssertEqual(first.sent, ["key 65 pressed=1"])
+        XCTAssertEqual(heartbeats.pending, 0)
+    }
+
+    func testForwardingOffStopsTheHeartbeat() async {
+        _ = connectReady()
+        client.sendKey(vk: VK.a, pressed: true)
+        await settle()
+        client.forwardingEnabled = false
+        await heartbeats.fireAll()
+        XCTAssertEqual(heartbeats.pending, 0)
     }
 }

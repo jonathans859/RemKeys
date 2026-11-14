@@ -367,6 +367,14 @@ final class KeyCapture {
         switch type {
         case .keyDown, .keyUp:
             guard bridge.forwardingEnabled else { return Unmanaged.passUnretained(event) }
+            // macOS's own autorepeat is swallowed, not forwarded: the agent
+            // repeats a held key itself, under the held-key lease (see
+            // `Heartbeat`), which pauses the moment the link stalls. Forwarded
+            // repeats did the opposite — they piled up in the send buffer
+            // during a stall and arrived as one burst of letters afterwards.
+            if type == .keyDown, event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
+                return nil
+            }
             if let vk = MacKeyVK.vk(
                 forKeyCode: keyCode,
                 isISOKeyboard: MacKeyboardLayout.isISO(event),

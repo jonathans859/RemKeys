@@ -28,11 +28,16 @@ namespace RemKeysAgent;
 /// user already tuned for every other keyboard on this machine. It covers the
 /// iOS key pad's hold gesture at the same time, which promises exactly this.
 ///
-/// macOS is the exception, and it needs no flag: its event tap receives repeat
-/// key-downs from macOS and forwards them, so that peer sends a second
-/// <c>pressed=1</c> for a key it is already holding. That duplicate is the
-/// signal — see <see cref="NotePeerRepeat"/> — and this repeater stands down
-/// for the rest of the session rather than repeating on top of it.
+/// The Mac app used to forward macOS's own repeats instead; current builds
+/// swallow them and leave repeat to this class too. An older Mac build still
+/// sends a second <c>pressed=1</c> for a key it is already holding. That
+/// duplicate is the signal — see <see cref="NotePeerRepeat"/> — and this
+/// repeater stands down for the rest of the session rather than repeating on
+/// top of it.
+///
+/// Repeats only go out while the peer's held-key lease is fresh (see
+/// <see cref="PeerLease"/>). If the link stalls, the key stays down but stops
+/// repeating, so a delayed key-up can no longer mean a screenful of one letter.
 ///
 /// Typematic semantics, deliberately: only the most recently pressed repeatable
 /// key repeats (pressing another key moves the repeat to it, and releasing the
@@ -71,6 +76,7 @@ public sealed class KeyRepeater : IDisposable
     private readonly IKeystrokeSink _sink;
     private readonly RemKeysOptions _options;
     private readonly ILogger _logger;
+    private readonly PeerLease _lease;
 
     private readonly object _gate = new();
     private readonly ThreadingTimer _timer;
@@ -83,11 +89,15 @@ public sealed class KeyRepeater : IDisposable
     /// <summary>Null while it is still unknown whether this peer repeats by itself.</summary>
     private bool? _peerRepeats;
     private bool _disposed;
+    /// <summary>Whether the last tick skipped its repeat because the lease went
+    /// stale, so the pause and the resume are each logged once.</summary>
+    private bool _pausedForSilence;
 
-    public KeyRepeater(IKeystrokeSink sink, RemKeysOptions options, ILogger logger)
+    public KeyRepeater(IKeystrokeSink sink, RemKeysOptions options, PeerLease lease, ILogger logger)
     {
         _sink = sink;
         _options = options;
+        _lease = lease;
         _logger = logger;
         _timer = new ThreadingTimer(OnTick, null, Timeout.Infinite, Timeout.Infinite);
     }
@@ -170,6 +180,27 @@ public sealed class KeyRepeater : IDisposable
 
             vk = current;
 
+            if (!_lease.RepeatAllowed)
+            {
+                // The link has gone quiet: keep the key down, type nothing,
+                // and look again a repeat interval later. The watchdog in
+                // Worker releases the key if the silence goes on.
+                if (!_pausedForSilence)
+                {
+                    _pausedForSilence = true;
+                    _logger.LogInformation(
+                        "Peer silent for {Ms} ms while holding vk={Vk}; pausing key repeat.",
+                        _lease.SilentForMs, vk);
+                }
+                Arm(RepeatInterval());
+                return;
+            }
+            if (_pausedForSilence)
+            {
+                _pausedForSilence = false;
+                _logger.LogInformation("Peer heard from again; resuming key repeat for vk={Vk}.", vk);
+            }
+
             // Surviving the grace period is the proof that this peer does not
             // repeat by itself; later holds start at the plain delay.
             _peerRepeats ??= false;
@@ -195,6 +226,7 @@ public sealed class KeyRepeater : IDisposable
     private void Disarm()
     {
         _key = null;
+        _pausedForSilence = false;
         _dueAt = long.MaxValue;
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
     }

@@ -6,8 +6,10 @@ namespace RemKeysAgent;
 /// one line per key transition, and
 /// <code>char &lt;codepoint&gt;</code>
 /// one line per Unicode character to type (a full down+up, injected via
-/// KEYEVENTF_UNICODE so it is independent of the active layout). This is the
-/// C# mirror of the Swift <c>KeyEvent.parse</c> / <c>CharEvent.parse</c>;
+/// KEYEVENTF_UNICODE so it is independent of the active layout), and
+/// <code>alive</code>
+/// the held-key lease (see <see cref="PeerLease"/>). This is the C# mirror of
+/// the Swift <c>KeyEvent.parse</c> / <c>CharEvent.parse</c> / <c>Heartbeat.parse</c>;
 /// keep the two sides in sync.
 /// </summary>
 public static class WireProtocol
@@ -28,6 +30,18 @@ public static class WireProtocol
             case "pressed=0": pressed = false; return true;
             default: return false;
         }
+    }
+
+    /// <summary>
+    /// The bare <c>alive</c> line: the peer is still there and every key it
+    /// holds is still held. Sent once when a connection comes up and then
+    /// every 100 ms while the peer holds a key; see <see cref="PeerLease"/>.
+    /// Mirrors the Swift <c>Heartbeat.parse</c>.
+    /// </summary>
+    public static bool IsAlive(string line)
+    {
+        var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return fields.Length == 1 && fields[0] == "alive";
     }
 
     public static bool TryParseChar(string line, out int codepoint)

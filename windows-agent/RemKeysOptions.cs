@@ -37,8 +37,9 @@ public sealed class RemKeysOptions
     ///
     /// On by default because Windows does not do it for injected input at all
     /// (see <see cref="KeyRepeater"/>): without this, holding Down Arrow moves
-    /// one line and stops. Turn it off if a peer already sends its own repeats
-    /// and the automatic detection somehow misses it.
+    /// one line and stops. Both current apps rely on it (the Mac app no longer
+    /// forwards macOS's own repeats); turning it off only makes sense for an
+    /// older Mac build whose repeats the automatic detection somehow misses.
     /// </summary>
     public bool KeyRepeat { get; set; } = true;
 

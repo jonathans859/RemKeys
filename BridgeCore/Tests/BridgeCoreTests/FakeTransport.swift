@@ -34,6 +34,8 @@ final class FakeTransport: BridgeTransport {
 
     func cancel() { cancelled = true }
 
+    func clearSent() { sent.removeAll() }
+
     /// Play the network: report a state change.
     func deliver(_ state: TransportState) {
         isReady = state == .ready

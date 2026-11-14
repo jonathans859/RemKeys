@@ -91,9 +91,18 @@ public final class BridgeClient {
     /// How a recovery timer waits. `Task.sleep` in the apps; tests swap it so
     /// they don't sit out real reconnect delays.
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
+    /// How the heartbeat waits between beats. Separate from `sleep` so tests
+    /// can fire recovery timers and heartbeats independently.
+    @ObservationIgnored private let heartbeatSleep: @Sendable (Duration) async throws -> Void
     /// VKs we've sent a down for but not yet an up — flushed on disconnect so
     /// the remote never gets stuck with a held key.
-    private var heldKeys: Set<UInt16> = []
+    @ObservationIgnored private var heldKeys: Set<UInt16> = [] {
+        didSet { updateHeartbeat() }
+    }
+    /// Sends `Heartbeat` every `Heartbeat.interval` while any key is held, so
+    /// the agent can tell a held key from a stalled link. Nil while nothing is
+    /// held: an idle connection carries no extra traffic.
+    @ObservationIgnored private var heartbeatTask: Task<Void, Never>?
     /// The pending reconnect timer, if any. One at a time, and owned by the
     /// connection it was scheduled for: `connect()` / `disconnect()` cancel it,
     /// so a timer left over from a previous connection can neither block the
@@ -127,10 +136,12 @@ public final class BridgeClient {
     /// `sleep`.
     init(settings: AppSettings,
          transportFactory: @escaping BridgeTransportFactory,
-         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+         heartbeatSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.settings = settings
         self.makeTransport = transportFactory
         self.sleep = sleep
+        self.heartbeatSleep = heartbeatSleep
     }
 
     // MARK: Sending
@@ -195,6 +206,29 @@ public final class BridgeClient {
         if let lastDropCue, now - lastDropCue < dropCueInterval { return }
         lastDropCue = now
         keystrokeWasDropped()
+    }
+
+    /// Start or stop the heartbeat to match `heldKeys`. The beat keeps going
+    /// across a connection that is briefly not `.connected` (its writes just
+    /// fail quietly); `connect()` empties `heldKeys`, which stops it.
+    private func updateHeartbeat() {
+        if heldKeys.isEmpty {
+            heartbeatTask?.cancel()
+            heartbeatTask = nil
+            return
+        }
+        guard heartbeatTask == nil else { return }
+        let sleep = heartbeatSleep
+        heartbeatTask = Task { @MainActor [weak self] in
+            while true {
+                // Cancelled means `heldKeys` emptied and a later hold may
+                // already own `heartbeatTask` — leave it alone.
+                do { try await sleep(Heartbeat.interval) } catch { return }
+                guard let self, !Task.isCancelled else { return }
+                // Never a drop cue: a heartbeat is not a keystroke.
+                _ = self.write(Heartbeat.wireData, cueIfLost: false)
+            }
+        }
     }
 
     /// Emit an up for every key we believe is still held, then clear the set.
@@ -289,6 +323,10 @@ public final class BridgeClient {
         switch state {
         case .ready:
             setStatus(.connected)
+            // Tells the agent this peer keeps the held-key lease, before any
+            // key can be held — see `Heartbeat`. Older agents log it as an
+            // unknown line and carry on.
+            _ = write(Heartbeat.wireData, cueIfLost: false)
         case .waiting(let error):
             // Reachability problem (host down, no route). Network.framework
             // keeps the connection and retries on its own — but a connection

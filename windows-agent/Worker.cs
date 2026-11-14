@@ -36,8 +36,17 @@ public sealed class Worker : BackgroundService
     private readonly AgentStatus _status;
     private readonly IKeystrokeSink _sink;
     private readonly AgentMode _mode;
-    /// <summary>Keys the current peer has pressed and not released yet.</summary>
+    /// <summary>Keys the current peer has pressed and not released yet.
+    /// Guarded by <see cref="_heldGate"/>: the read loop and the lease watchdog
+    /// both change it.</summary>
     private readonly HashSet<ushort> _held = new();
+    /// <summary>Keys the lease watchdog let go of while the peer was silent.
+    /// Their real key-ups may still arrive once the link recovers; those are
+    /// swallowed, since the PC already saw an up for each.</summary>
+    private readonly HashSet<ushort> _forceReleased = new();
+    private readonly object _heldGate = new();
+    /// <summary>Whether the peer is still confirming its held keys; see <see cref="PeerLease"/>.</summary>
+    private readonly PeerLease _lease = new();
     /// <summary>Types a held key over and over; Windows will not do it for injected input.</summary>
     private readonly KeyRepeater _repeater;
     /// <summary>Who may connect. Only consulted in lock-screen mode; see <see cref="PeerAccess"/>.</summary>
@@ -56,7 +65,7 @@ public sealed class Worker : BackgroundService
         _status = status;
         _sink = sink;
         _mode = mode;
-        _repeater = new KeyRepeater(sink, _options, logger);
+        _repeater = new KeyRepeater(sink, _options, _lease, logger);
 
         _access = _options.ResolveLockScreenAccess(out var accessWarning);
         if (accessWarning is not null)
@@ -111,10 +120,10 @@ public sealed class Worker : BackgroundService
         }
 
         // The current session runs as its own task so this loop can keep
-        // accepting. Nothing else runs concurrently: a new peer is only started
-        // after the previous session has been closed *and* awaited, which is
-        // what lets _held stay lock-free and keeps the old session's
-        // "released N keys" and status reset ahead of the new peer's log line.
+        // accepting. Sessions never overlap: a new peer is only started after
+        // the previous session has been closed *and* awaited, which keeps the
+        // old session's "released N keys" and status reset ahead of the new
+        // peer's log line.
         TcpClient? currentClient = null;
         var currentRemote = string.Empty;
         var currentSession = Task.CompletedTask;
@@ -215,6 +224,8 @@ public sealed class Worker : BackgroundService
     {
         ConfigureKeepAlive(client.Client, remote);
 
+        _lease.Begin();
+        lock (_heldGate) { _forceReleased.Clear(); }
         _repeater.BeginSession();
         _logger.LogInformation("Peer connected from {Remote}.", remote);
         _status.Set(AgentState.Connected, $"Connected to {remote}");
@@ -223,6 +234,8 @@ public sealed class Worker : BackgroundService
         using var stream = client.GetStream();
         var reader = new LineReader();
         var buffer = ArrayPool<byte>.Shared.Rent(4096);
+        using var watchdogStop = new CancellationTokenSource();
+        var watchdog = WatchLeaseAsync(remote, watchdogStop.Token);
         try
         {
             int read;
@@ -248,6 +261,8 @@ public sealed class Worker : BackgroundService
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            watchdogStop.Cancel();
+            await watchdog;
             // Before the releases below, so nothing re-presses a key on its way out.
             _repeater.Stop();
             ReleaseHeldKeys(remote);
@@ -298,40 +313,98 @@ public sealed class Worker : BackgroundService
     /// repeats that key forever. Only this end can clean that up: the sender
     /// is already gone. The desktop helpers do the same thing when their
     /// desktop leaves the foreground; this covers the network case, in every
-    /// mode. Sessions are handled one at a time, so no locking is needed.
+    /// mode.
     /// </summary>
     private void ReleaseHeldKeys(string remote)
     {
-        if (_held.Count == 0) return;
-
-        _logger.LogInformation("Releasing {Count} key(s) left down by {Remote}.", _held.Count, remote);
-        foreach (var vk in _held)
+        lock (_heldGate)
         {
-            _sink.Key(vk, false);
+            if (_held.Count == 0) return;
+
+            _logger.LogInformation("Releasing {Count} key(s) left down by {Remote}.", _held.Count, remote);
+            foreach (var vk in _held)
+            {
+                _sink.Key(vk, false);
+            }
+            _held.Clear();
         }
-        _held.Clear();
+    }
+
+    /// <summary>
+    /// Lets go of the peer's held keys once its lease has lapsed: it promised
+    /// to say <c>alive</c> every 100 ms while holding anything and has been
+    /// silent for <see cref="PeerLease.ReleaseAfterMs"/>. Keepalive would end
+    /// the session eventually too, but only after ~30 s, and the session may
+    /// well survive: this is for the link that stalls and then recovers.
+    /// The repeater has already paused by the time this fires.
+    /// </summary>
+    private async Task WatchLeaseAsync(string remote, CancellationToken token)
+    {
+        while (true)
+        {
+            try { await Task.Delay(100, token); }
+            catch (OperationCanceledException) { return; }
+
+            if (!_lease.ReleaseDue) continue;
+            lock (_heldGate)
+            {
+                if (_held.Count == 0) continue;
+
+                _repeater.Stop();
+                _logger.LogWarning(
+                    "Peer {Remote} silent for {Ms} ms with {Count} key(s) down; releasing them.",
+                    remote, _lease.SilentForMs, _held.Count);
+                foreach (var vk in _held)
+                {
+                    _sink.Key(vk, false);
+                    _forceReleased.Add(vk);
+                }
+                _held.Clear();
+            }
+        }
     }
 
     private void ProcessLine(string line)
     {
+        // Every line counts as hearing from the peer, whatever it says.
+        _lease.Heard();
+
         // Parsing happens here, at the network boundary, in every mode. In
         // service mode the sink forwards canonical lines to the desktop
         // helpers, so nothing a helper injects has skipped this check.
         if (WireProtocol.TryParse(line, out var vk, out var pressed))
         {
-            if (pressed)
+            lock (_heldGate)
             {
-                // A second press for a key already held is the peer forwarding
-                // its own OS's key repeat (macOS does); the repeater then leaves
-                // that key alone instead of repeating it a second time.
-                if (_held.Add(vk)) _repeater.Pressed(vk); else _repeater.NotePeerRepeat(vk);
+                if (pressed)
+                {
+                    _forceReleased.Remove(vk);
+                    // A second press for a key already held is an older Mac
+                    // build forwarding macOS's own key repeat; the repeater then
+                    // leaves that key alone instead of repeating it a second time.
+                    if (_held.Add(vk)) _repeater.Pressed(vk); else _repeater.NotePeerRepeat(vk);
+                }
+                else
+                {
+                    if (!_held.Remove(vk) && _forceReleased.Remove(vk))
+                    {
+                        // The late key-up of a key the watchdog already let go of.
+                        _logger.LogDebug("Ignoring late key-up for vk={Vk}; it was already released.", vk);
+                        return;
+                    }
+                    _repeater.Released(vk);
+                }
+                _sink.Key(vk, pressed);
             }
-            else
+        }
+        else if (WireProtocol.IsAlive(line))
+        {
+            if (_lease.Enable())
             {
-                _held.Remove(vk);
-                _repeater.Released(vk);
+                _logger.LogInformation(
+                    "Peer confirms its held keys; repeat pauses after {Pause} ms of silence and held keys " +
+                    "are released after {Release} ms.", PeerLease.PauseAfterMs, PeerLease.ReleaseAfterMs);
             }
-            _sink.Key(vk, pressed);
         }
         else if (WireProtocol.TryParseChar(line, out var codepoint))
         {

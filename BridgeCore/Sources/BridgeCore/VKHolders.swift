@@ -22,9 +22,10 @@ public struct VKHolders<Key: Hashable> {
     public init() {}
 
     /// Record `key` going down as `vk`. Returns true when the down should be
-    /// sent: `vk` wasn't held yet, or this is an autorepeat from the key
-    /// already holding it (macOS forwards its own repeats, and the agent
-    /// depends on them). False when another key already holds `vk`.
+    /// sent: `vk` wasn't held yet, or this is a second press from the key
+    /// already holding it (re-asserting the down is harmless; neither app
+    /// forwards OS autorepeat any more — the agent repeats under the held-key
+    /// lease). False when another key already holds `vk`.
     @discardableResult
     public mutating func press(_ key: Key, vk: UInt16) -> Bool {
         if let held = vkForKey[key] {

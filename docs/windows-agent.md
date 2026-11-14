@@ -92,22 +92,48 @@ do what it promises. Rules:
 - **Modifiers, the locks, media keys and PrintScreen never repeat.** A repeating Caps
   Lock would toggle at 30 Hz, and a repeating Shift upsets Sticky Keys and screen
   readers.
-- **macOS is detected, not flagged.** Its event tap forwards macOS's own repeat
-  key-downs, i.e. a second `pressed=1` for a key it already holds, and that duplicate
-  makes the repeater stand down for the session. The 250 ms grace on a session's
-  first repeat exists so macOS's own first repeat (~375 ms) lands inside it and is
-  recognised before a keystroke is doubled.
+- **Repeat stops when the link does** — see "Held-key lease" below. Without it, a
+  stalled link meant typing the held letter until the delayed key-up got through.
+- **The Mac app swallows macOS's own repeats** and leaves repeat to the agent too:
+  forwarded repeats piled up in the send buffer during a stall and arrived as one
+  burst. Older Mac builds still forward them, and are *detected, not flagged*: a
+  second `pressed=1` for a key already held makes the repeater stand down for the
+  session. The 250 ms grace on a session's first repeat exists so macOS's own first
+  repeat (~375 ms) lands inside it and is recognised before a keystroke is doubled.
 - Repeats go through the sink like any other event, so lock-screen mode carries them
   to the helpers unchanged.
+
+## Held-key lease (`PeerLease.cs`)
+
+While a key is held the link is otherwise silent, so a stalled link looks exactly
+like a held key. TCP loses nothing, it only delays: the key-up is stuck in
+retransmission while the repeater keeps typing. Field-reported 2026-11-14 from an
+iPhone on a flaky connection, as a run of one letter that eventually stopped.
+
+- The client (`BridgeClient`) sends a bare **`alive`** line once when a connection
+  becomes ready, then every **100 ms while it holds any key**. An idle connection
+  carries nothing extra.
+- Every line from the peer counts as hearing from it. After **350 ms** of silence the
+  repeater **pauses**: the key stays down, nothing more is typed. It resumes when the
+  peer is heard from again.
+- After **1500 ms** of silence a watchdog in `Worker` **releases every held key**, like
+  a keyboard whose cable was pulled. Keepalive would end the session after ~30 s; this
+  is for the stall that recovers. The real key-up that arrives later is swallowed
+  (`_forceReleased`), since the PC already saw an up.
+- **A peer that never says `alive` keeps the old behaviour.** Its silence proves
+  nothing, so nothing pauses or is released early. Update the agent before the
+  apps: an older agent logs every `alive` as a malformed line (10 a second while a
+  key is held), though it works otherwise.
 
 ## Sessions (`Worker.cs`)
 
 - **The accept loop never blocks on a session.** It accepts continuously; a new
   allowed peer closes the previous socket, waits for that session to finish (which
   releases its held keys and resets the status), then starts. Sessions still run
-  strictly one at a time, which is what keeps `_held` and the status writes
-  lock-free. The repeat timer is the one thing calling the sink off the session
-  thread; it keeps its own state under its own lock and never touches `_held`.
+  strictly one at a time, so per-session state is never shared between peers. Two
+  things call the sink off the read loop: the repeat timer (its own state under its
+  own lock, never touches `_held`) and the lease watchdog, which is why `_held` is
+  guarded by `_heldGate`.
 - Two details easy to undo by accident: the peer policy is checked **before** the old
   session is dropped, or anyone who can reach the port could cut off the real
   keyboard just by connecting once; and superseding **closes the socket** rather than
