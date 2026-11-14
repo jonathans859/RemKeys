@@ -57,6 +57,12 @@ final class AppModel {
         bridge.statusDidChange = { [weak self] status, previous in
             self?.handleStatusChange(status, previous: previous)
         }
+        // A keystroke typed into a link that is down. Sound only: the status
+        // line already says why, and announcing every burst would talk over
+        // the screen reader. Throttled and gated on the setting by the bridge.
+        bridge.keystrokeWasDropped = { [weak self] in
+            self?.play(.dropped)
+        }
         updater.availableUpdateDidChange = { [weak self] build in
             self?.handleAvailableUpdate(build)
         }
@@ -280,6 +286,9 @@ final class AppModel {
         case connected = "Glass"
         case failed = "Funk"
         case updateAvailable = "Hero"
+        /// Short and dry, unlike `failed`'s Funk, so "a key was lost" and
+        /// "the connection failed" never blur.
+        case dropped = "Bottle"
     }
 
     private func play(_ cue: Cue) {

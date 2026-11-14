@@ -66,6 +66,17 @@ public final class AppSettings {
         targetPort = connection.port
     }
 
+    // MARK: Drop cue (both platforms)
+
+    /// Whether a keystroke that could not be sent — typed while the PC is
+    /// unreachable or the connection is being rebuilt — gives a short tick
+    /// (iOS: a vibration plus a sound; macOS: a sound), so typing into a dead
+    /// link is noticed instead of discovered later. On by default; throttled
+    /// to one tick per burst by `BridgeClient`.
+    public var dropCueEnabled: Bool {
+        didSet { defaults.set(dropCueEnabled, forKey: Keys.dropCueEnabled) }
+    }
+
     // MARK: Screen curtain (iOS)
 
     /// Whether the screen curtain is raised by itself the first time a
@@ -331,6 +342,7 @@ public final class AppSettings {
         self.leftCommandMapping = mapping(Keys.leftCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.rightCommandMapping = mapping(Keys.rightCommandMapping, legacy: Keys.legacyCommandMapping, default: .control)
         self.autoScreenCurtain = defaults.bool(forKey: Keys.autoScreenCurtain)
+        self.dropCueEnabled = defaults.object(forKey: Keys.dropCueEnabled) as? Bool ?? true
         self.virtualPadModifiersAcrossPads = defaults.object(forKey: Keys.virtualPadModifiersAcrossPads) as? Bool ?? true
         self.virtualInputKeepText = defaults.bool(forKey: Keys.virtualInputKeepText)
         self.virtualInputLiveTyping = defaults.bool(forKey: Keys.virtualInputLiveTyping)
@@ -407,5 +419,6 @@ public final class AppSettings {
         static let virtualPadMultiFingerGrace = "virtualPadMultiFingerGrace"
         static let forwardFunctionKeyRow = "forwardFunctionKeyRow"
         static let ignorePointerWhileForwarding = "ignorePointerWhileForwarding"
+        static let dropCueEnabled = "dropCueEnabled"
     }
 }

@@ -26,6 +26,7 @@ struct SettingsView: View {
                 toggleShortcutSection
                 modifierMappingSection
                 screenCurtainSection
+                dropCueSection
                 keyPadSection
                 holdSection
             }
@@ -66,6 +67,14 @@ struct SettingsView: View {
                 Text("Locking the phone or leaving the app takes the curtain down, so you come back to a normal screen. Control Center and notifications leave it up.")
             } header: {
                 SectionHeader("Screen curtain", systemImage: "moon.stars")
+            }
+            Section {
+                Text(settings.dropCueEnabled
+                     ? "A key you type while forwarding is on but the PC can't be reached — the connection is down or being rebuilt — is lost, not saved up for later. The phone then vibrates and ticks, once per burst of typing rather than once per key, so you notice straight away instead of finding the text missing afterwards. The tick follows the silent switch; the vibration doesn't."
+                     : "Keys typed while the PC can't be reached are lost silently. Turn the setting on for a vibration and a tick when that happens.")
+                Text("No tick is not a promise that a key arrived: when the network vanishes without warning, the app needs up to about 25 seconds to notice, and keys typed in that time look sent.")
+            } header: {
+                SectionHeader("Dropped keys", systemImage: "exclamationmark.triangle")
             }
             Section {
                 Text(padStore.visiblePads.isEmpty
@@ -203,6 +212,18 @@ struct SettingsView: View {
             .accessibilityHint("On: once a forwarding session reaches the PC and a hardware keyboard is connected, the screen goes black by itself. Without a keyboard it stays on, for the Virtual Input pad. Off: raise it with the Screen curtain button on the Start tab.")
         } header: {
             SectionHeader("Screen curtain", systemImage: "moon.stars")
+        }
+    }
+
+    private var dropCueSection: some View {
+        Section {
+            Toggle("Tick when a key can't be sent", isOn: Binding(
+                get: { settings.dropCueEnabled },
+                set: { settings.dropCueEnabled = $0 }
+            ))
+            .accessibilityHint("On: a key typed while the PC can't be reached gives a vibration and a tick, once per burst of typing. Off: such keys are lost silently.")
+        } header: {
+            SectionHeader("Dropped keys", systemImage: "exclamationmark.triangle")
         }
     }
 

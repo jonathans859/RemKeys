@@ -176,6 +176,9 @@ struct MenuContentView: View {
             functionKeyRowControl
 
             Divider()
+            dropCueControl
+
+            Divider()
             toggleShortcutControl
 
             Divider()
@@ -195,6 +198,23 @@ struct MenuContentView: View {
                     + "instead of running the Mac's brightness, volume and Mission Control "
                     + "functions. The Mac gets those keys back as soon as forwarding stops."
                 )
+        }
+    }
+
+    /// The sound itself is played by `AppModel` from the bridge's throttled
+    /// `keystrokeWasDropped` hook; this only switches it.
+    private var dropCueControl: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Dropped keys").font(.caption).foregroundStyle(.secondary)
+            Toggle("Play a sound when a key can't be sent", isOn: Binding(
+                get: { settings.dropCueEnabled },
+                set: { settings.dropCueEnabled = $0 }
+            ))
+            .accessibilityHint(
+                "A key typed while forwarding is on but the Windows PC can't be reached "
+                + "is lost, not saved up. With this on, that plays a short sound, once "
+                + "per burst of typing."
+            )
         }
     }
 

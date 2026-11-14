@@ -23,7 +23,8 @@ final class CaptureDiagnostics {
     /// number: keyboard detected but this stays 0 while typing means another
     /// layer (VoiceOver QuickNav, Full Keyboard Access) consumes keys first.
     var pressesSeen = 0
-    /// Key transitions (downs and ups) handed to the bridge.
+    /// Key transitions (downs and ups) the bridge actually wrote to the
+    /// connection. Keys dropped because the link was down don't count.
     var eventsForwarded = 0
     /// Readable name of the last key-down seen.
     var lastKey: String?

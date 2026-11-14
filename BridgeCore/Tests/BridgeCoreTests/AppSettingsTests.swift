@@ -40,6 +40,18 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(AppSettings(defaults: defaults).forwardFunctionKeyRow)
     }
 
+    /// Defaults to true as well; a stored `false` must survive a reload.
+    func testDropCueDefaultsOnAndPersistsOff() {
+        let defaults = UserDefaults(suiteName: "AppSettingsDropCueTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsDropCueTests")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertTrue(settings.dropCueEnabled)
+
+        settings.dropCueEnabled = false
+        XCTAssertFalse(AppSettings(defaults: defaults).dropCueEnabled)
+    }
+
     /// Ignoring the pointer must never be on without a toggle shortcut — the
     /// pointer would otherwise be the only way to stop forwarding. Covers the
     /// setter, clearing the shortcut, and a stale value in the domain.

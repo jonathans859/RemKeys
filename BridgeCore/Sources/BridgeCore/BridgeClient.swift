@@ -71,6 +71,18 @@ public final class BridgeClient {
     /// Optional hook fired whenever `status` changes, with the new status and
     /// the one it replaced (see `ConnectionStatus.isWorthAnnouncing(after:)`).
     public var statusDidChange: (@MainActor (_ status: ConnectionStatus, _ previous: ConnectionStatus) -> Void)?
+    /// Optional hook fired when a keystroke the user typed was lost instead of
+    /// sent: forwarding is on but there is no live connection, or the
+    /// transport refused the write. The apps turn it into a tick so typing
+    /// into a dead link is noticed. Only key-downs and characters count —
+    /// never key-ups or the synthetic releases from `releaseHeldKeys()` — and
+    /// it is throttled: the first drop fires at once, then at most once per
+    /// `dropCueInterval` until a write succeeds again. Gated on
+    /// `AppSettings.dropCueEnabled`.
+    ///
+    /// A missing tick is not proof of delivery: keys written into a link that
+    /// died without closing look sent until keepalive notices (~10–25s).
+    public var keystrokeWasDropped: (@MainActor () -> Void)?
 
     private let settings: AppSettings
     private var connection: NWConnection?
@@ -91,6 +103,12 @@ public final class BridgeClient {
     /// (tower handover, border crossing) ends up in, and the one where sending
     /// keystrokes is pointless.
     private var pathIsViable = true
+    /// When `keystrokeWasDropped` last fired; nil once a write has succeeded
+    /// since, so the next drop is heard immediately.
+    @ObservationIgnored private var lastDropCue: ContinuousClock.Instant?
+    /// Minimum gap between drop cues while drops continue. Typing into a dead
+    /// link loses tens of keys a second; one tick each would be a buzz.
+    @ObservationIgnored var dropCueInterval: Duration = .seconds(1)
 
     public init(settings: AppSettings) {
         self.settings = settings
@@ -98,28 +116,69 @@ public final class BridgeClient {
 
     // MARK: Sending
 
-    /// Forward one physical key transition. No-op unless forwarding is on and
-    /// we have a live connection; while connecting, presses are dropped rather
-    /// than queued (a stale keystroke replayed seconds later is worse than a
-    /// lost one for a screen-reader user).
-    public func sendKey(vk: UInt16, pressed: Bool) {
-        guard forwardingEnabled else { return }
+    /// Forward one physical key transition. Returns whether it was actually
+    /// written to the connection, so callers count real sends only.
+    ///
+    /// Nothing is sent unless forwarding is on and we have a live connection;
+    /// while connecting, presses are dropped rather than queued (a stale
+    /// keystroke replayed seconds later is worse than a lost one for a
+    /// screen-reader user) and a dropped press fires `keystrokeWasDropped`.
+    /// A release is sent only for a key whose press went out: the PC never
+    /// saw a dropped press, and a lone Alt up focuses the menu bar in many
+    /// Windows apps.
+    @discardableResult
+    public func sendKey(vk: UInt16, pressed: Bool) -> Bool {
+        guard forwardingEnabled else { return false }
+        if !pressed, !heldKeys.contains(vk) { return false }
+        guard write(KeyEvent(vk: vk, pressed: pressed).wireData, cueIfLost: pressed) else {
+            if pressed { noteDrop() }
+            return false
+        }
         if pressed { heldKeys.insert(vk) } else { heldKeys.remove(vk) }
-        send(KeyEvent(vk: vk, pressed: pressed))
+        return true
     }
 
     /// Type one character on the remote via the layout-independent unicode
     /// path (`char` wire line). The agent injects a full down+up, so there is
-    /// no held-key bookkeeping. Same gating as `sendKey`.
-    public func sendCharacter(_ scalar: Unicode.Scalar) {
-        guard forwardingEnabled else { return }
-        guard let connection, status.isConnected else { return }
-        connection.send(content: CharEvent(scalar: scalar).wireData, completion: .contentProcessed { _ in })
+    /// no held-key bookkeeping. Same gating, return value and drop cue as
+    /// `sendKey` — a whole string sent at once ticks once, by the throttle.
+    @discardableResult
+    public func sendCharacter(_ scalar: Unicode.Scalar) -> Bool {
+        guard forwardingEnabled else { return false }
+        guard write(CharEvent(scalar: scalar).wireData, cueIfLost: true) else {
+            noteDrop()
+            return false
+        }
+        return true
     }
 
-    private func send(_ event: KeyEvent) {
-        guard let connection, status.isConnected else { return }
-        connection.send(content: event.wireData, completion: .contentProcessed { _ in })
+    /// Hand one wire line to the connection; false when there is no live one.
+    /// `.contentProcessed` means Network.framework took the bytes, not that
+    /// the PC got them — an error there is a write the transport refused, so
+    /// it counts as a drop (when `cueIfLost`), and success re-arms the cue.
+    /// Completions run on `.main`, where the connection was started.
+    private func write(_ data: Data, cueIfLost: Bool) -> Bool {
+        guard let connection, status.isConnected else { return false }
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if error == nil {
+                    if self.lastDropCue != nil { self.lastDropCue = nil }
+                } else if cueIfLost {
+                    self.noteDrop()
+                }
+            }
+        })
+        return true
+    }
+
+    /// Fire `keystrokeWasDropped`, throttled (see there).
+    private func noteDrop() {
+        guard settings.dropCueEnabled, let keystrokeWasDropped else { return }
+        let now = ContinuousClock.now
+        if let lastDropCue, now - lastDropCue < dropCueInterval { return }
+        lastDropCue = now
+        keystrokeWasDropped()
     }
 
     /// Emit an up for every key we believe is still held, then clear the set.
@@ -130,7 +189,7 @@ public final class BridgeClient {
     /// release, and the agent would repeat it forever.
     public func releaseHeldKeys() {
         for vk in heldKeys {
-            send(KeyEvent(vk: vk, pressed: false))
+            _ = write(KeyEvent(vk: vk, pressed: false).wireData, cueIfLost: false)
         }
         heldKeys.removeAll()
     }

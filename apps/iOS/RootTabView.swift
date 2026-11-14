@@ -194,5 +194,9 @@ struct RootTabView: View {
             }
             if status.isConnected { raiseCurtainAutomaticallyIfWanted() }
         }
+        // Created here, not at the first drop, so the tick's sound is loaded
+        // before it is needed.
+        let dropCue = DropCue.shared
+        bridge.keystrokeWasDropped = { dropCue.play() }
     }
 }

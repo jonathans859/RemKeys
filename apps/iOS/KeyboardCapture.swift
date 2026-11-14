@@ -402,8 +402,11 @@ final class CaptureView: UIView {
             }
         }
 
-        bridge.sendKey(vk: vk, pressed: pressed)
-        diagnostics.eventsForwarded += 1
+        // Counted only when it actually went out: a key typed while the link
+        // is down is dropped (and cued by the bridge), not forwarded.
+        if bridge.sendKey(vk: vk, pressed: pressed) {
+            diagnostics.eventsForwarded += 1
+        }
         return true
     }
 
@@ -457,9 +460,8 @@ final class CaptureView: UIView {
         // pair here would type it twice.
         guard !GameControllerCapture.shared.isLive else { return }
         guard let key = USCharVK.key(for: character) else { return }
-        bridge.sendKey(vk: key.vk, pressed: true)
-        bridge.sendKey(vk: key.vk, pressed: false)
-        diagnostics.eventsForwarded += 2
+        if bridge.sendKey(vk: key.vk, pressed: true) { diagnostics.eventsForwarded += 1 }
+        if bridge.sendKey(vk: key.vk, pressed: false) { diagnostics.eventsForwarded += 1 }
     }
 
     /// Whether a claimed chord is the recorded toggle shortcut, firing it if
