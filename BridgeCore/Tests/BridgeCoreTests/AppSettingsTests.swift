@@ -170,4 +170,18 @@ final class AppSettingsTests: XCTestCase {
         let action = try JSONDecoder().decode(PadGestureAction.self, from: Data(json.utf8))
         XCTAssertEqual(action.kind, .nothing)
     }
+
+    func testCurrentConnectionTrimsAndSelectSetsTarget() {
+        let defaults = UserDefaults(suiteName: "AppSettingsConnectionTests")!
+        defaults.removePersistentDomain(forName: "AppSettingsConnectionTests")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertNil(settings.currentConnection, "nothing to save without an address")
+        settings.targetHost = " 100.64.0.1 "
+        XCTAssertEqual(settings.currentConnection, SavedConnection(host: "100.64.0.1", port: 5391))
+
+        settings.select(SavedConnection(host: "192.168.1.20", port: 6000))
+        XCTAssertEqual(settings.targetHost, "192.168.1.20")
+        XCTAssertEqual(settings.targetPort, 6000)
+    }
 }

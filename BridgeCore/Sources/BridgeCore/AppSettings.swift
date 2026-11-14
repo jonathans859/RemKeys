@@ -53,6 +53,19 @@ public final class AppSettings {
         didSet { defaults.set(targetPort, forKey: Keys.targetPort) }
     }
 
+    /// The current target as a saved connection (see `ConnectionStore`); nil
+    /// while no address is set.
+    public var currentConnection: SavedConnection? {
+        let host = targetHost.trimmingCharacters(in: .whitespaces)
+        return host.isEmpty ? nil : SavedConnection(host: host, port: targetPort)
+    }
+
+    /// Makes a saved connection the current target.
+    public func select(_ connection: SavedConnection) {
+        targetHost = connection.host
+        targetPort = connection.port
+    }
+
     // MARK: Screen curtain (iOS)
 
     /// Whether the screen curtain is raised by itself the first time a

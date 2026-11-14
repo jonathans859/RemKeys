@@ -81,6 +81,11 @@ struct MenuContentView: View {
     private var connectionControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Windows PC").font(.caption).foregroundStyle(.secondary)
+
+            ForEach(model.connections.connections) { connection in
+                savedConnectionRow(connection)
+            }
+
             TextField("IP address", text: Binding(
                 get: { settings.targetHost },
                 set: { settings.targetHost = $0 }
@@ -96,6 +101,43 @@ struct MenuContentView: View {
             .textFieldStyle(.roundedBorder)
             .accessibilityLabel("Port")
             .accessibilityHint("Must match the port in the Windows agent configuration")
+
+            Button {
+                model.addCurrentConnection()
+            } label: {
+                Label("Add connection", systemImage: "plus.circle")
+            }
+            .disabled(settings.currentConnection == nil)
+            .accessibilityHint("Saves the IP address and port above to the list of connections")
+        }
+    }
+
+    /// One saved connection: a button that makes it the target. Delete is a
+    /// VoiceOver action (VO-Command-Space) and, for the pointer, a context menu.
+    private func savedConnectionRow(_ connection: SavedConnection) -> some View {
+        let isSelected = connection == settings.currentConnection
+        return Button {
+            model.selectConnection(connection)
+        } label: {
+            HStack {
+                Text(connection.displayName)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // The visible text is the label; selection rides in the Selected
+        // trait as well as the checkmark.
+        .accessibilityLabel(connection.displayName)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint(isSelected ? "" : "Makes this the Windows PC to connect to")
+        .accessibilityAction(named: "Delete") { model.deleteConnection(connection) }
+        .contextMenu {
+            Button("Delete") { model.deleteConnection(connection) }
         }
     }
 

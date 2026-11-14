@@ -10,6 +10,7 @@ struct KeyBridgeApp: App {
     @State private var settings: AppSettings
     @State private var bridge: BridgeClient
     @State private var padStore: PadStore
+    @State private var connectionStore: ConnectionStore
 
     init() {
         let settings = AppSettings()
@@ -22,21 +23,26 @@ struct KeyBridgeApp: App {
         // now, because changes made while the app wasn't running never arrive
         // as notifications, and the notification for the ones that come later.
         let cloud = NSUbiquitousKeyValueStore.default
+        // Saved connections ride the same store, under their own keys.
         let padStore = PadStore(cloud: cloud)
+        let connectionStore = ConnectionStore(cloud: cloud)
         _padStore = State(initialValue: padStore)
+        _connectionStore = State(initialValue: connectionStore)
         padStore.syncFromCloud()
+        connectionStore.syncFromCloud()
         NotificationCenter.default.addObserver(
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: cloud,
             queue: .main
         ) { _ in
             padStore.syncFromCloud()
+            connectionStore.syncFromCloud()
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            RootTabView(settings: settings, bridge: bridge, padStore: padStore)
+            RootTabView(settings: settings, bridge: bridge, padStore: padStore, connectionStore: connectionStore)
         }
     }
 }

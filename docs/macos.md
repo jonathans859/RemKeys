@@ -93,6 +93,17 @@ system gestures (three- and four-finger swipes, Mission Control) are really
 blocked at this tap. There's no public event field that tells the built-in
 trackpad apart from an external mouse, so the setting covers both.
 
+## Saved connections (`ConnectionStore` in BridgeCore)
+
+The window lists saved `host:port` pairs above the IP and port fields, with
+**Add connection** below them. Clicking a row makes it the target (checkmark plus
+the Selected trait; a running session reconnects). Delete is a named VoiceOver
+action (VO-Command-Space) and a context menu item for the pointer. The list is
+**local to the Mac**: it's the same store the iPhone and iPad sync through
+iCloud, built without a cloud, because an iCloud entitlement on the Mac target
+breaks its CI signing ("Your team has no devices"). So the Mac neither sends nor
+receives the iOS list.
+
 ## Updates (`Updater.swift`, Sparkle 2)
 
 The Mac app can't use the App Store's updates, so it carries Sparkle. Every

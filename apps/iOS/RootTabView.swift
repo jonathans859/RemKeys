@@ -13,6 +13,7 @@ struct RootTabView: View {
     let settings: AppSettings
     let bridge: BridgeClient
     let padStore: PadStore
+    let connectionStore: ConnectionStore
 
     private enum AppTab {
         case start, virtualInput, settings
@@ -48,7 +49,7 @@ struct RootTabView: View {
     var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
-                ContentView(settings: settings, bridge: bridge, activateCurtain: { setCurtain(true) })
+                ContentView(settings: settings, bridge: bridge, connections: connectionStore, activateCurtain: { setCurtain(true) })
                     .tabItem { Label("Start", systemImage: "keyboard") }
                     .tag(AppTab.start)
 

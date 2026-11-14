@@ -1,0 +1,169 @@
+import Foundation
+import Observation
+
+/// The saved connections list: the Start tab on iOS, the window on the Mac.
+///
+/// Same shape as `PadStore`, much smaller: **UserDefaults is the source of
+/// truth for reads** and iCloud's key-value store a write-through mirror,
+/// passed in only on iOS (the Mac target has no iCloud entitlement, see
+/// `docs/ios.md` → "Sync"). A connection is never edited, so there is no
+/// "newer wins" to settle; what's left are the rules that keep KVS from eating
+/// data:
+///
+/// - **One key per connection** (`conn.<hash>`), never one key for the list,
+///   so adding on two devices at once keeps both.
+/// - **Push is additive**; the only removal is an explicit `delete`.
+/// - **Deletes need no tombstones**: `cloudKnownIDs` remembers what this device
+///   has seen in the cloud, so one that vanishes from there was deleted
+///   elsewhere, while one that was never there is a local addition not yet
+///   pushed. `locallyDeleted` stops a late cloud copy resurrecting a deletion.
+/// - **Order is by when each was added**, identical on every device, so a sync
+///   never reshuffles the list under VoiceOver.
+@Observable
+public final class ConnectionStore {
+    public var connections: [SavedConnection] { entries.map(\.connection) }
+
+    private var entries: [Entry]
+    @ObservationIgnored private var cloudKnownIDs: Set<String>
+    @ObservationIgnored private var locallyDeleted: Set<String>
+
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let cloud: PadCloudStore?
+    @ObservationIgnored private let now: () -> Date
+
+    public init(
+        defaults: UserDefaults = .standard,
+        cloud: PadCloudStore? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.defaults = defaults
+        self.cloud = cloud
+        self.now = now
+        if let data = defaults.data(forKey: Keys.local),
+           let state = try? JSONDecoder().decode(LocalState.self, from: data) {
+            entries = state.entries
+            cloudKnownIDs = Set(state.cloudKnownIDs)
+            locallyDeleted = Set(state.locallyDeleted)
+        } else {
+            entries = []
+            cloudKnownIDs = []
+            locallyDeleted = []
+        }
+    }
+
+    // MARK: Editing
+
+    /// Appends a connection. Returns false when it is already saved.
+    @discardableResult
+    public func add(_ connection: SavedConnection) -> Bool {
+        guard !entries.contains(where: { $0.connection == connection }) else { return false }
+        entries.append(Entry(connection: connection, added: now()))
+        locallyDeleted.remove(connection.id)
+        push()
+        return true
+    }
+
+    /// The one path that deletes from iCloud — reachable only from an
+    /// explicit user deletion.
+    public func delete(_ connection: SavedConnection) {
+        guard entries.contains(where: { $0.connection == connection }) else { return }
+        entries.removeAll { $0.connection == connection }
+        locallyDeleted.insert(connection.id)
+        push()
+    }
+
+    // MARK: Sync
+
+    /// Merge iCloud into the local list, then push what's new here. Call at
+    /// launch **and** on the store's external-change notification — changes
+    /// made while the app wasn't running never arrive as notifications.
+    /// Returns whether the local list changed.
+    @discardableResult
+    public func syncFromCloud() -> Bool {
+        guard let cloud else { return false }
+        cloud.cloudSynchronize()
+
+        var remote: [String: Entry] = [:]
+        for key in cloud.cloudKeys where key.hasPrefix(Keys.prefix) {
+            // One unreadable record must not block the rest.
+            guard let data = cloud.cloudData(forKey: key),
+                  let entry = try? JSONDecoder().decode(Entry.self, from: data) else { continue }
+            remote[entry.connection.id] = entry
+        }
+
+        // A local one stays unless it was in the cloud and isn't any more.
+        var merged = entries.filter {
+            remote[$0.connection.id] != nil || !cloudKnownIDs.contains($0.connection.id)
+        }
+        let localIDs = Set(entries.map(\.connection.id))
+        merged += remote.values.filter {
+            !localIDs.contains($0.connection.id) && !locallyDeleted.contains($0.connection.id)
+        }
+        merged.sort { ($0.added, $0.connection.id) < ($1.added, $1.connection.id) }
+
+        cloudKnownIDs = Set(remote.keys)
+        let changed = merged != entries
+        entries = merged
+        push()
+        return changed
+    }
+
+    /// Saves locally, then — with a cloud — writes the connections it lacks
+    /// and removes only what the user deleted here.
+    private func push() {
+        defer { save() }
+        guard let cloud else { return }
+        for id in locallyDeleted {
+            cloud.removeCloudValue(forKey: Self.cloudKey(id))
+            cloudKnownIDs.remove(id)
+        }
+        for entry in entries {
+            let key = Self.cloudKey(entry.connection.id)
+            if cloud.cloudData(forKey: key) == nil,
+               let data = try? JSONEncoder().encode(entry) {
+                cloud.setCloudData(data, forKey: key)
+            }
+            cloudKnownIDs.insert(entry.connection.id)
+        }
+    }
+
+    private func save() {
+        let state = LocalState(
+            entries: entries,
+            cloudKnownIDs: cloudKnownIDs.sorted(),
+            locallyDeleted: locallyDeleted.sorted()
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            defaults.set(data, forKey: Keys.local)
+        }
+    }
+
+    /// KVS keys are capped at 64 bytes and a hostname can run to 253, so the
+    /// key is a stable hash of `host:port` (FNV-1a, 64 bit). The record itself
+    /// carries the real host and port.
+    static func cloudKey(_ id: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in id.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        let hex = String(hash, radix: 16)
+        return Keys.prefix + String(repeating: "0", count: 16 - hex.count) + hex
+    }
+
+    private struct Entry: Codable, Equatable {
+        var connection: SavedConnection
+        var added: Date
+    }
+
+    private struct LocalState: Codable {
+        var entries: [Entry]
+        var cloudKnownIDs: [String]
+        var locallyDeleted: [String]
+    }
+
+    enum Keys {
+        static let local = "savedConnections"
+        static let prefix = "conn."
+    }
+}

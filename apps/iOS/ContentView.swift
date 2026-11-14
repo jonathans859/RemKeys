@@ -22,6 +22,8 @@ import BridgeCore
 struct ContentView: View {
     let settings: AppSettings
     let bridge: BridgeClient
+    /// Saved Windows PCs, synced between iPhone and iPad through iCloud.
+    let connections: ConnectionStore
     /// Raises the screen curtain, which lives in `RootTabView` so its overlay
     /// covers the tab bar too.
     let activateCurtain: () -> Void
@@ -174,6 +176,19 @@ struct ContentView: View {
 
     private var connectionSection: some View {
         Section {
+            // Saved connections first: a plain list, each row a button that
+            // makes it the target. Delete comes from `onDelete`, which VoiceOver
+            // offers as the row's own Delete action — no extra actions added,
+            // so nothing shows up twice (see the note on `PadListView`).
+            ForEach(connections.connections) { connection in
+                savedConnectionRow(connection)
+            }
+            .onDelete { offsets in
+                let doomed = offsets.map { connections.connections[$0] }
+                doomed.forEach(connections.delete)
+                postQueuedAnnouncement("\(doomed.map(\.displayName).joined(separator: ", ")) deleted")
+            }
+
             // "IP address", not "Tailscale address": Tailscale is how this is
             // expected to be used and what the placeholder shows, but nothing
             // in the app requires it — a plain LAN address works exactly the
@@ -201,9 +216,60 @@ struct ContentView: View {
                 .keyboardType(.numberPad)
             }
             .accessibilityHint("Must match the port in the Windows agent's appsettings.json")
+
+            Button {
+                addConnection()
+            } label: {
+                Label("Add connection", systemImage: "plus.circle")
+            }
+            .disabled(settings.currentConnection == nil)
+            .accessibilityHint("Saves the IP address and port above to the list of connections, on your iPhone and iPad")
         } header: {
             SectionHeader("Windows PC", systemImage: "desktopcomputer")
         }
+    }
+
+    private func savedConnectionRow(_ connection: SavedConnection) -> some View {
+        let isSelected = connection == settings.currentConnection
+        return Button {
+            select(connection)
+        } label: {
+            HStack {
+                Text(connection.displayName)
+                    .foregroundStyle(.primary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        // The visible text is the label, so Voice Control can name the row;
+        // the selection rides in the Selected trait, not just the checkmark.
+        .accessibilityLabel(connection.displayName)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint(isSelected ? "" : "Makes this the Windows PC to connect to")
+    }
+
+    private func select(_ connection: SavedConnection) {
+        guard connection != settings.currentConnection else { return }
+        settings.select(connection)
+        // A session in progress follows the new target straight away.
+        if bridge.forwardingEnabled { bridge.connect() }
+        postQueuedAnnouncement("\(connection.displayName) selected")
+        CaptureView.requestReclaim()
+    }
+
+    private func addConnection() {
+        guard let current = settings.currentConnection else { return }
+        if connections.add(current) {
+            postQueuedAnnouncement("\(current.displayName) added")
+        } else {
+            postQueuedAnnouncement("\(current.displayName) is already saved")
+        }
+        CaptureView.requestReclaim()
     }
 
     /// Live telemetry for debugging "keys don't arrive" in the field: is a

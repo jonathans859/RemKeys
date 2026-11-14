@@ -18,6 +18,10 @@ final class AppModel {
 
     let settings: AppSettings
     let bridge: BridgeClient
+    /// Saved Windows PCs. Local to this Mac: the Mac target has no iCloud
+    /// entitlement (an App-ID capability breaks its CI signing), so the list
+    /// the iPhone and iPad share doesn't reach it.
+    let connections = ConnectionStore()
     @ObservationIgnored let capture: KeyCapture
     @ObservationIgnored private let overlay = CaptureOverlay()
     @ObservationIgnored private let updater = Updater()
@@ -84,6 +88,30 @@ final class AppModel {
 
     func toggleForwarding() {
         capture.toggleForwarding()
+    }
+
+    // MARK: Saved connections
+
+    /// Makes a saved connection the target; a session in progress follows it
+    /// straight away.
+    func selectConnection(_ connection: SavedConnection) {
+        guard connection != settings.currentConnection else { return }
+        settings.select(connection)
+        if bridge.forwardingEnabled { bridge.connect() }
+        announce("\(connection.displayName) selected")
+    }
+
+    /// Saves the address and port currently in the fields.
+    func addCurrentConnection() {
+        guard let current = settings.currentConnection else { return }
+        announce(connections.add(current)
+                 ? "\(current.displayName) added"
+                 : "\(current.displayName) is already saved")
+    }
+
+    func deleteConnection(_ connection: SavedConnection) {
+        connections.delete(connection)
+        announce("\(connection.displayName) deleted")
     }
 
     // MARK: Function-key row

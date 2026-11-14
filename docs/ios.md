@@ -104,6 +104,25 @@ underneath. Overlays (Control Center, notifications) are `.inactive` and keep it
   see, and **only from the Start tab**, since connecting from Virtual Input means the
   user is about to touch the pad.
 
+### Saved connections (`ConnectionStore`, `SavedConnection` in BridgeCore)
+
+The Start tab's "Windows PC" section lists saved `host:port` pairs above the IP
+and port fields, with **Add connection** below them saving whatever the fields
+hold (no duplicates; disabled with no address). Tapping a row copies it into
+`targetHost`/`targetPort`, which stay the only thing the client reads, and a
+session in progress reconnects to the new target at once. The current one has a
+checkmark *and* the Selected trait. Delete comes only from `onDelete`
+(VoiceOver's own Delete action; swipe to delete for touch), with no extra
+accessibility actions, so nothing is offered twice. No reordering, by request.
+
+**Synced between iPhone and iPad** through the same iCloud key-value store as the
+pads, following the same rules (see "Sync" below): one key per connection
+(`conn.<FNV-1a hash of host:port>`, because KVS keys cap at 64 bytes and a
+hostname doesn't), additive push, deletes via `cloudKnownIDs`/`locallyDeleted`,
+order by when each was added. A connection is never edited, so there is no
+newer-wins. **The Mac keeps its own local list** (`docs/macos.md`), since the Mac
+target can't carry the iCloud entitlement.
+
 ## Virtual Input tab (`VirtualInputView.swift`, `VirtualKeyPad.swift`)
 
 On-screen key sender, VoiceOver-first. Rebuilt small after the full PC-keyboard
