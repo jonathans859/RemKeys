@@ -164,6 +164,58 @@ final class PadStoreTests: XCTestCase {
         XCTAssertEqual(a.pads.count, 4)
     }
 
+    /// Signed out (or the account's store came back empty): no order, no
+    /// pads. That is not "every pad was deleted elsewhere".
+    func testEmptiedCloudKeepsEveryPad() {
+        let cloud = Backing(), clock = Clock()
+        let a = device(cloud, clock)
+        a.edit(DefaultPads.navigationID) { $0.title = "Mine" }
+        let extra = a.addPad(title: "Hand-built")
+        a.syncFromCloud()
+
+        cloud.values.removeAll()
+        XCTAssertFalse(a.syncFromCloud())
+        XCTAssertNotNil(a.pad(extra))
+        XCTAssertEqual(a.pad(DefaultPads.navigationID)?.title, "Mine")
+        XCTAssertEqual(a.pads.count, 5)
+    }
+
+    /// Deleting the last pad that was ever pushed still reaches the other
+    /// device: the delete rewrites `padOrder`, so the cloud isn't "empty".
+    func testDeletingTheOnlyPushedPadStillReachesTheOtherDevice() {
+        let cloud = Backing(), clock = Clock()
+        let a = device(cloud, clock), b = device(cloud, clock)
+        let id = a.addPad(title: "Temp")
+        b.syncFromCloud()
+        a.delete(id)
+        b.syncFromCloud()
+        XCTAssertNil(b.pad(id))
+    }
+
+    /// Apple replaces the store wholesale on an account change. The device
+    /// keeps all its pads, gains the new account's, and doesn't replay its
+    /// old deletions onto the new account.
+    func testAccountChangeMergesInsteadOfDeleting() {
+        let oldAccount = Backing(), newAccount = Backing(), clock = Clock()
+        let other = device(newAccount, clock)
+        let theirs = other.addPad(title: "Theirs")
+        other.edit(DefaultPads.functionKeysID) { $0.title = "Their F-keys" }
+
+        let a = device(oldAccount, clock)
+        let mine = a.addPad(title: "Mine")
+        a.delete(DefaultPads.functionKeysID)
+        a.syncFromCloud()
+
+        oldAccount.values = newAccount.values // the account switch
+        a.cloudAccountChanged()
+        XCTAssertNotNil(a.pad(mine))
+        XCTAssertNotNil(a.pad(theirs))
+        XCTAssertEqual(a.pad(DefaultPads.functionKeysID)?.title, "Their F-keys")
+        XCTAssertNotNil(oldAccount.values["pad.\(DefaultPads.functionKeysID.uuidString)"],
+                        "an old-account deletion must not reach the new account")
+        XCTAssertNotNil(oldAccount.values["pad.\(mine.uuidString)"], "local pads are pushed")
+    }
+
     func testDuplicateGetsFreshIDsAndAUniqueTitle() {
         let store = PadStore(defaults: freshDefaults())
         let copy = store.duplicate(DefaultPads.navigationID)!

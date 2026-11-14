@@ -122,6 +122,60 @@ final class ConnectionStoreTests: XCTestCase {
         XCTAssertTrue(phone.connections.contains(tailscale))
     }
 
+    /// Signed out (or the account's store came back empty): that is not
+    /// "every connection was deleted elsewhere".
+    func testEmptiedCloudKeepsEveryConnection() {
+        let cloud = CloudBacking()
+        let clock = TickClock()
+        let phone = device(cloud, clock)
+        phone.save(tailscale)
+        phone.save(lan)
+        phone.syncFromCloud()
+
+        cloud.values.removeAll()
+        XCTAssertFalse(phone.syncFromCloud())
+        XCTAssertEqual(phone.connections, [tailscale, lan])
+    }
+
+    /// The marker outlives the last record, so deleting the only connection
+    /// isn't mistaken for an emptied cloud and pushed back.
+    func testDeletingTheLastConnectionStillReachesTheOtherDevice() {
+        let cloud = CloudBacking()
+        let clock = TickClock()
+        let phone = device(cloud, clock)
+        let pad = device(cloud, clock)
+        phone.save(tailscale)
+        pad.syncFromCloud()
+
+        pad.delete(tailscale)
+        XCTAssertTrue(phone.syncFromCloud())
+        XCTAssertEqual(phone.connections, [])
+        pad.syncFromCloud()
+        XCTAssertEqual(pad.connections, [])
+    }
+
+    /// Apple replaces the store wholesale on an account change: keep every
+    /// local connection, gain the new account's, and don't replay old
+    /// deletions onto it.
+    func testAccountChangeMergesInsteadOfDeleting() {
+        let oldAccount = CloudBacking(), newAccount = CloudBacking()
+        let clock = TickClock()
+        let phone = device(oldAccount, clock)
+        phone.save(tailscale)
+        phone.save(lan)
+        phone.delete(lan)
+
+        let other = device(newAccount, clock)
+        other.save(lan)
+
+        oldAccount.values = newAccount.values // the account switch
+        XCTAssertTrue(phone.cloudAccountChanged())
+        XCTAssertEqual(phone.connections, [tailscale, lan])
+        XCTAssertNotNil(oldAccount.values[ConnectionStore.cloudKey(lan.id)],
+                        "an old-account deletion must not reach the new account")
+        XCTAssertNotNil(oldAccount.values[ConnectionStore.cloudKey(tailscale.id)], "local ones are pushed")
+    }
+
     func testSavingAnExistingAddressRenamesItAndTheNewerNameSyncs() {
         let cloud = CloudBacking()
         let clock = TickClock()

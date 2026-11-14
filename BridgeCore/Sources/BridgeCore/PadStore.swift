@@ -42,6 +42,12 @@ extension NSUbiquitousKeyValueStore: PadCloudStore {
 ///   deleted elsewhere, while one that was never there is a local creation.
 ///   An untouched default missing from a newer remote order was deleted
 ///   elsewhere too.
+/// - **An empty cloud proves nothing.** A real delete always leaves
+///   `padOrder` behind, so a store with no order and no pads is a signed-out
+///   or replaced account, never "everything was deleted elsewhere".
+/// - **An account change starts the bookkeeping over** (`cloudAccountChanged`):
+///   the new account never saw this device's pads, so nothing it lacks was
+///   deleted there.
 @Observable
 public final class PadStore {
     public private(set) var pads: [Pad]
@@ -197,8 +203,13 @@ public final class PadStore {
 
         let remoteOrder = cloud.cloudData(forKey: Keys.order)
             .flatMap { try? JSONDecoder().decode(PadOrder.self, from: $0) }
+        let padKeys = cloud.cloudKeys.filter { $0.hasPrefix(Keys.padPrefix) }
+        // Every delete rewrites `padOrder`, so a store with neither an order
+        // nor a pad was emptied (signed out, account replaced), not edited:
+        // "known to the cloud, missing now" means nothing then.
+        let cloudIsEmpty = padKeys.isEmpty && cloud.cloudData(forKey: Keys.order) == nil
         var remote: [UUID: Pad] = [:]
-        for key in cloud.cloudKeys where key.hasPrefix(Keys.padPrefix) {
+        for key in padKeys {
             // One unreadable record must not block the rest.
             guard let data = cloud.cloudData(forKey: key),
                   let pad = try? JSONDecoder().decode(Pad.self, from: data) else { continue }
@@ -209,7 +220,7 @@ public final class PadStore {
         for local in pads {
             if let theirs = remote[local.id] {
                 merged.append(theirs.modified >= local.modified ? theirs : local)
-            } else if cloudKnownIDs.contains(local.id) {
+            } else if cloudKnownIDs.contains(local.id), !cloudIsEmpty {
                 continue // was in the cloud, isn't now: deleted elsewhere
             } else if local.modified == Pad.neverEdited, let order = remoteOrder,
                       !order.ids.contains(local.id) {
@@ -240,6 +251,18 @@ public final class PadStore {
         save()
         push()
         return changed
+    }
+
+    /// The device switched iCloud accounts. Apple replaces the store's
+    /// contents wholesale, so what this device knew about the old account says
+    /// nothing about the new one: forget it, then merge as a device seeing
+    /// this account for the first time. Every local pad is kept (and pushed),
+    /// and deletions made under the old account aren't replayed onto the new.
+    @discardableResult
+    public func cloudAccountChanged() -> Bool {
+        cloudKnownIDs = []
+        locallyDeleted = []
+        return syncFromCloud()
     }
 
     private func commit() {

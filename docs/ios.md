@@ -283,6 +283,16 @@ covered by `PadStoreTests` with a two-device fake:
   "created here, not pushed yet"; an untouched default missing from a newer remote
   order was deleted elsewhere; `locallyDeleted` stops a late cloud copy resurrecting.
 - Restore stamps the defaults *now*, so it beats older edits on other devices.
+- **An empty cloud proves nothing.** A real delete always rewrites `padOrder`, so
+  no order and no pads means signed out or a replaced account, and "known, missing
+  now" is not taken as a delete. Connections have no order record, so their push
+  writes a never-removed `connectionsInUse` marker for the same purpose.
+- **An account change starts over**: `KeyBridgeApp` reads
+  `NSUbiquitousKeyValueStoreChangeReasonKey`, and on `…AccountChange` both stores
+  clear `cloudKnownIDs` and `locallyDeleted` and merge as a first sync (Apple
+  replaces the store's contents then). Local records are kept and pushed into the
+  new account. Not yet seen on a device: whether a switch made while the app was
+  closed is still reported as an account change at the next launch.
 - Merge at launch **and** on `didChangeExternallyNotification` (`KeyBridgeApp`).
 
 ### Touch and feedback

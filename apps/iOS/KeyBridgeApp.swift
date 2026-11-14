@@ -34,9 +34,18 @@ struct KeyBridgeApp: App {
             forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification,
             object: cloud,
             queue: .main
-        ) { _ in
-            padStore.syncFromCloud()
-            connectionStore.syncFromCloud()
+        ) { note in
+            // On an account change Apple replaces the store's contents, so
+            // records missing from it weren't deleted anywhere: the stores
+            // start their bookkeeping over instead of merging deletions.
+            let reason = note.userInfo?[NSUbiquitousKeyValueStoreChangeReasonKey] as? Int
+            if reason == NSUbiquitousKeyValueStoreAccountChange {
+                padStore.cloudAccountChanged()
+                connectionStore.cloudAccountChanged()
+            } else {
+                padStore.syncFromCloud()
+                connectionStore.syncFromCloud()
+            }
         }
     }
 

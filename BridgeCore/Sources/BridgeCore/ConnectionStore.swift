@@ -17,6 +17,11 @@ import Observation
 ///   has seen in the cloud, so one that vanishes from there was deleted
 ///   elsewhere, while one that was never there is a local addition not yet
 ///   pushed. `locallyDeleted` stops a late cloud copy resurrecting a deletion.
+/// - **An empty cloud proves nothing.** Every push also writes a marker key
+///   (`connectionsInUse`) that deletes never remove, so a store with neither
+///   the marker nor a record was emptied (signed out, account replaced) and
+///   nothing is treated as deleted elsewhere. An account change starts the
+///   bookkeeping over (`cloudAccountChanged`).
 /// - **Order is by when each was added**, identical on every device, so a sync
 ///   never reshuffles the list under VoiceOver.
 @Observable
@@ -99,21 +104,25 @@ public final class ConnectionStore {
         guard let cloud else { return false }
         cloud.cloudSynchronize()
 
+        let recordKeys = cloud.cloudKeys.filter { $0.hasPrefix(Keys.prefix) }
+        // The marker outlives a delete of the last record, so its absence
+        // too means the store was emptied rather than edited.
+        let cloudIsEmpty = recordKeys.isEmpty && cloud.cloudData(forKey: Keys.marker) == nil
         var remote: [String: Entry] = [:]
-        for key in cloud.cloudKeys where key.hasPrefix(Keys.prefix) {
+        for key in recordKeys {
             // One unreadable record must not block the rest.
             guard let data = cloud.cloudData(forKey: key),
                   let entry = try? JSONDecoder().decode(Entry.self, from: data) else { continue }
             remote[entry.connection.id] = entry
         }
 
-        // A local one stays unless it was in the cloud and isn't any more;
-        // present on both sides, the newer one wins.
+        // A local one stays unless it was in the cloud and isn't any more
+        // (and the cloud wasn't simply emptied); on both sides, newer wins.
         var merged: [Entry] = []
         for local in entries {
             if let theirs = remote[local.connection.id] {
                 merged.append(theirs.modified > local.modified ? theirs : local)
-            } else if !cloudKnownIDs.contains(local.connection.id) {
+            } else if cloudIsEmpty || !cloudKnownIDs.contains(local.connection.id) {
                 merged.append(local)
             }
         }
@@ -128,6 +137,17 @@ public final class ConnectionStore {
         entries = merged
         push()
         return changed
+    }
+
+    /// The device switched iCloud accounts, and Apple replaced the store's
+    /// contents: forget what the old account held, then merge as a first
+    /// sync. Every local connection is kept (and pushed), and deletions made
+    /// under the old account aren't replayed onto the new one.
+    @discardableResult
+    public func cloudAccountChanged() -> Bool {
+        cloudKnownIDs = []
+        locallyDeleted = []
+        return syncFromCloud()
     }
 
     /// Saves locally, then — with a cloud — writes the connections it lacks
@@ -148,6 +168,9 @@ public final class ConnectionStore {
                 cloud.setCloudData(data, forKey: key)
             }
             cloudKnownIDs.insert(entry.connection.id)
+        }
+        if !(entries.isEmpty && locallyDeleted.isEmpty), cloud.cloudData(forKey: Keys.marker) == nil {
+            cloud.setCloudData(Data([1]), forKey: Keys.marker)
         }
     }
 
@@ -204,5 +227,8 @@ public final class ConnectionStore {
     enum Keys {
         static let local = "savedConnections"
         static let prefix = "conn."
+        /// Written by every push, never removed: "this account has been used
+        /// for connections". Deliberately outside `prefix`.
+        static let marker = "connectionsInUse"
     }
 }
