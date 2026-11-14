@@ -620,12 +620,10 @@ struct VirtualInputView: View {
         liveMirror = value
     }
 
-    /// Live typing: send exactly what changed in the field.
-    ///
-    /// The diff is a common prefix, which covers the two things that actually
-    /// happen — characters appended, and characters backspaced off the end —
-    /// and degrades sanely on the rare third (an edit in the middle re-types
-    /// the tail). Deletions go as **plain Backspace, never wrapped**: deleting
+    /// Live typing: send exactly what changed in the field, as worked out by
+    /// BridgeCore's `LiveTypingDiff` (a common prefix: appends and backspaces
+    /// off the end, and an edit in the middle re-types the tail — tested
+    /// there). Deletions go as **plain Backspace, never wrapped**: deleting
     /// is an edit, not a shortcut, and Caps Lock plus Backspace is not what
     /// anybody meant.
     private func liveSend(to newValue: String) {
@@ -643,11 +641,10 @@ struct VirtualInputView: View {
         }
         liveWarned = false
 
-        let shared = liveMirror.commonPrefix(with: newValue)
-        let removed = liveMirror.count - shared.count
-        let added = newValue.dropFirst(shared.count)
+        let diff = LiveTypingDiff(from: liveMirror, to: newValue)
+        let added = diff.typed
 
-        for _ in 0..<removed { tap(VK.back) }
+        for _ in 0..<diff.backspaces { tap(VK.back) }
 
         if !added.isEmpty {
             let wrap = wrapKeys.map(\.vk)

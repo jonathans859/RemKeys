@@ -13,7 +13,8 @@ Shared architecture and the accessibility rules: [`../CLAUDE.md`](../CLAUDE.md).
   never delivers. It is *not* the sole source — that handler has a history of
   silently never firing on real devices (SDL #6465).
   `CaptureView.report(_:pressed:from:)` merges them by counting **holders per HID
-  usage**: down on the first source to report it, up when the last lets go. So a key
+  usage** (BridgeCore's `KeyHolders`, unit-tested there): down on the first source
+  to report it, up when the last lets go. So a key
   both see is forwarded once, and a dead `GCKeyboard` changes nothing. A release
   whose press was never forwarded (held while forwarding was off, e.g. the toggle
   shortcut's own modifiers) is dropped, not sent: a lone Alt up focuses the

@@ -2,8 +2,8 @@ import XCTest
 @testable import BridgeCore
 
 /// Keystrokes typed while there is no live connection: reported as not sent,
-/// never remembered as held, and cued once per burst. No network is touched —
-/// with no target address, turning forwarding on fails straight away.
+/// never remembered as held, and cued once per burst. No transport is ever
+/// made — with no target address, turning forwarding on fails straight away.
 @MainActor
 final class DroppedKeystrokeTests: XCTestCase {
     private var settings: AppSettings!
@@ -14,7 +14,9 @@ final class DroppedKeystrokeTests: XCTestCase {
         let defaults = UserDefaults(suiteName: "DroppedKeystrokeTests")!
         defaults.removePersistentDomain(forName: "DroppedKeystrokeTests")
         settings = AppSettings(defaults: defaults)
-        client = BridgeClient(settings: settings)
+        client = BridgeClient(settings: settings, transportFactory: { _, _ in
+            preconditionFailure("no target address, so no transport")
+        })
         cues = 0
         client.keystrokeWasDropped = { [unowned self] in self.cues += 1 }
     }

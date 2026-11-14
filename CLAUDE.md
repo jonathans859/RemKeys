@@ -127,6 +127,12 @@ open KeyBridge.xcodeproj    # schemes: KeyBridge-iOS, KeyBridge-macOS
 cd BridgeCore && swift test # core unit tests
 ```
 
+`swift test` also runs on Windows (Swift for Windows toolchain), because
+`BridgeClient` reaches the network only through its `BridgeTransport` seam and the
+Network.framework transport is `#if canImport(Network)`. Keep it that way: logic
+worth testing goes into BridgeCore as a pure type (`KeyHolders`, `LiveTypingDiff`),
+and the client's reconnect rules are tested through `FakeTransport`.
+
 The macOS app needs **Accessibility** and **Input Monitoring** permissions (it
 prompts and deep-links to System Settings). Capture cannot be tested in the
 Simulator or in SwiftUI previews — real hardware only.

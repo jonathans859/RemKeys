@@ -1,5 +1,4 @@
 import Foundation
-import Network
 import Observation
 
 /// TCP client that ships key transitions to the Windows agent over Tailscale.
@@ -85,7 +84,13 @@ public final class BridgeClient {
     public var keystrokeWasDropped: (@MainActor () -> Void)?
 
     private let settings: AppSettings
-    private var connection: NWConnection?
+    private var connection: BridgeTransport?
+    /// Builds the transport for each connection attempt. Network.framework in
+    /// the apps, a fake in tests.
+    @ObservationIgnored private let makeTransport: BridgeTransportFactory
+    /// How a recovery timer waits. `Task.sleep` in the apps; tests swap it so
+    /// they don't sit out real reconnect delays.
+    @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     /// VKs we've sent a down for but not yet an up — flushed on disconnect so
     /// the remote never gets stuck with a held key.
     private var heldKeys: Set<UInt16> = []
@@ -110,8 +115,22 @@ public final class BridgeClient {
     /// link loses tens of keys a second; one tick each would be a buzz.
     @ObservationIgnored var dropCueInterval: Duration = .seconds(1)
 
-    public init(settings: AppSettings) {
+    #if canImport(Network)
+    public convenience init(settings: AppSettings) {
+        self.init(settings: settings,
+                  transportFactory: { NWConnectionTransport(host: $0, port: $1) })
+    }
+    #endif
+
+    /// The seam: everything the client does to a connection goes through
+    /// `transportFactory`'s transports, and every reconnect delay through
+    /// `sleep`.
+    init(settings: AppSettings,
+         transportFactory: @escaping BridgeTransportFactory,
+         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.settings = settings
+        self.makeTransport = transportFactory
+        self.sleep = sleep
     }
 
     // MARK: Sending
@@ -156,19 +175,16 @@ public final class BridgeClient {
     /// `.contentProcessed` means Network.framework took the bytes, not that
     /// the PC got them — an error there is a write the transport refused, so
     /// it counts as a drop (when `cueIfLost`), and success re-arms the cue.
-    /// Completions run on `.main`, where the connection was started.
     private func write(_ data: Data, cueIfLost: Bool) -> Bool {
         guard let connection, status.isConnected else { return false }
-        connection.send(content: data, completion: .contentProcessed { [weak self] error in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if error == nil {
-                    if self.lastDropCue != nil { self.lastDropCue = nil }
-                } else if cueIfLost {
-                    self.noteDrop()
-                }
+        connection.send(data) { [weak self] error in
+            guard let self else { return }
+            if error == nil {
+                if self.lastDropCue != nil { self.lastDropCue = nil }
+            } else if cueIfLost {
+                self.noteDrop()
             }
-        })
+        }
         return true
     }
 
@@ -214,8 +230,7 @@ public final class BridgeClient {
             setStatus(.failed("No target address set"))
             return
         }
-        guard let portValue = UInt16(exactly: settings.targetPort),
-              let port = NWEndpoint.Port(rawValue: portValue) else {
+        guard let port = UInt16(exactly: settings.targetPort), port != 0 else {
             setStatus(.failed("Invalid port"))
             return
         }
@@ -230,45 +245,29 @@ public final class BridgeClient {
         // thought was down on the old connection is not down on the new one.
         heldKeys.removeAll()
 
-        let params = NWParameters.tcp
-        if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-            // Keep latency low: disable Nagle so single keystrokes aren't buffered.
-            tcp.noDelay = true
-            // Notice a link that died without closing. When the phone moves
-            // between towers or countries the old path just stops carrying
-            // packets — no FIN, no RST — and without keepalive this connection
-            // stays `.ready` forever while every keystroke vanishes. Probe
-            // after 10s idle, three times, 5s apart: dead in about 25s.
-            tcp.enableKeepalive = true
-            tcp.keepaliveIdle = 10
-            tcp.keepaliveCount = 3
-            tcp.keepaliveInterval = 5
-            // And when we *are* typing, don't retransmit into the void for the
-            // system default (minutes). Unacknowledged for 10s means gone.
-            tcp.connectionDropTime = 10
-        }
-
-        let conn = NWConnection(host: NWEndpoint.Host(host), port: port, using: params)
+        // TCP options (no Nagle, keepalive, drop time) are the transport's
+        // business: see `NWConnectionTransport`.
+        let conn = makeTransport(host, port)
         // Every handler carries the generation it was created for, so a late
         // callback from a connection that has since been replaced can't touch
         // the status or schedule recovery on behalf of its successor.
-        conn.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in self?.handleState(state, generation: generation) }
+        conn.stateHandler = { [weak self] state in
+            self?.handleState(state, generation: generation)
         }
         // A `.ready` connection whose path is no longer viable is the failure
         // mode keepalive takes ~25s to catch; this catches it in one hop.
-        conn.viabilityUpdateHandler = { [weak self] viable in
-            Task { @MainActor in self?.handleViability(viable, generation: generation) }
+        conn.viabilityHandler = { [weak self] viable in
+            self?.handleViability(viable, generation: generation)
         }
         // Wi-Fi came back, or a better interface appeared: retry a connection
         // that is currently stuck waiting, right away, instead of sitting out
         // the recovery delay. A healthy connection is left alone — see
         // handleBetterPath.
-        conn.betterPathUpdateHandler = { [weak self] available in
-            Task { @MainActor in self?.handleBetterPath(available, generation: generation) }
+        conn.betterPathHandler = { [weak self] available in
+            self?.handleBetterPath(available, generation: generation)
         }
         connection = conn
-        conn.start(queue: .main)
+        conn.start()
     }
 
     /// Tear down the connection. Keeps `status` unless asked to reset it, so an
@@ -285,7 +284,7 @@ public final class BridgeClient {
         }
     }
 
-    private func handleState(_ state: NWConnection.State, generation: Int) {
+    private func handleState(_ state: TransportState, generation: Int) {
         guard generation == connectionGeneration else { return }
         switch state {
         case .ready:
@@ -295,14 +294,12 @@ public final class BridgeClient {
             // keeps the connection and retries on its own — but a connection
             // that started on a network the device has since left can wait
             // forever, so rebuild it if it hasn't recovered shortly.
-            setStatus(.failed(Self.describe(error)))
+            setStatus(.failed(error))
             scheduleRecovery(after: 10)
         case .failed(let error):
-            setStatus(.failed(Self.describe(error)))
+            setStatus(.failed(error))
             scheduleRecovery(after: 2)
-        case .cancelled:
-            break
-        default:
+        case .cancelled, .other:
             break
         }
     }
@@ -319,7 +316,7 @@ public final class BridgeClient {
             return
         }
         // Came back on the same path before the recovery fired.
-        if let connection, case .ready = connection.state {
+        if let connection, connection.isReady {
             setStatus(.connected)
         }
     }
@@ -341,10 +338,11 @@ public final class BridgeClient {
     private func scheduleRecovery(after seconds: Int) {
         guard forwardingEnabled, recoveryTask == nil else { return }
         let generation = connectionGeneration
+        let sleep = self.sleep
         recoveryTask = Task { @MainActor [weak self] in
             // Cancelled means connect()/disconnect() superseded this timer and
             // may already have scheduled a new one — leave `recoveryTask` alone.
-            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            do { try await sleep(.seconds(seconds)) } catch { return }
             guard let self, !Task.isCancelled else { return }
             self.recoveryTask = nil
             guard self.forwardingEnabled, self.connectionGeneration == generation else { return }
@@ -358,12 +356,5 @@ public final class BridgeClient {
         let previous = status
         status = newStatus
         statusDidChange?(newStatus, previous)
-    }
-
-    private static func describe(_ error: NWError) -> String {
-        switch error {
-        case .posix(let code): return String(cString: strerror(code.rawValue))
-        default: return error.localizedDescription
-        }
     }
 }

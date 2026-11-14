@@ -102,22 +102,23 @@ final class CaptureView: UIView {
 
     /// Which sources currently believe each key is down. A key is forwarded
     /// down when the *first* source reports it and up when the *last* one
-    /// lets go, so overlapping reports collapse into one down/up pair.
-    private var sourcesHoldingKey: [UIKeyboardHIDUsage: Set<KeySource>] = [:]
+    /// lets go, so overlapping reports collapse into one down/up pair. The
+    /// merge rules live in BridgeCore's `KeyHolders`, where they are tested.
+    private var sourcesHoldingKey = KeyHolders<UIKeyboardHIDUsage, KeySource>()
 
     /// What the user is physically holding, per source, whether or not
     /// forwarding is on. `sourcesHoldingKey` is what the *remote* believes is
     /// held and is cleared whenever forwarding flips, so it can't answer
     /// "is Caps Lock down right now" (the flag is only the lock state) or
     /// "which modifiers are held" on the HID path (no flags at all).
-    private var physicallyHeld: [UIKeyboardHIDUsage: Set<KeySource>] = [:]
+    private var physicallyHeld = KeyHolders<UIKeyboardHIDUsage, KeySource>()
 
     /// The press that fired the toggle shortcut, while it is still down: the
     /// sources that have reported it so far. Every down and up of that key
     /// from either source is swallowed until the last holder lets go, so the
     /// second source's copy of the same press neither toggles again nor
     /// types on the PC.
-    private var shortcutPressHolders: [UIKeyboardHIDUsage: Set<KeySource>] = [:]
+    private var shortcutPressHolders = KeyHolders<UIKeyboardHIDUsage, KeySource>()
 
     /// When a claimed Cmd chord fired the shortcut (that path has no key-up,
     /// so it can't join `shortcutPressHolders`). If the HID source goes live
@@ -262,19 +263,17 @@ final class CaptureView: UIView {
     /// Record a physical transition from one source, independent of
     /// forwarding.
     private func trackPhysical(_ usage: UIKeyboardHIDUsage, pressed: Bool, from source: KeySource) {
-        var holders = physicallyHeld[usage] ?? []
-        if pressed { holders.insert(source) } else { holders.remove(source) }
-        physicallyHeld[usage] = holders.isEmpty ? nil : holders
+        physicallyHeld.record(usage, pressed: pressed, from: source)
     }
 
     private func isHeld(_ usage: UIKeyboardHIDUsage) -> Bool {
-        physicallyHeld[usage] != nil
+        physicallyHeld.isHeld(usage)
     }
 
     /// The shortcut modifiers physically held right now, for the HID source,
     /// which delivers bare usages with no modifier flags.
     private func heldModifiers() -> Set<ShortcutModifier> {
-        Set(physicallyHeld.keys.compactMap(HIDToVK.shortcutModifier(for:)))
+        Set(physicallyHeld.heldKeys.compactMap(HIDToVK.shortcutModifier(for:)))
     }
 
     /// One key-down from either source, checked against the toggle shortcut
@@ -284,16 +283,15 @@ final class CaptureView: UIView {
     private func claimShortcutDown(_ usage: UIKeyboardHIDUsage,
                                    modifiers: Set<ShortcutModifier>,
                                    from source: KeySource) -> Bool {
-        if var holders = shortcutPressHolders[usage] {
+        if shortcutPressHolders.isHeld(usage) {
             // The other source already fired the shortcut for this press.
-            holders.insert(source)
-            shortcutPressHolders[usage] = holders
+            shortcutPressHolders.press(usage, from: source)
             return true
         }
         guard bridge != nil, let shortcut = settings?.toggleShortcut,
               Int(usage.rawValue) == shortcut.keyCode,
               modifiers == shortcut.modifiers else { return false }
-        shortcutPressHolders[usage] = [source]
+        shortcutPressHolders.press(usage, from: source)
         if let chord = lastChordToggle, chord.usage == usage,
            ProcessInfo.processInfo.systemUptime - chord.at < 0.5 {
             // A claimed Cmd chord already fired it for this press.
@@ -307,10 +305,7 @@ final class CaptureView: UIView {
     /// One key-up from either source. Returns true when it belongs to the
     /// press that fired the shortcut, and so must be swallowed.
     private func consumeShortcutUp(_ usage: UIKeyboardHIDUsage, from source: KeySource) -> Bool {
-        guard var holders = shortcutPressHolders[usage] else { return false }
-        holders.remove(source)
-        shortcutPressHolders[usage] = holders.isEmpty ? nil : holders
-        return true
+        shortcutPressHolders.release(usage, from: source) != .wasNotHeld
     }
 
     /// Track the releases and drop those that belong to the shortcut's press.
@@ -328,7 +323,7 @@ final class CaptureView: UIView {
         // Turning forwarding *off* flushes held keys in the bridge, and
         // turning it on can't have forwarded anything yet, so dropping the
         // merge state here can't strand a key on the remote.
-        sourcesHoldingKey.removeValue(forKey: usage)
+        sourcesHoldingKey.forget(usage)
     }
 
     /// Returns true if at least one press in the set was claimed (forwarded).
@@ -383,22 +378,14 @@ final class CaptureView: UIView {
         // The PC never saw that down, and a lone Alt up focuses the menu bar
         // in many Windows apps. Not ours to take either: the system had the
         // down, so it gets the up.
-        if !pressed, sourcesHoldingKey[usage] == nil { return false }
-
-        var holders = sourcesHoldingKey[usage] ?? []
         if pressed {
-            let isFirstHolder = holders.isEmpty
-            holders.insert(source)
-            sourcesHoldingKey[usage] = holders
-            guard isFirstHolder else { return true }
+            // Only the first holder sends the down.
+            guard sourcesHoldingKey.press(usage, from: source) else { return true }
         } else {
-            holders.remove(source)
-            if holders.isEmpty {
-                sourcesHoldingKey.removeValue(forKey: usage)
-            } else {
-                // Another source still holds it — don't release early.
-                sourcesHoldingKey[usage] = holders
-                return true
+            switch sourcesHoldingKey.release(usage, from: source) {
+            case .wasNotHeld: return false
+            case .stillHeld: return true    // another source still holds it
+            case .lastHolderReleased: break
             }
         }
 
@@ -479,7 +466,7 @@ final class CaptureView: UIView {
         // shortcut itself; firing here as well would toggle twice. Same if
         // `pressesBegan` somehow saw this press and already fired.
         guard !GameControllerCapture.shared.isLive,
-              shortcutPressHolders[usage] == nil else { return true }
+              !shortcutPressHolders.isHeld(usage) else { return true }
         fireToggle(usage)
         lastChordToggle = (usage, ProcessInfo.processInfo.systemUptime)
         return true
