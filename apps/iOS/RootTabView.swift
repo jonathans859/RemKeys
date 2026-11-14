@@ -188,8 +188,10 @@ struct RootTabView: View {
             if !enabled { curtainAutoRaised = false }
             postQueuedAnnouncement(enabled ? "Forwarding on" : "Forwarding off")
         }
-        bridge.statusDidChange = { status in
-            postQueuedAnnouncement(status.announcement)
+        bridge.statusDidChange = { status, previous in
+            if status.isWorthAnnouncing(after: previous) {
+                postQueuedAnnouncement(status.announcement)
+            }
             if status.isConnected { raiseCurtainAutomaticallyIfWanted() }
         }
     }

@@ -29,6 +29,21 @@ public final class BridgeClient {
         }
 
         public var isConnected: Bool { self == .connected }
+
+        public var isFailed: Bool {
+            if case .failed = self { return true }
+            return false
+        }
+
+        /// Whether moving from `previous` to this status is news worth an
+        /// announcement or audio cue. One failure followed by another — the
+        /// automatic retries while the PC is asleep or out of reach, each with
+        /// its own error text — is not: the status line still shows the latest
+        /// reason, but speaking every attempt would repeat indefinitely,
+        /// under the screen curtain too.
+        public func isWorthAnnouncing(after previous: ConnectionStatus) -> Bool {
+            !(isFailed && previous.isFailed)
+        }
     }
 
     /// Master gate. Capture code checks this before forwarding; flipping it
@@ -53,8 +68,9 @@ public final class BridgeClient {
     /// Optional hook fired after `forwardingEnabled` changes (used by the apps
     /// to post an announcement / play an audio cue on the same thread).
     public var forwardingDidChange: (@MainActor (Bool) -> Void)?
-    /// Optional hook fired whenever `status` changes.
-    public var statusDidChange: (@MainActor (ConnectionStatus) -> Void)?
+    /// Optional hook fired whenever `status` changes, with the new status and
+    /// the one it replaced (see `ConnectionStatus.isWorthAnnouncing(after:)`).
+    public var statusDidChange: (@MainActor (_ status: ConnectionStatus, _ previous: ConnectionStatus) -> Void)?
 
     private let settings: AppSettings
     private var connection: NWConnection?
@@ -124,6 +140,14 @@ public final class BridgeClient {
     /// (Re)connect using the current host/port. Safe to call repeatedly; tears
     /// down any existing connection first.
     public func connect() {
+        connect(isAutomaticRetry: false)
+    }
+
+    /// `isAutomaticRetry`: a rebuild the client scheduled itself. If the link
+    /// is already down, the status stays at that failure instead of passing
+    /// through `.connecting` — otherwise every retry against an unreachable PC
+    /// flips the status twice and the apps announce both, every 10 seconds.
+    private func connect(isAutomaticRetry: Bool) {
         disconnect(resetStatus: false)
 
         let host = settings.targetHost.trimmingCharacters(in: .whitespaces)
@@ -137,7 +161,9 @@ public final class BridgeClient {
             return
         }
 
-        setStatus(.connecting)
+        if !(isAutomaticRetry && status.isFailed) {
+            setStatus(.connecting)
+        }
         connectionGeneration &+= 1
         let generation = connectionGeneration
         pathIsViable = true
@@ -264,14 +290,15 @@ public final class BridgeClient {
             self.recoveryTask = nil
             guard self.forwardingEnabled, self.connectionGeneration == generation else { return }
             guard !(self.status.isConnected && self.pathIsViable) else { return }
-            self.connect()
+            self.connect(isAutomaticRetry: true)
         }
     }
 
     private func setStatus(_ newStatus: ConnectionStatus) {
         guard newStatus != status else { return }
+        let previous = status
         status = newStatus
-        statusDidChange?(newStatus)
+        statusDidChange?(newStatus, previous)
     }
 
     private static func describe(_ error: NWError) -> String {

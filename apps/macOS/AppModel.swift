@@ -54,8 +54,8 @@ final class AppModel {
         bridge.forwardingDidChange = { [weak self] enabled in
             self?.handleForwardingChange(enabled)
         }
-        bridge.statusDidChange = { [weak self] status in
-            self?.handleStatusChange(status)
+        bridge.statusDidChange = { [weak self] status, previous in
+            self?.handleStatusChange(status, previous: previous)
         }
         updater.availableUpdateDidChange = { [weak self] build in
             self?.handleAvailableUpdate(build)
@@ -246,13 +246,18 @@ final class AppModel {
         refreshStatusLine()
     }
 
-    private func handleStatusChange(_ status: BridgeClient.ConnectionStatus) {
-        switch status {
-        case .connected: play(.connected)
-        case .failed: play(.failed)
-        default: break
+    private func handleStatusChange(_ status: BridgeClient.ConnectionStatus,
+                                    previous: BridgeClient.ConnectionStatus) {
+        // The status line always shows the latest reason; the cue and the
+        // announcement skip failure-to-failure retries (see isWorthAnnouncing).
+        if status.isWorthAnnouncing(after: previous) {
+            switch status {
+            case .connected: play(.connected)
+            case .failed: play(.failed)
+            default: break
+            }
+            announce(status.announcement)
         }
-        announce(status.announcement)
         refreshStatusLine()
     }
 
