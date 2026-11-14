@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import GameController
 import BridgeCore
 
 /// Hosts a `UIView` that becomes first responder so attached Bluetooth / USB-C
@@ -72,34 +73,24 @@ final class CaptureView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleReclaimRequest),
-            name: Self.reclaimFirstResponder,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleForgetHeldKeysRequest),
-            name: Self.forgetHeldKeys,
-            object: nil
-        )
+        observeNotifications()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleReclaimRequest),
-            name: Self.reclaimFirstResponder,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleForgetHeldKeysRequest),
-            name: Self.forgetHeldKeys,
-            object: nil
-        )
+        observeNotifications()
+    }
+
+    private func observeNotifications() {
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(handleReclaimRequest),
+                           name: Self.reclaimFirstResponder, object: nil)
+        center.addObserver(self, selector: #selector(handleForgetHeldKeysRequest),
+                           name: Self.forgetHeldKeys, object: nil)
+        // A keyboard unplugged or switched off mid-press never reports the
+        // release, on either source.
+        center.addObserver(self, selector: #selector(handleKeyboardDisconnect),
+                           name: .GCKeyboardDidDisconnect, object: nil)
     }
 
     /// Main-key codes whose *release* we swallow because their press fired the
@@ -132,6 +123,9 @@ final class CaptureView: UIView {
     override func resignFirstResponder() -> Bool {
         let result = super.resignFirstResponder()
         diagnostics.captureViewIsFirstResponder = isFirstResponder
+        // Presses now go to whoever took over, and the HID source is gated on
+        // first responder, so no key-up for anything held reaches us.
+        if !isFirstResponder { releaseAllHeldKeys() }
         return result
     }
 
@@ -144,7 +138,10 @@ final class CaptureView: UIView {
             }
             Task { @MainActor in _ = self.becomeFirstResponder() }
         } else {
+            // Leaving the window (e.g. switching tabs) ends both sources'
+            // delivery here; let go of anything still down.
             GameControllerCapture.shared.onKey = nil
+            releaseAllHeldKeys()
         }
     }
 
@@ -170,6 +167,21 @@ final class CaptureView: UIView {
         sourcesHoldingKey.removeAll()
         swallowedKeyUps.removeAll()
         swallowedGameControllerKeys.removeAll()
+    }
+
+    @objc private func handleKeyboardDisconnect() {
+        releaseAllHeldKeys()
+    }
+
+    /// Capture just lost sight of the keyboard while keys may be down: send
+    /// their key-ups to the remote (the agent repeats a held key until one
+    /// arrives) and forget them locally (a stale holder blocks that key's
+    /// next press). The remote flush only runs when this view holds
+    /// something, so it can't release keys another sender — the Virtual Input
+    /// tab — is holding through the same bridge.
+    private func releaseAllHeldKeys() {
+        if !sourcesHoldingKey.isEmpty { bridge?.releaseHeldKeys() }
+        handleForgetHeldKeysRequest()
     }
 
     /// Reclaim first responder if we're still on screen. Guarded by `window`
