@@ -729,12 +729,24 @@ final class KeyPadUIView: UIView {
     // MARK: Raw touch tracking (direct touch delivers touches straight here;
     // this is where the latency win comes from)
 
+    /// Fingers currently down on the pad. `event.allTouches` is not that: it
+    /// also carries touches elsewhere in the window and ones that ended in
+    /// this very event, so a tap landing as another finger lifts read as a
+    /// second finger and was thrown away.
+    private func activeTouchCount(in event: UIEvent?) -> Int {
+        event?.allTouches?.filter { touch in
+            guard touch.phase != .ended, touch.phase != .cancelled,
+                  let view = touch.view else { return false }
+            return view.isDescendant(of: self)
+        }.count ?? 0
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         super.touchesBegan(touches, with: event)
         // A finger lifted inside the grace window and another lands before it
         // ended: a staggered multi-finger touch, so the lifted one never acts.
         if pendingLiftKey != nil { cancelSettle() }
-        let isFirstFinger = trackedTouch == nil && touches.count == 1 && event?.allTouches?.count == 1
+        let isFirstFinger = trackedTouch == nil && touches.count == 1 && activeTouchCount(in: event) == 1
         guard isFirstFinger, let touch = touches.first else {
             // A second finger joined (a two-finger tap or a page swipe): the
             // press is over, and the eventual lift must not act.
