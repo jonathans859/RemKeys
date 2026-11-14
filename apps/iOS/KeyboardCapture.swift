@@ -106,6 +106,13 @@ final class CaptureView: UIView {
     /// merge rules live in BridgeCore's `KeyHolders`, where they are tested.
     private var sourcesHoldingKey = KeyHolders<UIKeyboardHIDUsage, KeySource>()
 
+    /// Which forwarded keys hold each VK down. Several keys share a VK (both
+    /// Shifts; Control and Command at the default mapping), and the PC only
+    /// sees the VK, so the up goes out when the *last* of them lets go — not
+    /// the first. Fed only with what `sourcesHoldingKey` lets through, and
+    /// cleared alongside it.
+    private var keysHoldingVK = VKHolders<UIKeyboardHIDUsage>()
+
     /// What the user is physically holding, per source, whether or not
     /// forwarding is on. `sourcesHoldingKey` is what the *remote* believes is
     /// held and is cleared whenever forwarding flips, so it can't answer
@@ -181,6 +188,7 @@ final class CaptureView: UIView {
     /// their key-ups are not coming either.
     @objc private func handleForgetHeldKeysRequest() {
         sourcesHoldingKey.removeAll()
+        keysHoldingVK.removeAll()
         physicallyHeld.removeAll()
         shortcutPressHolders.removeAll()
         lastChordToggle = nil
@@ -324,6 +332,7 @@ final class CaptureView: UIView {
         // turning it on can't have forwarded anything yet, so dropping the
         // merge state here can't strand a key on the remote.
         sourcesHoldingKey.forget(usage)
+        keysHoldingVK.forget(usage)
     }
 
     /// Returns true if at least one press in the set was claimed (forwarded).
@@ -356,6 +365,7 @@ final class CaptureView: UIView {
     private func report(_ usage: UIKeyboardHIDUsage, pressed: Bool, from source: KeySource) -> Bool {
         guard let bridge, bridge.forwardingEnabled else {
             sourcesHoldingKey.removeAll()
+            keysHoldingVK.removeAll()
             return false
         }
         guard let vk = HIDToVK.vk(
@@ -378,20 +388,29 @@ final class CaptureView: UIView {
         // The PC never saw that down, and a lone Alt up focuses the menu bar
         // in many Windows apps. Not ours to take either: the system had the
         // down, so it gets the up.
+        //
+        // Then the same again one level up: another physical key on the same
+        // VK (the other Shift) keeps the PC's key down until it lets go too.
+        let sendVK: UInt16
         if pressed {
             // Only the first holder sends the down.
             guard sourcesHoldingKey.press(usage, from: source) else { return true }
+            guard keysHoldingVK.press(usage, vk: vk) else { return true }
+            sendVK = vk
         } else {
             switch sourcesHoldingKey.release(usage, from: source) {
             case .wasNotHeld: return false
             case .stillHeld: return true    // another source still holds it
             case .lastHolderReleased: break
             }
+            // The VK this key pressed, even if the mapping changed since.
+            guard let heldVK = keysHoldingVK.release(usage) else { return true }
+            sendVK = heldVK
         }
 
         // Counted only when it actually went out: a key typed while the link
         // is down is dropped (and cued by the bridge), not forwarded.
-        if bridge.sendKey(vk: vk, pressed: pressed) {
+        if bridge.sendKey(vk: sendVK, pressed: pressed) {
             diagnostics.eventsForwarded += 1
         }
         return true

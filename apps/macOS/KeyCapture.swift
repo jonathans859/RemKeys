@@ -85,8 +85,9 @@ final class KeyCapture {
     /// Key codes whose *down* we have forwarded and not yet released. Guards
     /// the matching up: a key the user was already holding when forwarding
     /// came on (the toggle chord's own modifiers, above all) must not send the
-    /// remote an up for a down it never received.
-    @ObservationIgnored private var forwardedDown: Set<CGKeyCode> = []
+    /// remote an up for a down it never received. Also counts which keys
+    /// hold each VK, so two keys sharing one release it only when both are up.
+    @ObservationIgnored private var forwardedDown = VKHolders<CGKeyCode>()
 
     init(bridge: BridgeClient, settings: AppSettings) {
         self.bridge = bridge
@@ -183,15 +184,19 @@ final class KeyCapture {
     /// Send one key transition, keeping `forwardedDown` in step. A release is
     /// dropped unless we forwarded the matching press, so the toggle chord's
     /// modifiers — held across the moment forwarding came on — don't reach the
-    /// PC as a bare key-up.
+    /// PC as a bare key-up. Holds are counted per VK: with both Shifts (or
+    /// Control and Command at the default mapping) down, lifting one must not
+    /// release the shared VK on the PC, and the up uses the VK the key
+    /// pressed even if the mapping changed meanwhile.
     private func forward(keyCode: CGKeyCode, vk: UInt16, pressed: Bool) {
         if pressed {
             guard bridge.forwardingEnabled else { return }
-            forwardedDown.insert(keyCode)
+            guard forwardedDown.press(keyCode, vk: vk) else { return }
+            bridge.sendKey(vk: vk, pressed: true)
         } else {
-            guard forwardedDown.remove(keyCode) != nil else { return }
+            guard let heldVK = forwardedDown.release(keyCode) else { return }
+            bridge.sendKey(vk: heldVK, pressed: false)
         }
-        bridge.sendKey(vk: vk, pressed: pressed)
     }
 
     // MARK: Pointer blocking
