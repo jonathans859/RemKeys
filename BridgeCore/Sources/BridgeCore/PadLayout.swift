@@ -194,6 +194,8 @@ public struct Pad: Codable, Equatable, Identifiable, Sendable {
     public static let neverEdited = Date(timeIntervalSince1970: 0)
 
     public var id: UUID
+    /// As typed — may be empty or blank while (or after) the user edits it.
+    /// Anything that shows or speaks the pad's name uses `displayTitle`.
     public var title: String
     public private(set) var rows: Int
     public private(set) var columns: Int
@@ -202,6 +204,14 @@ public struct Pad: Codable, Equatable, Identifiable, Sendable {
     /// Row-major by top-left cell, kept valid by every mutation.
     public private(set) var keys: [PlacedKey]
     public var modified: Date
+
+    /// `title`, or "Pad" when it is blank: an empty name would leave the pad
+    /// list row, the page control and the swipe announcement with nothing to
+    /// say. The stored title stays as typed so the name field can be cleared
+    /// and retyped without snapping back.
+    public var displayTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Pad" : title
+    }
 
     public init(
         id: UUID = UUID(),

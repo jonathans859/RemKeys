@@ -37,6 +37,12 @@ final class PadLayoutTests: XCTestCase {
         XCTAssertEqual(pad.columns, Pad.columnRange.lowerBound)
     }
 
+    func testBlankTitleDisplaysAsPad() {
+        XCTAssertEqual(Pad(title: "", rows: 1, columns: 1).displayTitle, "Pad")
+        XCTAssertEqual(Pad(title: "  \n", rows: 1, columns: 1).displayTitle, "Pad")
+        XCTAssertEqual(Pad(title: " Arrows ", rows: 1, columns: 1).displayTitle, " Arrows ")
+    }
+
     func testMoveRightIntoGapAndSwap() {
         var (pad, a, b, _) = sample()
         XCTAssertNil(pad.move(a, .right))

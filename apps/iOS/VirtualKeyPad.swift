@@ -400,7 +400,7 @@ final class KeyPadUIView: UIView {
             }
         }
         setNeedsLayout()
-        if announce, let pad { self.announce(pad.title) }
+        if announce, let pad { self.announce(pad.displayTitle) }
     }
 
     /// Three visibly distinct key states. A **filled background** is the

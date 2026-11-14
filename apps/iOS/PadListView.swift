@@ -76,14 +76,14 @@ struct PadListView: View {
             Text("Every pad is replaced by Navigation, Editing, Function keys and Extended function keys, on all your devices. Your own pads are deleted.")
         }
         .confirmationDialog(
-            "Delete \(pendingDelete?.title ?? "pad")?",
+            "Delete \(pendingDelete?.displayTitle ?? "pad")?",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
             titleVisibility: .visible,
             presenting: pendingDelete
         ) { pad in
             Button("Delete pad", role: .destructive) {
                 store.delete(pad.id)
-                postQueuedAnnouncement("\(pad.title) deleted")
+                postQueuedAnnouncement("\(pad.displayTitle) deleted")
             }
         } message: { _ in
             Text("The pad is deleted on all your devices.")
@@ -92,7 +92,7 @@ struct PadListView: View {
 
     private func row(_ pad: Pad) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(pad.title)
+            Text(pad.displayTitle)
             Text(sizeText(pad) + (pad.isVisible ? "" : " · Hidden"))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -100,7 +100,7 @@ struct PadListView: View {
         // Label is the visible title, so Voice Control can name the row; the
         // details ride in the value.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(pad.title)
+        .accessibilityLabel(pad.displayTitle)
         .accessibilityValue("\(pad.columns) columns, \(pad.rows) rows, \(pad.keys.count) keys\(pad.isVisible ? "" : ", hidden")")
     }
 
@@ -118,14 +118,14 @@ struct PadListView: View {
             Button("Move down") { move(pad, by: 1) }
         }
         Button("Duplicate") {
-            if store.duplicate(pad.id) != nil { postQueuedAnnouncement("\(pad.title) duplicated") }
+            if store.duplicate(pad.id) != nil { postQueuedAnnouncement("\(pad.displayTitle) duplicated") }
         }
         Button("Delete", role: .destructive) { pendingDelete = pad }
     }
 
     private func toggleVisible(_ pad: Pad) {
         store.edit(pad.id) { $0.isVisible.toggle() }
-        postQueuedAnnouncement("\(pad.title) \(pad.isVisible ? "hidden" : "shown")")
+        postQueuedAnnouncement("\(pad.displayTitle) \(pad.isVisible ? "hidden" : "shown")")
     }
 
     private func move(_ pad: Pad, by offset: Int) {

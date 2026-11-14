@@ -299,7 +299,7 @@ struct SettingsView: View {
     /// Names the visible pads for the info sheet, so it never lists one that
     /// isn't there.
     private var pageCountLabel: String {
-        VirtualKeys.spokenList(padStore.visiblePads.map(\.title))
+        VirtualKeys.spokenList(padStore.visiblePads.map(\.displayTitle))
     }
 
     private var assignedGestureCount: Int {

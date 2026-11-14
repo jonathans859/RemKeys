@@ -156,14 +156,14 @@ struct VirtualInputView: View {
     /// and the pad's own two-finger swipe is the fast path once the pages are
     /// known.
     private var pageControl: some View {
-        Text(currentPage?.title ?? "No pads")
+        Text(currentPage?.displayTitle ?? "No pads")
             .font(.subheadline.weight(.medium))
             .lineLimit(1)
             .contentShape(Rectangle())
             .onTapGesture { stepPage(by: 1) }
             .accessibilityElement()
             .accessibilityLabel("Pad")
-            .accessibilityValue(currentPage?.title ?? "No pads")
+            .accessibilityValue(currentPage?.displayTitle ?? "No pads")
             .accessibilityHint("Chooses which pad of keys is shown. Pads and the pad's gestures are set up in Settings.")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { stepPage(by: 1) }
@@ -496,7 +496,7 @@ struct VirtualInputView: View {
     /// The page names, spoken as a list: "Navigation, Editing and Function
     /// keys".
     private var pageList: String {
-        VirtualKeys.spokenList(pages.map(\.title))
+        VirtualKeys.spokenList(pages.map(\.displayTitle))
     }
 
     // MARK: Combination state

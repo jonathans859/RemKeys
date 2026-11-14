@@ -91,7 +91,7 @@ struct PadEditorView: View {
                 SectionHeader("Keys", systemImage: "keyboard")
             }
         }
-        .navigationTitle(pad.title)
+        .navigationTitle(pad.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $keySheet) { sheet in
             keyEditor(sheet, pad)
