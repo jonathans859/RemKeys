@@ -33,6 +33,9 @@ struct ContentView: View {
     private var isForwarding: Bool { bridge.forwardingEnabled }
 
     @State private var showInfo = false
+    /// The Name field. Not a setting of its own: it is filled from the saved
+    /// connection whenever one is selected, and saved with Add / Rename.
+    @State private var nameDraft = ""
 
     var body: some View {
         ZStack {
@@ -217,26 +220,66 @@ struct ContentView: View {
             }
             .accessibilityHint("Must match the port in the Windows agent's appsettings.json")
 
-            Button {
-                addConnection()
-            } label: {
-                Label("Add connection", systemImage: "plus.circle")
+            LabeledContent("Name") {
+                TextField("Optional, e.g. Office PC", text: $nameDraft)
+                    .multilineTextAlignment(.trailing)
+                    .submitLabel(.done)
+                    .onSubmit { CaptureView.requestReclaim() }
             }
-            .disabled(settings.currentConnection == nil)
-            .accessibilityHint("Saves the IP address and port above to the list of connections, on your iPhone and iPad")
+            .accessibilityHint("A friendly name the list shows instead of the address")
+
+            Button {
+                saveConnection()
+            } label: {
+                Label(saveButtonTitle, systemImage: saveButtonIcon)
+            }
+            .disabled(!canSave)
+            .accessibilityHint("Saves the IP address, port and name above to the list of connections, on your iPhone and iPad")
         } header: {
             SectionHeader("Windows PC", systemImage: "desktopcomputer")
         }
+        .onAppear { nameDraft = savedCurrent?.name ?? "" }
+        // Typing another address must not carry the previous PC's name along.
+        .onChange(of: settings.currentConnection?.id) { nameDraft = savedCurrent?.name ?? "" }
+    }
+
+    /// The saved entry for what the fields hold now, if there is one.
+    private var savedCurrent: SavedConnection? { connections.saved(settings.currentConnection) }
+
+    private var trimmedNameDraft: String { nameDraft.trimmingCharacters(in: .whitespaces) }
+
+    private var canSave: Bool {
+        guard settings.currentConnection != nil else { return false }
+        return savedCurrent.map { $0.name != trimmedNameDraft } ?? true
+    }
+
+    /// Says in words what pressing it will do — the visible title is what
+    /// VoiceOver reads and Voice Control matches.
+    private var saveButtonTitle: String {
+        guard let saved = savedCurrent else { return "Add connection" }
+        return saved.name == trimmedNameDraft ? "Connection saved" : "Rename connection"
+    }
+
+    private var saveButtonIcon: String {
+        guard let saved = savedCurrent else { return "plus.circle" }
+        return saved.name == trimmedNameDraft ? "checkmark.circle" : "pencil.circle"
     }
 
     private func savedConnectionRow(_ connection: SavedConnection) -> some View {
-        let isSelected = connection == settings.currentConnection
+        let isSelected = connection.isSameTarget(as: settings.currentConnection)
         return Button {
             select(connection)
         } label: {
             HStack {
-                Text(connection.displayName)
-                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(connection.displayName)
+                        .foregroundStyle(.primary)
+                    if !connection.name.isEmpty {
+                        Text(connection.address)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark")
@@ -246,15 +289,18 @@ struct ContentView: View {
             }
             .contentShape(Rectangle())
         }
-        // The visible text is the label, so Voice Control can name the row;
-        // the selection rides in the Selected trait, not just the checkmark.
+        // The visible name is the label, so Voice Control can say "Tap Office
+        // PC"; the address rides in the value, the selection in the Selected
+        // trait, not just the checkmark.
         .accessibilityLabel(connection.displayName)
+        .accessibilityValue(connection.name.isEmpty ? "" : connection.address)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityHint(isSelected ? "" : "Makes this the Windows PC to connect to")
     }
 
     private func select(_ connection: SavedConnection) {
-        guard connection != settings.currentConnection else { return }
+        nameDraft = connection.name
+        guard !connection.isSameTarget(as: settings.currentConnection) else { return }
         settings.select(connection)
         // A session in progress follows the new target straight away.
         if bridge.forwardingEnabled { bridge.connect() }
@@ -262,13 +308,15 @@ struct ContentView: View {
         CaptureView.requestReclaim()
     }
 
-    private func addConnection() {
+    private func saveConnection() {
         guard let current = settings.currentConnection else { return }
-        if connections.add(current) {
-            postQueuedAnnouncement("\(current.displayName) added")
-        } else {
-            postQueuedAnnouncement("\(current.displayName) is already saved")
+        let named = SavedConnection(host: current.host, port: current.port, name: nameDraft)
+        switch connections.save(named) {
+        case .added: postQueuedAnnouncement("\(named.displayName) added")
+        case .renamed: postQueuedAnnouncement("Renamed to \(named.displayName)")
+        case .unchanged: break
         }
+        nameDraft = named.name
         CaptureView.requestReclaim()
     }
 

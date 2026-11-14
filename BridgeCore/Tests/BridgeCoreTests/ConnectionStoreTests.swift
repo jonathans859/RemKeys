@@ -47,9 +47,9 @@ final class ConnectionStoreTests: XCTestCase {
     func testAddSkipsDuplicatesAndPersistsWithoutCloud() {
         let defaults = freshDefaults()
         let store = device(nil, TickClock(), defaults: defaults)
-        XCTAssertTrue(store.add(tailscale))
-        XCTAssertFalse(store.add(tailscale), "no duplicates")
-        XCTAssertTrue(store.add(lan))
+        XCTAssertEqual(store.save(tailscale), .added)
+        XCTAssertEqual(store.save(tailscale), .unchanged, "no duplicates")
+        XCTAssertEqual(store.save(lan), .added)
         XCTAssertFalse(store.syncFromCloud(), "no cloud, nothing to merge")
 
         XCTAssertEqual(device(nil, TickClock(), defaults: defaults).connections, [tailscale, lan])
@@ -64,8 +64,8 @@ final class ConnectionStoreTests: XCTestCase {
         let phone = device(cloud, clock)
         let pad = device(cloud, clock)
 
-        phone.add(tailscale)
-        pad.add(lan)
+        phone.save(tailscale)
+        pad.save(lan)
         XCTAssertTrue(phone.syncFromCloud())
         pad.syncFromCloud()
 
@@ -78,8 +78,8 @@ final class ConnectionStoreTests: XCTestCase {
         let clock = TickClock()
         let phone = device(cloud, clock)
         let pad = device(cloud, clock)
-        phone.add(tailscale)
-        phone.add(lan)
+        phone.save(tailscale)
+        phone.save(lan)
         pad.syncFromCloud()
 
         pad.delete(tailscale)
@@ -93,7 +93,7 @@ final class ConnectionStoreTests: XCTestCase {
         let cloud = CloudBacking()
         let clock = TickClock()
         let phone = device(cloud, clock)
-        phone.add(tailscale)
+        phone.save(tailscale)
 
         let fresh = device(cloud, clock)
         fresh.syncFromCloud()
@@ -108,18 +108,51 @@ final class ConnectionStoreTests: XCTestCase {
         let cloud = CloudBacking()
         let clock = TickClock()
         let phone = device(cloud, clock)
-        phone.add(tailscale)
-        phone.add(lan)
+        phone.save(tailscale)
+        phone.save(lan)
 
         phone.delete(tailscale)
         // Another device that never saw the delete adds it back to the cloud.
-        device(cloud, clock).add(tailscale)
+        device(cloud, clock).save(tailscale)
         phone.syncFromCloud()
         XCTAssertEqual(phone.connections, [lan])
 
         // Adding it again on purpose brings it back.
-        XCTAssertTrue(phone.add(tailscale))
+        XCTAssertEqual(phone.save(tailscale), .added)
         XCTAssertTrue(phone.connections.contains(tailscale))
+    }
+
+    func testSavingAnExistingAddressRenamesItAndTheNewerNameSyncs() {
+        let cloud = CloudBacking()
+        let clock = TickClock()
+        let phone = device(cloud, clock)
+        let pad = device(cloud, clock)
+        phone.save(tailscale)
+        pad.syncFromCloud()
+
+        XCTAssertEqual(pad.save(SavedConnection(host: "100.64.0.1", port: 5391, name: " Office PC ")), .renamed)
+        XCTAssertEqual(pad.connections.count, 1, "renamed, not added")
+        XCTAssertTrue(phone.syncFromCloud())
+        XCTAssertEqual(phone.connections.first?.displayName, "Office PC")
+        XCTAssertEqual(phone.saved(SavedConnection(host: "100.64.0.1", port: 5391))?.name, "Office PC")
+
+        // An older name on another device does not win back.
+        let stale = device(cloud, clock)
+        stale.syncFromCloud()
+        phone.save(SavedConnection(host: "100.64.0.1", port: 5391, name: "Gaming PC"))
+        stale.syncFromCloud()
+        XCTAssertEqual(stale.connections.first?.name, "Gaming PC")
+        pad.syncFromCloud()
+        XCTAssertEqual(pad.connections.first?.name, "Gaming PC")
+    }
+
+    func testRecordWithoutNameOrModifiedDecodes() throws {
+        let json = #"{"connection":{"host":"10.0.0.2","port":5391},"added":0}"#
+        let cloud = CloudBacking()
+        cloud.values[ConnectionStore.cloudKey("10.0.0.2:5391")] = Data(json.utf8)
+        let store = device(cloud, TickClock())
+        store.syncFromCloud()
+        XCTAssertEqual(store.connections.map(\.displayName), ["10.0.0.2:5391"])
     }
 
     func testCloudKeyFitsKVSLimitForLongHostnames() {

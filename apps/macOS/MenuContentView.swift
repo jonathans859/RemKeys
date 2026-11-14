@@ -102,25 +102,39 @@ struct MenuContentView: View {
             .accessibilityLabel("Port")
             .accessibilityHint("Must match the port in the Windows agent configuration")
 
+            TextField("Name (optional)", text: $model.connectionNameDraft)
+            .textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Name")
+            .accessibilityHint("A friendly name the list shows instead of the address")
+
             Button {
-                model.addCurrentConnection()
+                model.saveCurrentConnection()
             } label: {
-                Label("Add connection", systemImage: "plus.circle")
+                Label(model.saveConnectionTitle, systemImage: "plus.circle")
             }
-            .disabled(settings.currentConnection == nil)
-            .accessibilityHint("Saves the IP address and port above to the list of connections")
+            .disabled(!model.canSaveConnection)
+            .accessibilityHint("Saves the IP address, port and name above to the list of connections")
         }
+        // Typing another address must not carry the previous PC's name along.
+        .onChange(of: settings.currentConnection?.id) { model.refreshConnectionNameDraft() }
     }
 
     /// One saved connection: a button that makes it the target. Delete is a
     /// VoiceOver action (VO-Command-Space) and, for the pointer, a context menu.
     private func savedConnectionRow(_ connection: SavedConnection) -> some View {
-        let isSelected = connection == settings.currentConnection
+        let isSelected = connection.isSameTarget(as: settings.currentConnection)
         return Button {
             model.selectConnection(connection)
         } label: {
             HStack {
-                Text(connection.displayName)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(connection.displayName)
+                    if !connection.name.isEmpty {
+                        Text(connection.address)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark")
@@ -133,6 +147,7 @@ struct MenuContentView: View {
         // The visible text is the label; selection rides in the Selected
         // trait as well as the checkmark.
         .accessibilityLabel(connection.displayName)
+        .accessibilityValue(connection.name.isEmpty ? "" : connection.address)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityHint(isSelected ? "" : "Makes this the Windows PC to connect to")
         .accessibilityAction(named: "Delete") { model.deleteConnection(connection) }

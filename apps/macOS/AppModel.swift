@@ -65,6 +65,7 @@ final class AppModel {
     /// Install the event tap once at launch (gated behind the forwarding
     /// boolean per the UTM pattern — never rebuilt on toggle).
     func start() {
+        refreshConnectionNameDraft()
         capture.start()
         refreshStatusLine()
     }
@@ -92,21 +93,48 @@ final class AppModel {
 
     // MARK: Saved connections
 
+    /// The Name field: filled from the saved connection whenever one is
+    /// selected (or the address typed matches one), saved with Add / Rename.
+    var connectionNameDraft = ""
+
+    func refreshConnectionNameDraft() {
+        connectionNameDraft = connections.saved(settings.currentConnection)?.name ?? ""
+    }
+
+    private var trimmedNameDraft: String { connectionNameDraft.trimmingCharacters(in: .whitespaces) }
+
+    var canSaveConnection: Bool {
+        guard settings.currentConnection != nil else { return false }
+        return connections.saved(settings.currentConnection).map { $0.name != trimmedNameDraft } ?? true
+    }
+
+    /// Says in words what the button will do.
+    var saveConnectionTitle: String {
+        guard let saved = connections.saved(settings.currentConnection) else { return "Add connection" }
+        return saved.name == trimmedNameDraft ? "Connection saved" : "Rename connection"
+    }
+
     /// Makes a saved connection the target; a session in progress follows it
     /// straight away.
     func selectConnection(_ connection: SavedConnection) {
-        guard connection != settings.currentConnection else { return }
+        connectionNameDraft = connection.name
+        guard !connection.isSameTarget(as: settings.currentConnection) else { return }
         settings.select(connection)
         if bridge.forwardingEnabled { bridge.connect() }
         announce("\(connection.displayName) selected")
     }
 
-    /// Saves the address and port currently in the fields.
-    func addCurrentConnection() {
+    /// Saves the address, port and name currently in the fields; an address
+    /// already saved just takes the new name.
+    func saveCurrentConnection() {
         guard let current = settings.currentConnection else { return }
-        announce(connections.add(current)
-                 ? "\(current.displayName) added"
-                 : "\(current.displayName) is already saved")
+        let named = SavedConnection(host: current.host, port: current.port, name: connectionNameDraft)
+        switch connections.save(named) {
+        case .added: announce("\(named.displayName) added")
+        case .renamed: announce("Renamed to \(named.displayName)")
+        case .unchanged: break
+        }
+        connectionNameDraft = named.name
     }
 
     func deleteConnection(_ connection: SavedConnection) {

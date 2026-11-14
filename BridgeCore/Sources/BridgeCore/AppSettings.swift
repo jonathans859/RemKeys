@@ -53,8 +53,8 @@ public final class AppSettings {
         didSet { defaults.set(targetPort, forKey: Keys.targetPort) }
     }
 
-    /// The current target as a saved connection (see `ConnectionStore`); nil
-    /// while no address is set.
+    /// The current target as an unnamed saved connection (see
+    /// `ConnectionStore`); nil while no address is set.
     public var currentConnection: SavedConnection? {
         let host = targetHost.trimmingCharacters(in: .whitespaces)
         return host.isEmpty ? nil : SavedConnection(host: host, port: targetPort)

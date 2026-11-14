@@ -115,12 +115,23 @@ checkmark *and* the Selected trait. Delete comes only from `onDelete`
 (VoiceOver's own Delete action; swipe to delete for touch), with no extra
 accessibility actions, so nothing is offered twice. No reordering, by request.
 
+**Optional friendly name.** A Name field sits under Port. A named row shows (and
+VoiceOver labels it with) the name, with the address as the second line and the
+accessibility value. The label is the visible name, so Voice Control can say
+"Tap Office PC". Renaming needs no extra UI: selecting a row fills the Name field,
+and the button below reads **Rename connection** once the name differs from the
+saved one (**Connection saved**, disabled, when nothing would change). Saving an
+address that's already in the list renames it rather than adding a duplicate.
+Typing a different address resets the Name field to that address's saved name, or
+clears it, so a new PC doesn't inherit the old one's name.
+
 **Synced between iPhone and iPad** through the same iCloud key-value store as the
 pads, following the same rules (see "Sync" below): one key per connection
 (`conn.<FNV-1a hash of host:port>`, because KVS keys cap at 64 bytes and a
 hostname doesn't), additive push, deletes via `cloudKnownIDs`/`locallyDeleted`,
-order by when each was added. A connection is never edited, so there is no
-newer-wins. **The Mac keeps its own local list** (`docs/macos.md`), since the Mac
+order by when each was added. The name is the one editable part, so each
+record carries `modified` and the newer one wins (records written before names
+existed decode with no name and `modified` = `added`). **The Mac keeps its own local list** (`docs/macos.md`), since the Mac
 target can't carry the iCloud entitlement.
 
 ## Virtual Input tab (`VirtualInputView.swift`, `VirtualKeyPad.swift`)

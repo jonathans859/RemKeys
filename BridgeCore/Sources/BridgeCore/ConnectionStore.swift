@@ -6,13 +6,13 @@ import Observation
 /// Same shape as `PadStore`, much smaller: **UserDefaults is the source of
 /// truth for reads** and iCloud's key-value store a write-through mirror,
 /// passed in only on iOS (the Mac target has no iCloud entitlement, see
-/// `docs/ios.md` → "Sync"). A connection is never edited, so there is no
-/// "newer wins" to settle; what's left are the rules that keep KVS from eating
-/// data:
+/// `docs/ios.md` → "Sync"). The rules that keep KVS from eating data:
 ///
 /// - **One key per connection** (`conn.<hash>`), never one key for the list,
 ///   so adding on two devices at once keeps both.
 /// - **Push is additive**; the only removal is an explicit `delete`.
+/// - **Newer `modified` wins** per connection — the name is the one thing
+///   that changes, and a record is only written over an older one.
 /// - **Deletes need no tombstones**: `cloudKnownIDs` remembers what this device
 ///   has seen in the cloud, so one that vanishes from there was deleted
 ///   elsewhere, while one that was never there is a local addition not yet
@@ -53,21 +53,37 @@ public final class ConnectionStore {
 
     // MARK: Editing
 
-    /// Appends a connection. Returns false when it is already saved.
+    public enum SaveResult: Equatable { case added, renamed, unchanged }
+
+    /// Appends a connection, or — when that address and port are already
+    /// saved — gives it the new name.
     @discardableResult
-    public func add(_ connection: SavedConnection) -> Bool {
-        guard !entries.contains(where: { $0.connection == connection }) else { return false }
-        entries.append(Entry(connection: connection, added: now()))
+    public func save(_ connection: SavedConnection) -> SaveResult {
+        if let index = entries.firstIndex(where: { $0.connection.id == connection.id }) {
+            guard entries[index].connection.name != connection.name else { return .unchanged }
+            entries[index].connection.name = connection.name
+            entries[index].modified = now()
+            push()
+            return .renamed
+        }
+        let stamp = now()
+        entries.append(Entry(connection: connection, added: stamp, modified: stamp))
         locallyDeleted.remove(connection.id)
         push()
-        return true
+        return .added
+    }
+
+    /// The saved entry for this address and port, name included.
+    public func saved(_ connection: SavedConnection?) -> SavedConnection? {
+        guard let connection else { return nil }
+        return entries.first { $0.connection.id == connection.id }?.connection
     }
 
     /// The one path that deletes from iCloud — reachable only from an
     /// explicit user deletion.
     public func delete(_ connection: SavedConnection) {
-        guard entries.contains(where: { $0.connection == connection }) else { return }
-        entries.removeAll { $0.connection == connection }
+        guard entries.contains(where: { $0.connection.id == connection.id }) else { return }
+        entries.removeAll { $0.connection.id == connection.id }
         locallyDeleted.insert(connection.id)
         push()
     }
@@ -91,9 +107,15 @@ public final class ConnectionStore {
             remote[entry.connection.id] = entry
         }
 
-        // A local one stays unless it was in the cloud and isn't any more.
-        var merged = entries.filter {
-            remote[$0.connection.id] != nil || !cloudKnownIDs.contains($0.connection.id)
+        // A local one stays unless it was in the cloud and isn't any more;
+        // present on both sides, the newer one wins.
+        var merged: [Entry] = []
+        for local in entries {
+            if let theirs = remote[local.connection.id] {
+                merged.append(theirs.modified > local.modified ? theirs : local)
+            } else if !cloudKnownIDs.contains(local.connection.id) {
+                merged.append(local)
+            }
         }
         let localIDs = Set(entries.map(\.connection.id))
         merged += remote.values.filter {
@@ -119,7 +141,9 @@ public final class ConnectionStore {
         }
         for entry in entries {
             let key = Self.cloudKey(entry.connection.id)
-            if cloud.cloudData(forKey: key) == nil,
+            let theirs = cloud.cloudData(forKey: key)
+                .flatMap { try? JSONDecoder().decode(Entry.self, from: $0) }
+            if theirs.map({ $0.modified < entry.modified }) ?? true,
                let data = try? JSONEncoder().encode(entry) {
                 cloud.setCloudData(data, forKey: key)
             }
@@ -154,6 +178,21 @@ public final class ConnectionStore {
     private struct Entry: Codable, Equatable {
         var connection: SavedConnection
         var added: Date
+        var modified: Date
+
+        init(connection: SavedConnection, added: Date, modified: Date) {
+            self.connection = connection
+            self.added = added
+            self.modified = modified
+        }
+
+        // Records written before names existed carry no `modified`.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            connection = try c.decode(SavedConnection.self, forKey: .connection)
+            added = try c.decode(Date.self, forKey: .added)
+            modified = try c.decodeIfPresent(Date.self, forKey: .modified) ?? added
+        }
     }
 
     private struct LocalState: Codable {

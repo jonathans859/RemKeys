@@ -96,7 +96,9 @@ trackpad apart from an external mouse, so the setting covers both.
 ## Saved connections (`ConnectionStore` in BridgeCore)
 
 The window lists saved `host:port` pairs above the IP and port fields, with
-**Add connection** below them. Clicking a row makes it the target (checkmark plus
+**Add connection** below them, plus an optional Name field that works as on iOS
+(selecting fills it; the button turns into **Rename connection**; the draft lives
+on `AppModel`). Clicking a row makes it the target (checkmark plus
 the Selected trait; a running session reconnects). Delete is a named VoiceOver
 action (VO-Command-Space) and a context menu item for the pointer. The list is
 **local to the Mac**: it's the same store the iPhone and iPad sync through
