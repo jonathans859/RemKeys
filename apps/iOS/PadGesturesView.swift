@@ -75,51 +75,23 @@ struct PadGesturesView: View {
 
     // MARK: Grace window
 
-    private var graceValue: String { Self.graceDescription(settings.virtualPadMultiFingerGrace) }
-
     static func graceDescription(_ seconds: Double) -> String {
         let ms = Int((seconds * 1000).rounded())
         return ms == 0 ? "Off" : "\(ms) milliseconds"
     }
 
-    /// One accessibility element with an adjustable action, for the same
-    /// reason as the hold-delay slider in Settings: a bare `Slider` plus a
-    /// caption announced the row twice.
     private var graceSlider: some View {
-        let title = "Wait for more fingers"
-        let range = AppSettings.multiFingerGraceRange
-        let value = Binding(
-            get: { settings.virtualPadMultiFingerGrace },
-            set: { settings.virtualPadMultiFingerGrace = $0 }
+        SteppedSliderRow(
+            title: "Wait for more fingers",
+            value: Binding(
+                get: { settings.virtualPadMultiFingerGrace },
+                set: { settings.virtualPadMultiFingerGrace = $0 }
+            ),
+            range: AppSettings.multiFingerGraceRange,
+            step: 0.05,
+            valueText: Self.graceDescription,
+            hint: "How long the pad waits after a finger lands before it speaks or sends that key. A second finger arriving in that time makes it a multi-finger gesture, so the first finger's key is never sent. Off reacts at once. Try 100 to 150 milliseconds if two-finger gestures sometimes send a key first."
         )
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                Spacer()
-                Text(graceValue)
-                    .font(.system(.subheadline, design: .rounded).weight(.medium))
-                    .foregroundStyle(Color.accentColor)
-                    .monospacedDigit()
-            }
-            Slider(value: value, in: range, step: 0.05)
-                .labelsHidden()
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(graceValue)
-        .accessibilityHint("How long the pad waits after a finger lands before it speaks or sends that key. A second finger arriving in that time makes it a multi-finger gesture, so the first finger's key is never sent. Off reacts at once. Try 100 to 150 milliseconds if two-finger gestures sometimes send a key first.")
-        .accessibilityAdjustableAction { direction in
-            let delta: Double
-            switch direction {
-            case .increment: delta = 0.05
-            case .decrement: delta = -0.05
-            @unknown default: return
-            }
-            // Rounded to the 50 ms grid, so the spoken value stays the stored one.
-            let stepped = ((value.wrappedValue + delta) * 20).rounded() / 20
-            value.wrappedValue = min(max(stepped, range.lowerBound), range.upperBound)
-        }
     }
 }
 
@@ -156,34 +128,8 @@ struct PadGestureActionEditor: View {
             }
 
             if action.kind == .sendKey {
-                Section {
-                    NavigationLink {
-                        KeyPickerView(selection: Binding(
-                            get: { action.vk },
-                            set: { vk in update { $0.vk = vk; $0.modifiers.remove(vk) } }
-                        ))
-                    } label: {
-                        LabeledContent("Key", value: KeyCatalog.spokenName(for: action.vk))
-                    }
-                    LabeledContent("Sends", value: KeyCatalog.spokenComboName(vk: action.vk, modifiers: action.modifiers))
-                } header: {
-                    SectionHeader("Key", systemImage: "keyboard")
-                }
-
-                Section {
-                    ForEach(KeyCatalog.modifiers) { modifier in
-                        Toggle(modifier.spokenName, isOn: Binding(
-                            get: { action.modifiers.contains(modifier.vk) },
-                            set: { on in
-                                update {
-                                    if on { $0.modifiers.insert(modifier.vk) } else { $0.modifiers.remove(modifier.vk) }
-                                }
-                            }
-                        ))
-                        .disabled(modifier.vk == action.vk)
-                    }
-                } header: {
-                    SectionHeader("Pressed together with", systemImage: "option")
+                KeyChordSections(vk: action.vk, modifiers: action.modifiers) { vk, modifiers in
+                    update { $0.vk = vk; $0.modifiers = modifiers }
                 }
             }
         }

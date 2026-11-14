@@ -53,36 +53,9 @@ struct PadKeyEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    NavigationLink {
-                        KeyPickerView(selection: Binding(
-                            get: { key.vk },
-                            set: { vk in
-                                key.vk = vk
-                                // A key is never its own modifier.
-                                key.modifiers.remove(vk)
-                            }
-                        ))
-                    } label: {
-                        LabeledContent("Key", value: KeyCatalog.spokenName(for: key.vk))
-                    }
-                    LabeledContent("Sends", value: KeyCatalog.spokenComboName(vk: key.vk, modifiers: key.modifiers))
-                } header: {
-                    SectionHeader("Key", systemImage: "keyboard")
-                }
-
-                Section {
-                    ForEach(KeyCatalog.modifiers) { modifier in
-                        Toggle(modifier.spokenName, isOn: Binding(
-                            get: { key.modifiers.contains(modifier.vk) },
-                            set: { on in
-                                if on { key.modifiers.insert(modifier.vk) } else { key.modifiers.remove(modifier.vk) }
-                            }
-                        ))
-                        .disabled(modifier.vk == key.vk)
-                    }
-                } header: {
-                    SectionHeader("Pressed together with", systemImage: "option")
+                KeyChordSections(vk: key.vk, modifiers: key.modifiers) { vk, modifiers in
+                    key.vk = vk
+                    key.modifiers = modifiers
                 }
 
                 Section {

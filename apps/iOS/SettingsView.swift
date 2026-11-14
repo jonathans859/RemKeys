@@ -271,13 +271,15 @@ struct SettingsView: View {
             .accessibilityHint("On: holding a key on the pad presses it down on the PC until you lift, so it repeats there. Off: the pad only sends on lift.")
 
             if settings.virtualPadHoldEnabled {
-                delaySlider(
+                SteppedSliderRow(
                     title: "Presses down after",
                     value: Binding(
                         get: { settings.virtualPadHoldDelay },
                         set: { settings.virtualPadHoldDelay = $0 }
                     ),
                     range: AppSettings.holdDelayRange,
+                    step: 0.1,
+                    valueText: secondsLabel,
                     hint: "How long a key has to be held, from the moment you touch it, before it is pressed down on the PC. Default 0.8 seconds."
                 )
 
@@ -293,59 +295,6 @@ struct SettingsView: View {
     }
 
     // MARK: Row builders
-
-    /// One timing row: a caption line carrying the current value for sighted
-    /// users (SwiftUI never draws a Slider's own label on iOS) over the
-    /// slider they can drag.
-    ///
-    /// The whole row is collapsed into **one** accessibility element with an
-    /// adjustable action, rather than letting the `Slider` carry its own.
-    /// Both softer attempts still announced the row twice ("Then presses down
-    /// after, Then presses down after 0.5 seconds") — hiding the caption
-    /// wasn't enough, because the label ends up on a wrapper element as well
-    /// as on the slider inside it (field-reported twice, 2026-08-10).
-    /// `children: .ignore` is the only version that is deterministic: nothing
-    /// inside the row is exposed, so what VoiceOver reads is exactly the
-    /// label/value/hint set here, and swipe up/down steps the value.
-    private func delaySlider(
-        title: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        hint: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                Spacer()
-                Text(secondsLabel(value.wrappedValue))
-                    .font(.system(.subheadline, design: .rounded).weight(.medium))
-                    .foregroundStyle(Color.accentColor)
-                    .monospacedDigit()
-            }
-            Slider(value: value, in: range, step: 0.1)
-                .labelsHidden()
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(secondsLabel(value.wrappedValue))
-        .accessibilityHint(hint)
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: step(value, by: 0.1, in: range)
-            case .decrement: step(value, by: -0.1, in: range)
-            @unknown default: break
-            }
-        }
-    }
-
-    /// Step a delay by one notch, rounded back to a tenth: repeated
-    /// increments of 0.1 in binary drift to 0.7000000000000001, and the
-    /// spoken value has to stay the value that is stored.
-    private func step(_ value: Binding<Double>, by delta: Double, in range: ClosedRange<Double>) {
-        let stepped = ((value.wrappedValue + delta) * 10).rounded() / 10
-        value.wrappedValue = min(max(stepped, range.lowerBound), range.upperBound)
-    }
 
     /// Names the visible pads for the info sheet, so it never lists one that
     /// isn't there.
