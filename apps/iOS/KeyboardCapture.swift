@@ -93,13 +93,6 @@ final class CaptureView: UIView {
                            name: .GCKeyboardDidDisconnect, object: nil)
     }
 
-    /// Main-key codes whose *release* we swallow because their press fired the
-    /// toggle shortcut — so the up neither types nor leaks to the remote.
-    private var swallowedKeyUps: Set<Int> = []
-    /// Same idea for the HID-level source, which has no responder chain to be
-    /// claimed out of and so must be told explicitly.
-    private var swallowedGameControllerKeys: Set<Int> = []
-
     /// The two capture sources whose events are merged into one forwarded
     /// stream. See `report(_:pressed:from:)`.
     private enum KeySource: Hashable {
@@ -111,6 +104,26 @@ final class CaptureView: UIView {
     /// down when the *first* source reports it and up when the *last* one
     /// lets go, so overlapping reports collapse into one down/up pair.
     private var sourcesHoldingKey: [UIKeyboardHIDUsage: Set<KeySource>] = [:]
+
+    /// What the user is physically holding, per source, whether or not
+    /// forwarding is on. `sourcesHoldingKey` is what the *remote* believes is
+    /// held and is cleared whenever forwarding flips, so it can't answer
+    /// "is Caps Lock down right now" (the flag is only the lock state) or
+    /// "which modifiers are held" on the HID path (no flags at all).
+    private var physicallyHeld: [UIKeyboardHIDUsage: Set<KeySource>] = [:]
+
+    /// The press that fired the toggle shortcut, while it is still down: the
+    /// sources that have reported it so far. Every down and up of that key
+    /// from either source is swallowed until the last holder lets go, so the
+    /// second source's copy of the same press neither toggles again nor
+    /// types on the PC.
+    private var shortcutPressHolders: [UIKeyboardHIDUsage: Set<KeySource>] = [:]
+
+    /// When a claimed Cmd chord fired the shortcut (that path has no key-up,
+    /// so it can't join `shortcutPressHolders`). If the HID source goes live
+    /// on that very press and reports it a moment later, this stops it
+    /// toggling a second time.
+    private var lastChordToggle: (usage: UIKeyboardHIDUsage, at: TimeInterval)?
 
     override var canBecomeFirstResponder: Bool { true }
 
@@ -151,11 +164,13 @@ final class CaptureView: UIView {
     /// responder chain to fall out of.
     private func gameControllerKey(_ usage: UIKeyboardHIDUsage, pressed: Bool) {
         guard window != nil, isFirstResponder else { return }
-        // The toggle shortcut is handled locally, so its key must not also
-        // type on the PC — the UIKit path swallows it, and this source needs
-        // the same instruction or the two would disagree.
-        if swallowedGameControllerKeys.contains(usage.rawValue) {
-            if !pressed { swallowedGameControllerKeys.remove(usage.rawValue) }
+        trackPhysical(usage, pressed: pressed, from: .gameController)
+        // Shortcut detection runs here too, before `report`: this source can
+        // see the shortcut's key before `pressesBegan` does (and Cmd chords
+        // only ever arrive here), and the key must not reach the PC first.
+        if pressed {
+            if claimShortcutDown(usage, modifiers: heldModifiers(), from: .gameController) { return }
+        } else if consumeShortcutUp(usage, from: .gameController) {
             return
         }
         report(usage, pressed: pressed, from: .gameController)
@@ -165,8 +180,9 @@ final class CaptureView: UIView {
     /// their key-ups are not coming either.
     @objc private func handleForgetHeldKeysRequest() {
         sourcesHoldingKey.removeAll()
-        swallowedKeyUps.removeAll()
-        swallowedGameControllerKeys.removeAll()
+        physicallyHeld.removeAll()
+        shortcutPressHolders.removeAll()
+        lastChordToggle = nil
     }
 
     @objc private func handleKeyboardDisconnect() {
@@ -209,57 +225,110 @@ final class CaptureView: UIView {
             diagnostics.pressesSeen += 1
             diagnostics.lastKey = HIDToVK.keyName(for: key)
         }
+        for press in presses {
+            guard let key = press.key else { continue }
+            trackPhysical(key.keyCode, pressed: true, from: .uiKit)
+        }
         // The toggle shortcut takes precedence over forwarding, and works
         // whether forwarding is currently on or off.
-        if handleToggleShortcut(presses) { return }
-        if !forward(presses, pressed: true) {
-            super.pressesBegan(presses, with: event)
+        let rest = presses.filter { press in
+            guard let key = press.key else { return true }
+            let modifiers = HIDToVK.modifiers(from: key.modifierFlags, capsLockHeld: isHeld(.keyboardCapsLock))
+            return !claimShortcutDown(key.keyCode, modifiers: modifiers, from: .uiKit)
+        }
+        guard !rest.isEmpty else { return }
+        if !forward(rest, pressed: true) {
+            super.pressesBegan(rest, with: event)
         }
     }
 
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if consumeSwallowedKeyUp(presses) { return }
-        if !forward(presses, pressed: false) {
-            super.pressesEnded(presses, with: event)
+        let rest = releasesNotSwallowed(presses)
+        guard !rest.isEmpty else { return }
+        if !forward(rest, pressed: false) {
+            super.pressesEnded(rest, with: event)
         }
     }
 
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if consumeSwallowedKeyUp(presses) { return }
+        let rest = releasesNotSwallowed(presses)
+        guard !rest.isEmpty else { return }
         // A cancelled press is functionally a release as far as the slave is
         // concerned — emit the up so we don't strand a modifier.
-        _ = forward(presses, pressed: false)
-        super.pressesCancelled(presses, with: event)
+        _ = forward(rest, pressed: false)
+        super.pressesCancelled(rest, with: event)
     }
 
-    /// If a press completes the user's recorded toggle shortcut, flip forwarding
-    /// and claim the event. Returns true when the shortcut fired.
-    private func handleToggleShortcut(_ presses: Set<UIPress>) -> Bool {
-        guard let bridge, let shortcut = settings?.toggleShortcut else { return false }
-        for press in presses {
-            guard let key = press.key, !HIDToVK.isModifier(key) else { continue }
-            guard Int(key.keyCode.rawValue) == shortcut.keyCode else { continue }
-            guard HIDToVK.modifiers(from: key.modifierFlags) == shortcut.modifiers else { continue }
-            bridge.forwardingEnabled.toggle()
-            swallowedKeyUps.insert(shortcut.keyCode)
-            swallowedGameControllerKeys.insert(shortcut.keyCode)
-            // Turning forwarding *off* flushes held keys in the bridge, and
-            // turning it on can't have forwarded anything yet, so dropping the
-            // merge state here can't strand a key on the remote.
-            sourcesHoldingKey.removeValue(forKey: key.keyCode)
+    /// Record a physical transition from one source, independent of
+    /// forwarding.
+    private func trackPhysical(_ usage: UIKeyboardHIDUsage, pressed: Bool, from source: KeySource) {
+        var holders = physicallyHeld[usage] ?? []
+        if pressed { holders.insert(source) } else { holders.remove(source) }
+        physicallyHeld[usage] = holders.isEmpty ? nil : holders
+    }
+
+    private func isHeld(_ usage: UIKeyboardHIDUsage) -> Bool {
+        physicallyHeld[usage] != nil
+    }
+
+    /// The shortcut modifiers physically held right now, for the HID source,
+    /// which delivers bare usages with no modifier flags.
+    private func heldModifiers() -> Set<ShortcutModifier> {
+        Set(physicallyHeld.keys.compactMap(HIDToVK.shortcutModifier(for:)))
+    }
+
+    /// One key-down from either source, checked against the toggle shortcut
+    /// before it can be forwarded. Returns true when the press is the
+    /// shortcut's — whether this report fired it or the other source's copy
+    /// of the same press already had — so the caller must not forward it.
+    private func claimShortcutDown(_ usage: UIKeyboardHIDUsage,
+                                   modifiers: Set<ShortcutModifier>,
+                                   from source: KeySource) -> Bool {
+        if var holders = shortcutPressHolders[usage] {
+            // The other source already fired the shortcut for this press.
+            holders.insert(source)
+            shortcutPressHolders[usage] = holders
             return true
         }
-        return false
+        guard bridge != nil, let shortcut = settings?.toggleShortcut,
+              Int(usage.rawValue) == shortcut.keyCode,
+              modifiers == shortcut.modifiers else { return false }
+        shortcutPressHolders[usage] = [source]
+        if let chord = lastChordToggle, chord.usage == usage,
+           ProcessInfo.processInfo.systemUptime - chord.at < 0.5 {
+            // A claimed Cmd chord already fired it for this press.
+            lastChordToggle = nil
+            return true
+        }
+        fireToggle(usage)
+        return true
     }
 
-    /// Swallow the release of a key whose press fired the toggle shortcut.
-    private func consumeSwallowedKeyUp(_ presses: Set<UIPress>) -> Bool {
-        var consumed = false
-        for press in presses {
-            guard let key = press.key else { continue }
-            if swallowedKeyUps.remove(Int(key.keyCode.rawValue)) != nil { consumed = true }
+    /// One key-up from either source. Returns true when it belongs to the
+    /// press that fired the shortcut, and so must be swallowed.
+    private func consumeShortcutUp(_ usage: UIKeyboardHIDUsage, from source: KeySource) -> Bool {
+        guard var holders = shortcutPressHolders[usage] else { return false }
+        holders.remove(source)
+        shortcutPressHolders[usage] = holders.isEmpty ? nil : holders
+        return true
+    }
+
+    /// Track the releases and drop those that belong to the shortcut's press.
+    private func releasesNotSwallowed(_ presses: Set<UIPress>) -> Set<UIPress> {
+        presses.filter { press in
+            guard let key = press.key else { return true }
+            trackPhysical(key.keyCode, pressed: false, from: .uiKit)
+            return !consumeShortcutUp(key.keyCode, from: .uiKit)
         }
-        return consumed
+    }
+
+    private func fireToggle(_ usage: UIKeyboardHIDUsage) {
+        guard let bridge else { return }
+        bridge.forwardingEnabled.toggle()
+        // Turning forwarding *off* flushes held keys in the bridge, and
+        // turning it on can't have forwarded anything yet, so dropping the
+        // merge state here can't strand a key on the remote.
+        sourcesHoldingKey.removeValue(forKey: usage)
     }
 
     /// Returns true if at least one press in the set was claimed (forwarded).
@@ -348,8 +417,9 @@ final class CaptureView: UIView {
     /// below this view in the responder chain.
     ///
     /// Tap-only semantics: a claimed chord can't be held for key-repeat, which
-    /// shortcuts don't need. (Caveat: a recorded toggle shortcut of the form
-    /// Cmd+letter is shadowed by the claim.)
+    /// shortcuts don't need. A claimed chord never reaches `pressesBegan`, so
+    /// a recorded toggle shortcut of the form Cmd+letter is checked in the
+    /// handler — and on the HID path, which does see the chord's real keys.
     override var keyCommands: [UIKeyCommand]? { Self.claimedChords }
 
     private static let claimedChords: [UIKeyCommand] = {
@@ -369,6 +439,7 @@ final class CaptureView: UIView {
     }()
 
     @objc private func handleClaimedChord(_ sender: UIKeyCommand) {
+        if claimedChordIsToggleShortcut(sender) { return }
         guard let bridge, bridge.forwardingEnabled,
               let character = sender.input?.first else { return }
         diagnostics.chordsClaimed += 1
@@ -380,5 +451,26 @@ final class CaptureView: UIView {
         bridge.sendKey(vk: key.vk, pressed: true)
         bridge.sendKey(vk: key.vk, pressed: false)
         diagnostics.eventsForwarded += 2
+    }
+
+    /// Whether a claimed chord is the recorded toggle shortcut, firing it if
+    /// nothing else already has. Returns true when the chord is the
+    /// shortcut, so it must not be typed on the PC either way.
+    private func claimedChordIsToggleShortcut(_ sender: UIKeyCommand) -> Bool {
+        guard bridge != nil, let shortcut = settings?.toggleShortcut,
+              let character = sender.input?.first,
+              let usage = HIDToVK.usage(forClaimedInput: character),
+              Int(usage.rawValue) == shortcut.keyCode,
+              HIDToVK.modifiers(from: sender.modifierFlags,
+                                capsLockHeld: isHeld(.keyboardCapsLock)) == shortcut.modifiers
+        else { return false }
+        // The HID source reports the chord's real keys and detects the
+        // shortcut itself; firing here as well would toggle twice. Same if
+        // `pressesBegan` somehow saw this press and already fired.
+        guard !GameControllerCapture.shared.isLive,
+              shortcutPressHolders[usage] == nil else { return true }
+        fireToggle(usage)
+        lastChordToggle = (usage, ProcessInfo.processInfo.systemUptime)
+        return true
     }
 }

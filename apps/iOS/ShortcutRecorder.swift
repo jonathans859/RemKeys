@@ -54,7 +54,26 @@ final class ShortcutRecorderView: UIView {
     // passed up the chain. See the matching note in KeyboardCapture.swift.
     override var keyCommands: [UIKeyCommand]? { [] }
 
+    /// Whether the Caps Lock key is physically down. Its modifier flag is the
+    /// lock state, so recording from the flag would add "Caps Lock" to any
+    /// chord pressed while the lock happens to be on.
+    private var capsLockHeld = false
+
+    override func resignFirstResponder() -> Bool {
+        capsLockHeld = false
+        return super.resignFirstResponder()
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.key?.keyCode == .keyboardCapsLock }) { capsLockHeld = false }
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.key?.keyCode == .keyboardCapsLock }) { capsLockHeld = false }
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.key?.keyCode == .keyboardCapsLock }) { capsLockHeld = true }
         for press in presses {
             guard let key = press.key else { continue }
             if key.keyCode == .keyboardEscape { onCancel?(); return }
@@ -62,7 +81,7 @@ final class ShortcutRecorderView: UIView {
             if HIDToVK.isModifier(key) { continue }
             let shortcut = ToggleShortcut(
                 keyCode: Int(key.keyCode.rawValue),
-                modifiers: HIDToVK.modifiers(from: key.modifierFlags),
+                modifiers: HIDToVK.modifiers(from: key.modifierFlags, capsLockHeld: capsLockHeld),
                 keyName: HIDToVK.keyName(for: key)
             )
             onCapture?(shortcut)

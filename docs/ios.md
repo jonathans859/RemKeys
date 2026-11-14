@@ -19,8 +19,16 @@ Shared architecture and the accessibility rules: [`../CLAUDE.md`](../CLAUDE.md).
 - Two gates the HID source needs and the responder chain gave for free: it forwards
   only while the capture view is first responder (it is delivered app-wide, so
   otherwise it would forward what the user types into the app's own text fields),
-  and the toggle shortcut's key is suppressed explicitly
-  (`swallowedGameControllerKeys`) or it would type itself on the PC.
+  and the toggle shortcut is detected on it too, before `report`, or its key would
+  type itself on the PC.
+- **Toggle-shortcut detection runs on every path that can see the key**:
+  `pressesBegan`, the HID source and the claimed-chord handler, because a Cmd chord
+  shortcut reaches only the last two and the HID source may report a key before
+  UIKit does. `shortcutPressHolders` turns the two sources' copies of one press
+  into one toggle, and swallows every down and up of that press. **Caps Lock counts
+  only while physically held**: `.alphaShift` is the *lock state*, so matching on
+  it made every Caps Lock press (the NVDA key) flip whether the shortcut matched.
+  The recorder follows the same rule.
 - **No "priority override" exists, and none is needed.** The documented mechanism
   (WWDC21 10260) is already in place: presses reach the first responder's
   `pressesBegan` before the system acts, and the focus engine only handles presses

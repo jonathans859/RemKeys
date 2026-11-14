@@ -211,14 +211,52 @@ enum HIDToVK {
     }
 
     /// Translate a key event's live modifier flags into the platform-neutral set.
-    static func modifiers(from flags: UIKeyModifierFlags) -> Set<ShortcutModifier> {
+    ///
+    /// `.alphaShift` is deliberately ignored: it reports the Caps Lock *lock*
+    /// state, not a held key, so reading it would make every Caps Lock press
+    /// (the NVDA key) flip whether a shortcut matches. Callers pass whether the
+    /// Caps Lock key is physically down instead.
+    static func modifiers(from flags: UIKeyModifierFlags, capsLockHeld: Bool) -> Set<ShortcutModifier> {
         var mods: Set<ShortcutModifier> = []
-        if flags.contains(.alphaShift) { mods.insert(.capsLock) }
+        if capsLockHeld { mods.insert(.capsLock) }
         if flags.contains(.control) { mods.insert(.control) }
         if flags.contains(.alternate) { mods.insert(.option) }
         if flags.contains(.shift) { mods.insert(.shift) }
         if flags.contains(.command) { mods.insert(.command) }
         return mods
+    }
+
+    /// The shortcut modifier a modifier key's usage stands for, if any. Used
+    /// where there are no `UIKeyModifierFlags` to read — the HID source — and
+    /// for Caps Lock everywhere, since its flag is the lock state.
+    static func shortcutModifier(for usage: UIKeyboardHIDUsage) -> ShortcutModifier? {
+        switch usage {
+        case .keyboardCapsLock: return .capsLock
+        case .keyboardLeftControl, .keyboardRightControl: return .control
+        case .keyboardLeftAlt, .keyboardRightAlt: return .option
+        case .keyboardLeftShift, .keyboardRightShift: return .shift
+        case .keyboardLeftGUI, .keyboardRightGUI: return .command
+        default: return nil
+        }
+    }
+
+    /// HID usage of a claimed chord's input character (see
+    /// `CaptureView.claimedChords`: a–z, 0–9, comma, period). US positions,
+    /// matching `USCharVK`.
+    static func usage(forClaimedInput character: Character) -> UIKeyboardHIDUsage? {
+        guard let ascii = character.lowercased().first?.asciiValue else { return nil }
+        let raw: Int
+        switch ascii {
+        case UInt8(ascii: "a")...UInt8(ascii: "z"):
+            raw = UIKeyboardHIDUsage.keyboardA.rawValue + Int(ascii - UInt8(ascii: "a"))
+        case UInt8(ascii: "1")...UInt8(ascii: "9"):
+            raw = UIKeyboardHIDUsage.keyboard1.rawValue + Int(ascii - UInt8(ascii: "1"))
+        case UInt8(ascii: "0"): raw = UIKeyboardHIDUsage.keyboard0.rawValue
+        case UInt8(ascii: ","): raw = UIKeyboardHIDUsage.keyboardComma.rawValue
+        case UInt8(ascii: "."): raw = UIKeyboardHIDUsage.keyboardPeriod.rawValue
+        default: return nil
+        }
+        return UIKeyboardHIDUsage(rawValue: raw)
     }
 
     /// Readable name of a key for labeling a recorded shortcut. Special/function

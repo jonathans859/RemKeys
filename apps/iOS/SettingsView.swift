@@ -48,7 +48,7 @@ struct SettingsView: View {
             Section {
                 Text(settings.toggleShortcut == nil
                      ? "No shortcut is recorded, so forwarding is toggled with the Start button or a two-finger double tap. Record a physical chord to flip forwarding straight from the keyboard."
-                     : "Pressing \(settings.toggleShortcut?.displayString ?? "the recorded chord") on the physical keyboard flips forwarding, even while it is off. While forwarding is on, chords using the Command key are claimed for the PC, so prefer a shortcut without Command.")
+                     : "Pressing \(settings.toggleShortcut?.displayString ?? "the recorded chord") on the physical keyboard flips forwarding, even while it is off. Caps Lock counts as part of the shortcut only while you hold it down, so switching the lock on or off doesn't change whether the shortcut works.")
             } header: {
                 SectionHeader("Toggle shortcut", systemImage: "command")
             }
