@@ -2,35 +2,22 @@ import UIKit
 import os
 import BridgeCore
 
-/// Maps a UIKit `UIKey` (HID usage code) to a Windows virtual-key code.
+/// Maps a keyboard HID usage (UIKit's `UIKey.keyCode`, or a GameController
+/// `GCKeyCode` raw value) to a Windows virtual-key code.
 ///
 /// Built as an explicit, complete table rather than a "common subset": full
 /// alphanumerics, every modifier individually, F1–F24, numpad, the nav/edit
-/// cluster, and media keys UIKit exposes. Anything with no Windows equivalent
+/// cluster, and the volume keys of the keyboard usage page. Play/pause and
+/// track keys are on the consumer usage page, which neither UIKit nor
+/// GameController reports to apps. Anything with no Windows equivalent
 /// returns nil and is logged by the caller, so coverage gaps are visible
 /// during on-device testing instead of silently swallowed.
 enum HIDToVK {
     private static let log = Logger(subsystem: "com.jonathan859.keybridge", category: "HIDToVK")
 
-    static func vk(
-        for key: UIKey,
-        leftOptionMapping: ModifierMapping,
-        rightOptionMapping: ModifierMapping,
-        leftCommandMapping: ModifierMapping,
-        rightCommandMapping: ModifierMapping
-    ) -> UInt16? {
-        vk(
-            for: key.keyCode,
-            leftOptionMapping: leftOptionMapping,
-            rightOptionMapping: rightOptionMapping,
-            leftCommandMapping: leftCommandMapping,
-            rightCommandMapping: rightCommandMapping
-        )
-    }
-
-    /// Usage-based entry point. The table is keyed on the HID usage alone so
-    /// GameController (`GCKeyCode` raw values *are* HID usages) resolves
-    /// through exactly the same mapping as UIKit's `UIKey`.
+    /// Keyed on the HID usage alone, so GameController (`GCKeyCode` raw values
+    /// *are* HID usages) resolves through exactly the same mapping as UIKit's
+    /// `UIKey`.
     static func vk(
         for usage: UIKeyboardHIDUsage,
         leftOptionMapping: ModifierMapping,
@@ -179,17 +166,19 @@ enum HIDToVK {
         case .keyboardLeftGUI: return leftCommandMapping.vk
         case .keyboardRightGUI: return rightCommandMapping.vk
 
+        // MARK: Volume (keyboard usage page)
+        // Most Apple-layout keyboards send these on the consumer page instead,
+        // where iOS keeps them and changes the device's own volume.
+        case .keyboardMute: return VK.volumeMute
+        case .keyboardVolumeUp: return VK.volumeUp
+        case .keyboardVolumeDown: return VK.volumeDown
+
         default:
             return nil
         }
     }
 
     /// Log a key we couldn't map so testing surfaces the gap.
-    static func logUnmapped(_ key: UIKey) {
-        log.notice("Unmapped key: hidUsage=\(key.keyCode.rawValue, privacy: .public) chars=\(key.characters, privacy: .public)")
-    }
-
-    /// Same, for a source that only knows the usage (GameController).
     static func logUnmapped(usage: UIKeyboardHIDUsage) {
         log.notice("Unmapped key: hidUsage=\(usage.rawValue, privacy: .public)")
     }
@@ -313,5 +302,7 @@ enum HIDToVK {
         .keyboardF16: "F16", .keyboardF17: "F17", .keyboardF18: "F18",
         .keyboardF19: "F19", .keyboardF20: "F20", .keyboardF21: "F21",
         .keyboardF22: "F22", .keyboardF23: "F23", .keyboardF24: "F24",
+        .keyboardMute: "Mute", .keyboardVolumeUp: "Volume Up",
+        .keyboardVolumeDown: "Volume Down",
     ]
 }

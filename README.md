@@ -39,10 +39,13 @@ normally used, and it is what encrypts and authenticates the link.
 
 ## Worth knowing
 
-- **Virtual Input tab (iOS)** — send keys without a physical keyboard: a
-  three-column pad with the keys the iPhone keyboard lacks (navigation, editing,
-  F-keys) plus a permanent modifier block, and a text field for letters. Built
-  for VoiceOver: drag to hear, lift to send.
+- **Virtual Input tab (iOS)** — send keys without a physical keyboard. Pads
+  carry the keys the iPhone keyboard lacks (navigation, editing, F-keys, and
+  the modifiers as ordinary keys), and you can build your own in Settings →
+  Pads. They sync between your iPhone and iPad through iCloud. A text field
+  covers letters: sent on Send, or as you type with live typing on. Built for
+  VoiceOver: drag to hear, lift to send, and swipe with two fingers to change
+  pads.
 - **Screen curtain (iOS)** — blacks the display and drops brightness to zero for
   long sessions while forwarding keeps running. Double-tap to bring it back.
 - **Lock-screen support (Windows, optional)** — turn it on from the tray menu to

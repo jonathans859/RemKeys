@@ -7,9 +7,11 @@ import Observation
 /// does the capture view hold first responder, and do key events actually
 /// reach `pressesBegan`?
 ///
-/// GameController is used only to *detect* the keyboard (presence + name) —
-/// capture itself stays on the pressesBegan path; `keyChangedHandler` is
-/// deliberately not used (it silently fails on some devices, SDL #6465).
+/// GameController also supplies the keyboard's presence and name. Its
+/// `keyChangedHandler` is the second capture source (`GameControllerCapture`,
+/// the only one that sees Cmd chords), merged with `pressesBegan` in
+/// `CaptureView`. It silently never fires on some devices (SDL #6465), which
+/// is what `gameControllerIsLive` shows.
 @MainActor
 @Observable
 final class CaptureDiagnostics {

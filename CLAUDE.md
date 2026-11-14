@@ -53,7 +53,12 @@ either direction.
 - **Complete, explicit key mapping tables**, not a "common subset":
   `apps/iOS/HIDToVK.swift` (HID usage → VK) and `apps/macOS/MacKeyVK.swift`
   (CGKeyCode → VK). Both cover full alphanumerics, every modifier individually,
-  F1–F20/F24, numpad, the nav/edit cluster, and media keys. **Anything unmapped
+  F1–F20/F24, numpad, the nav/edit cluster, and the volume keys (Mute, Volume
+  Up/Down; on iOS only when the keyboard sends them on the keyboard usage page,
+  since UIKit and GameController don't deliver consumer-page keys). Play/pause
+  and track keys are in neither table: they aren't key codes on either platform
+  (on the Mac they arrive as system-defined events, which the tap doesn't
+  handle). **Anything unmapped
   is logged, never silently dropped**, so gaps show up during device testing.
 - **Modifier mapping is configurable**, because there is no fixed correct
   mapping between the Apple and Windows layouts. Option and Command each map
