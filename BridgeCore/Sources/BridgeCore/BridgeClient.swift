@@ -61,8 +61,11 @@ public final class BridgeClient {
     /// VKs we've sent a down for but not yet an up — flushed on disconnect so
     /// the remote never gets stuck with a held key.
     private var heldKeys: Set<UInt16> = []
-    /// Guards against overlapping reconnect timers.
-    private var reconnectScheduled = false
+    /// The pending reconnect timer, if any. One at a time, and owned by the
+    /// connection it was scheduled for: `connect()` / `disconnect()` cancel it,
+    /// so a timer left over from a previous connection can neither block the
+    /// current one from scheduling its own recovery nor act on it.
+    private var recoveryTask: Task<Void, Never>?
     /// Bumped by every `connect()` / `disconnect()`, so a recovery scheduled
     /// for one connection can tell it no longer concerns the current one and
     /// bow out instead of tearing down a healthy successor.
@@ -136,6 +139,7 @@ public final class BridgeClient {
 
         setStatus(.connecting)
         connectionGeneration &+= 1
+        let generation = connectionGeneration
         pathIsViable = true
         // The agent starts every session holding nothing, so whatever we
         // thought was down on the old connection is not down on the new one.
@@ -160,20 +164,23 @@ public final class BridgeClient {
         }
 
         let conn = NWConnection(host: NWEndpoint.Host(host), port: port, using: params)
+        // Every handler carries the generation it was created for, so a late
+        // callback from a connection that has since been replaced can't touch
+        // the status or schedule recovery on behalf of its successor.
         conn.stateUpdateHandler = { [weak self] state in
-            Task { @MainActor in self?.handleState(state) }
+            Task { @MainActor in self?.handleState(state, generation: generation) }
         }
         // A `.ready` connection whose path is no longer viable is the failure
         // mode keepalive takes ~25s to catch; this catches it in one hop.
         conn.viabilityUpdateHandler = { [weak self] viable in
-            Task { @MainActor in self?.handleViability(viable) }
+            Task { @MainActor in self?.handleViability(viable, generation: generation) }
         }
         // Wi-Fi came back, or a better interface appeared: retry a connection
         // that is currently stuck waiting, right away, instead of sitting out
         // the recovery delay. A healthy connection is left alone — see
         // handleBetterPath.
         conn.betterPathUpdateHandler = { [weak self] available in
-            Task { @MainActor in self?.handleBetterPath(available) }
+            Task { @MainActor in self?.handleBetterPath(available, generation: generation) }
         }
         connection = conn
         conn.start(queue: .main)
@@ -183,6 +190,8 @@ public final class BridgeClient {
     /// internal reconnect doesn't flicker the UI to `.idle`.
     public func disconnect(resetStatus: Bool = true) {
         connectionGeneration &+= 1
+        recoveryTask?.cancel()
+        recoveryTask = nil
         connection?.cancel()
         connection = nil
         if resetStatus {
@@ -191,7 +200,8 @@ public final class BridgeClient {
         }
     }
 
-    private func handleState(_ state: NWConnection.State) {
+    private func handleState(_ state: NWConnection.State, generation: Int) {
+        guard generation == connectionGeneration else { return }
         switch state {
         case .ready:
             setStatus(.connected)
@@ -212,7 +222,8 @@ public final class BridgeClient {
         }
     }
 
-    private func handleViability(_ viable: Bool) {
+    private func handleViability(_ viable: Bool, generation: Int) {
+        guard generation == connectionGeneration else { return }
         pathIsViable = viable
         guard forwardingEnabled else { return }
         guard viable else {
@@ -233,8 +244,8 @@ public final class BridgeClient {
     /// connection onto a new interface would drop keystrokes for no gain —
     /// and over Tailscale the socket lives on the tunnel interface anyway, so
     /// the interface underneath it changing is not our business.
-    private func handleBetterPath(_ available: Bool) {
-        guard available, forwardingEnabled else { return }
+    private func handleBetterPath(_ available: Bool, generation: Int) {
+        guard generation == connectionGeneration, available, forwardingEnabled else { return }
         scheduleRecovery(after: 1)
     }
 
@@ -243,12 +254,14 @@ public final class BridgeClient {
     /// the triggers overlap (a dead path usually reports non-viable *and*
     /// fails), and reconnecting twice would just interrupt itself.
     private func scheduleRecovery(after seconds: Int) {
-        guard forwardingEnabled, !reconnectScheduled else { return }
-        reconnectScheduled = true
+        guard forwardingEnabled, recoveryTask == nil else { return }
         let generation = connectionGeneration
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
-            self.reconnectScheduled = false
+        recoveryTask = Task { @MainActor [weak self] in
+            // Cancelled means connect()/disconnect() superseded this timer and
+            // may already have scheduled a new one — leave `recoveryTask` alone.
+            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.recoveryTask = nil
             guard self.forwardingEnabled, self.connectionGeneration == generation else { return }
             guard !(self.status.isConnected && self.pathIsViable) else { return }
             self.connect()
